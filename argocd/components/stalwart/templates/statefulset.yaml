@@ -50,6 +50,13 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if not .Values.disableRecoveryAdmin }}
+            - name: STALWART_RECOVERY_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery-admin
+                  key: STALWART_RECOVERY_ADMIN
+            {{- end }}
           envFrom:
             - secretRef:
                 name: {{ include "stalwart.fullname" . }}-env
