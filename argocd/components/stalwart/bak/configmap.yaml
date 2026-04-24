@@ -1,0 +1,27 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stalwart-config
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+data:
+  # Trying to keep secret data out of the config map. The database password is loaded from an environment variable using
+  # a syntax supported by Stalwart: https://stalw.art/docs/ref/object/data-store/#authsecret. That secret is set in the
+  # pod spec. Because the host is internal, we use the environment variable provided by Kubernetes service discovery:
+  # https://kubernetes.io/docs/concepts/services-networking/service/#discovering-services. Because Kubernetes will not
+  # parse this out for us in the literal data below, we will do an `envsubst` on it at init time.
+  config.json: |
+    {
+      "@type": "PostgreSql",
+      "authUsername": "stalwart",
+      "authSecret": {
+        "EnvironmentVariable": {
+          "variableName": "POSTGRESQL_PASSWORD"
+        }
+      },
+      "database": "stalwart",
+      "host": "$STALWART_POSTGRESQL_SERVICE_HOST",
+      "port": 5432,
+    }
