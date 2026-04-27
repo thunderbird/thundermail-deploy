@@ -1,0 +1,12 @@
+---
+# Test secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rjung-test-secret
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data: |
+  {"foo": "bar"}
+type: Opaque
