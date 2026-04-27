@@ -1,0 +1,31 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart
+  ports:
+    - name: smtps
+      port: 465
+      targetPort: smtps
+    - name: submission
+      port: 587
+      targetPort: submission
+    - name: imaps
+      port: 993
+      targetPort: imaps
+    - name: sieve
+      port: 4190
+      targetPort: sieve
+    - name: https
+      port: 443
+      targetPort: https
+    - name: mgmt
+      port: 8080
+      targetPort: mgmt
+
