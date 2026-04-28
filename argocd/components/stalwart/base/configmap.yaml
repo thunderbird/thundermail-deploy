@@ -8,5 +8,4 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 data:
-  config.json: |
-  {"@type": RocksDB, "path": "/var/lib/stalwart"}
+  config.json: '{"@type": RocksDB, "path": "/var/lib/stalwart"}'
