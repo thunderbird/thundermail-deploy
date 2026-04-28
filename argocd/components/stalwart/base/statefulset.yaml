@@ -28,8 +28,6 @@ spec:
       containers:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16.1
-          command: /bin/cat
-          args: /opt/stalwart/config.json
           imagePullPolicy: IfNotPresent
           args:
             - "--config"
