@@ -1,8 +1,6 @@
 ---
 # RDS PostgreSQL instance for Stalwart's relational database backend.
 # Master password sourced from K8s secret (synced by ExternalSecret).
-#
-# VPC: vpc-0e0f4b8d603d463e0 (tb-dev, eu-central-1)
 apiVersion: rds.services.k8s.aws/v1alpha1
 kind: DBSubnetGroup
 metadata:

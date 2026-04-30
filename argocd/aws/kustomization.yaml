@@ -1,0 +1,11 @@
+---
+namespace: thundermail
+
+# Listed in sync wave order
+resources:
+  - elasticache.yaml
+  - opensearch.yaml
+  - rds.yaml
+
+commonLabels:
+  app: stalwart
