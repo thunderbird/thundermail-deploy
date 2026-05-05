@@ -14,7 +14,7 @@ spec:
       toPort: 0
       ipProtocol: "-1"
       ipRanges:
-        - cidrIp: "0.0.0.0/0"
+        - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
   ingressRules: []
 
