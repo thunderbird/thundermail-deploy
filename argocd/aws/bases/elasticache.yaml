@@ -37,8 +37,8 @@ spec:
   numNodeGroups: 1
   replicasPerNodeGroup: 0
   cacheSubnetGroupName: stalwart-redis-subnet-group
-  securityGroupIDs:
-    - "TODO: BUILD SGS AND POPULATE THIS FIELD"
+  # securityGroupIDs:
+  #   - "TODO: BUILD SGS AND POPULATE THIS FIELD"
   transitEncryptionEnabled: true
   atRestEncryptionEnabled: true
   automaticFailoverEnabled: false

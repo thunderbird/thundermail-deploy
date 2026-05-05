@@ -43,8 +43,8 @@ spec:
     namespace: thundermail
     name: STALWART_POSTGRESQL_ADMIN_PASSWORD
   dbSubnetGroupName: stalwart-rds-subnet-group
-  vpcSecurityGroupIDs:
-    - "TODO: BUILD SGS AND POPULATE THIS FIELD"
+  # vpcSecurityGroupIDs:
+  #   - "TODO: BUILD SGS AND POPULATE THIS FIELD"
   multiAZ: false
   backupRetentionPeriod: 7
   preferredBackupWindow: "03:00-04:00"
