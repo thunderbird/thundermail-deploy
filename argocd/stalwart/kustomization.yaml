@@ -1,0 +1,13 @@
+---
+namespace: thundermail
+
+# Listed in sync wave order
+resources:
+  - secret.yaml
+  - configmap.yaml
+  - ingress.yaml
+  - service.yaml
+  - statefulset.yaml
+
+commonLabels:
+  app: stalwart

@@ -2,64 +2,52 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "stalwart.fullname" . }}
-  labels:
-    {{- include "stalwart.labels" . | nindent 4 }}
+  name: stalwart
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
-  serviceName: {{ include "stalwart.fullname" . }}-headless
-  replicas: {{ .Values.replicaCount }}
+  serviceName: stalwart
+  replicas: 1
   selector:
     matchLabels:
-      {{- include "stalwart.selectorLabels" . | nindent 6 }}
+      app: stalwart
   template:
     metadata:
       labels:
-        {{- include "stalwart.selectorLabels" . | nindent 8 }}
-      annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        app: stalwart
     spec:
       securityContext:
         fsGroup: 2000
         runAsUser: 2000
         runAsGroup: 2000
+      # ConfigMap with DB connection info
+      volumes:
+        - name: config
+          configMap:
+            name: stalwart-config
       containers:
         - name: stalwart
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: stalwartlabs/stalwart:v0.16.1
+          imagePullPolicy: IfNotPresent
           args:
             - "--config"
             - "/etc/stalwart/config.json"
           env:
-            {{- if .Values.role }}
-            - name: STALWART_ROLE
-              value: {{ .Values.role | quote }}
-            {{- end }}
-            {{- if .Values.pushShard }}
+            # - name: STALWART_ROLE
+            #   value: https://stalw.art/docs/configuration/environment-variables/#clustering
             - name: STALWART_PUSH_SHARD
-              value: {{ .Values.pushShard | quote }}
-            {{- end }}
-            {{- if .Values.recoveryMode.enabled }}
+              value: ""
             - name: STALWART_RECOVERY_MODE
-              value: "true"
+              value: "false"
             - name: STALWART_RECOVERY_MODE_PORT
-              value: {{ .Values.recoveryMode.port | quote }}
+              value: "8080"
             - name: STALWART_RECOVERY_MODE_LOG_LEVEL
-              value: {{ .Values.recoveryMode.logLevel | quote }}
-            {{- end }}
-            {{- range $key, $value := .Values.extraEnv }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
-            {{- if not .Values.disableRecoveryAdmin }}
+              value: info
             - name: STALWART_RECOVERY_ADMIN
               valueFrom:
                 secretKeyRef:
                   name: stalwart-recovery-admin
                   key: STALWART_RECOVERY_ADMIN
-            {{- end }}
-          envFrom:
-            - secretRef:
-                name: {{ include "stalwart.fullname" . }}-env
           ports:
             - name: smtp
               containerPort: 25
@@ -97,31 +85,21 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - name: config
-              mountPath: /etc/stalwart/config.json
               subPath: config.json
+              mountPath: /etc/stalwart/config.json
               readOnly: true
-            {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: /var/lib/stalwart
-            {{- end }}
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-      volumes:
-        - name: config
-          configMap:
-            name: {{ include "stalwart.fullname" . }}-config
-  {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
-    - metadata:
+    - apiVersion: v1	
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
         accessModes:
-          - {{ .Values.persistence.accessMode | quote }}
-        {{- if .Values.persistence.storageClass }}
-        storageClassName: {{ .Values.persistence.storageClass | quote }}
-        {{- end }}
+          - ReadWriteOnce
+        storageClassName: gp3
         resources:
           requests:
-            storage: {{ .Values.persistence.size | quote }}
-  {{- end }}
+            storage: 20Gi
 
