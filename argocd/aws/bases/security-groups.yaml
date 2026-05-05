@@ -9,6 +9,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   description: SG for Stalwart server containers running in Kubernetes
+  name: stalwart-server
   egressRules:
     - fromPort: 0
       toPort: 0
@@ -46,6 +47,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   description: SG for Stalwart's backend PostgreSQL instance on RDS
+  name: stalwart-rds-postgresql
   egressRules:
     - fromPort: 0
       toPort: 0
