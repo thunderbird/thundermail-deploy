@@ -1,6 +1,6 @@
 # Build security groups for each app
 ---
-apiVersion: securitygroups.ec2.services.k8s.aws/v1alpha1
+apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
   name: stalwart-server
@@ -37,7 +37,7 @@ spec:
 
 # Build security groups for each backend service (RDS, Redis) allowing access from the app SGs
 ---
-apiVersion: securitygroups.ec2.services.k8s.aws/v1alpha1
+apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
   name: stalwart-rds-postgresql
