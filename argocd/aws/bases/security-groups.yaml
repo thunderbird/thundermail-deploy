@@ -14,8 +14,8 @@ spec:
       toPort: 0
       ipProtocol: "-1"
       ipRanges:
-        - cidrIp: "0.0.0.0/0"
-          description: "Allow all egress"
+        cidrIp: "0.0.0.0/0"
+        description: "Allow all egress"
   ingressRules: []
 
 # Build SecurityGroupPolicies matching each pod deployment with each app SG
@@ -51,8 +51,8 @@ spec:
       toPort: 0
       ipProtocol: "-1"
       ipRanges:
-        - cidrIp: "0.0.0.0/0"
-          description: "Allow all egress"
+        cidrIp: "0.0.0.0/0"
+        description: "Allow all egress"
   ingressRules: []
   # ingressRules:
   #   - fromPort: 5432
