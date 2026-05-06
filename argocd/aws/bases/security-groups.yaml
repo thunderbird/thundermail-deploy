@@ -63,7 +63,7 @@ spec:
   name: stalwart-rds-postgresql
   tags:
     - key: Name
-      value: stalwart-server
+      value: stalwart-rds-postgresql
   vpcID: vpc-0e0f4b8d603d463e0
   egressRules:
     - fromPort: 0
