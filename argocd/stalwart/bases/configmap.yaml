@@ -8,4 +8,4 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 data:
-  config.json: '{"@type": "PostgreSql", "host": ""}'
+  config.json: '{"@type": "PostgreSql", "host": "cache.prod.tb-dev.mail.thundermail.com"}'
