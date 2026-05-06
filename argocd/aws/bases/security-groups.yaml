@@ -13,6 +13,8 @@ metadata:
 spec:
   description: SG for Stalwart server containers running in Kubernetes
   name: stalwart-server
+  tags:
+    Name: stalwart-server
   vpcID: vpc-0e0f4b8d603d463e0
   egressRules:
     - fromPort: 0
@@ -52,6 +54,8 @@ metadata:
 spec:
   description: SG for Stalwart's backend PostgreSQL instance on RDS
   name: stalwart-rds-postgresql
+  tags:
+    Name: stalwart-rds-postgresql
   vpcID: vpc-0e0f4b8d603d463e0
   egressRules:
     - fromPort: 0
