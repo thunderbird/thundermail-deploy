@@ -1,3 +1,6 @@
+# Throughout these documents, we make reference to VPC vpc-0e0f4b8d603d463e0,
+#  which is the "mzla-tb-dev-vpc".
+
 # Build security groups for each app
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
@@ -10,6 +13,7 @@ metadata:
 spec:
   description: SG for Stalwart server containers running in Kubernetes
   name: stalwart-server
+  vpcID: vpc-0e0f4b8d603d463e0
   egressRules:
     - fromPort: 0
       toPort: 0
@@ -48,6 +52,7 @@ metadata:
 spec:
   description: SG for Stalwart's backend PostgreSQL instance on RDS
   name: stalwart-rds-postgresql
+  vpcID: vpc-0e0f4b8d603d463e0
   egressRules:
     - fromPort: 0
       toPort: 0
