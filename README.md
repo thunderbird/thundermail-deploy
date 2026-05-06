@@ -59,13 +59,22 @@ Flow:
 
 ### Critical gotchas (learned the hard way)
 
-**Trunk ENIs are only attached at node-register time.** If the VPC CNI's
-`ENABLE_POD_ENI` flag is flipped *after* a node has already joined, that node
-will never get a trunk and will never advertise `vpc.amazonaws.com/pod-eni`
-capacity. Pods using `SecurityGroupPolicy` will be permanently unschedulable
-with `Insufficient vpc.amazonaws.com/pod-eni`. The fix is to **recycle the
-nodes** (e.g. `aws eks update-nodegroup-version --force` with no version
-change does a rolling replace).
+**Trunk ENI attachment is on-demand, not on-boot.** The VPC Resource
+Controller attaches a trunk to a node when (a) `ENABLE_POD_ENI=true` on the
+VPC CNI *and* (b) an SGP-targeted pod is pending that could land on that
+node. Once attached, the trunk persists for the life of the instance.
+Implications:
+
+- A node with no pending SGP pod will show `vpc.amazonaws.com/pod-eni: <none>`
+  forever — that's normal, not broken. Don't rotate the nodegroup expecting
+  fresh trunks; nothing will be attached until an SGP pod tries to schedule.
+- If `ENABLE_POD_ENI` is flipped *after* nodes already joined and SGP pods
+  are pending, those nodes can take a long time (or fail) to attach trunks.
+  Recycling the nodegroup (`aws eks update-nodegroup-version --force` with
+  no version change does a rolling replace) plus having a pending SGP pod
+  is the reliable kick.
+- To force-test trunk attachment on a specific nodegroup, briefly schedule
+  an SGP-tagged pod there with a matching `nodeSelector`.
 
 **The `vpc.amazonaws.com/has-trunk-attached` node label is cosmetic.** It
 sometimes never appears even when a trunk *is* attached. The authoritative
