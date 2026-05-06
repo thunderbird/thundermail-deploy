@@ -21,7 +21,17 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules: []
+  ingressRules:
+    # Kubelet liveness/readiness probes target the `mgmt` (8080) port. Probe
+    # traffic originates from the node primary ENI, which carries the EKS
+    # cluster security group. Without this rule, probes fail and the pod is
+    # killed by the kubelet (graceful SIGTERM, exits "Completed" / 0).
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - groupID: sg-08c51d43c4a250a81
+          description: Kubelet probes from EKS cluster SG (mzla-eks-tb-dev01)
 
 # Build SecurityGroupPolicies matching each pod deployment with each app SG
 # (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
