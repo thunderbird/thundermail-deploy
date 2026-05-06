@@ -23,7 +23,13 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules: []
+  ingressRules:
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - groupID: sg-08c51d43c4a250a81
+          description: Kubelet probes from EKS cluster SG (mzla-eks-tb-dev01)
 
 # Build SecurityGroupPolicies matching each pod deployment with each app SG
 # (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
@@ -52,7 +58,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  description: SG for Stalwart's backend PostgreSQL instance on RDS
+  description: SG for Stalwarts backend PostgreSQL instance on RDS
   name: stalwart-rds-postgresql
   tags:
     Name: stalwart-rds-postgresql
