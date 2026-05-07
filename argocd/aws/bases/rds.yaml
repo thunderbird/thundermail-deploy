@@ -37,7 +37,7 @@ spec:
   maxAllocatedStorage: 50
   storageType: gp3
   storageEncrypted: true
-  masterUsername: admin
+  masterUsername: stalwart
   masterUserPassword:
     namespace: thundermail
     name: stalwart-postgresql-admin-password

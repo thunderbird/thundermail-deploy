@@ -8,4 +8,15 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 data:
-  config.json: '{"@type": "PostgreSql", "host": "cache.prod.tb-dev.mail.thundermail.com"}'
+  # The format of this config file is a JSON representation of a Stalwart DataStore object.
+  # Ref: https://stalw.art/docs/ref/object/data-store/
+  config.json: |
+    {
+      "@type": "PostgreSql",
+      "host": "cache.prod.tb-dev.mail.thundermail.com",
+      "authSecret": {
+        "EnvironmentVariable": {
+          "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
+        }
+      }
+    }
