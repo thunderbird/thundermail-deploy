@@ -13,7 +13,7 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "cache.prod.tb-dev.mail.thundermail.com",
+      "host": "stalwart-postgresql.cf6we8ukyqsy.eu-central-1.rds.amazonaws.com",
       "authSecret": {
         "EnvironmentVariable": {
           "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"

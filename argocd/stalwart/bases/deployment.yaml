@@ -50,6 +50,14 @@ spec:
               value: "8080"
             - name: STALWART_RECOVERY_MODE_LOG_LEVEL
               value: info
+            # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
+            # database password from this environment variable. Here, we populate this
+            # variable from a secret, preventing us from ever having to cleartext it.)
+            - name: STALWART_POSTGRESQL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-postgresql-admin-password
+                  key: STALWART_POSTGRESQL_ADMIN_PASSWORD
             - name: STALWART_RECOVERY_ADMIN
               valueFrom:
                 secretKeyRef:
