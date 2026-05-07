@@ -100,6 +100,6 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - name: config
-              # subPath: config.json
-              mountPath: /etc/stalwart/config.json
+              subPath: config.json
+              mountPath: /etc/stalwart/
               readOnly: true
