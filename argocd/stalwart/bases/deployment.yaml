@@ -24,7 +24,9 @@ spec:
         - name: config
           configMap:
             name: stalwart-config
-            # defaultMode: 0444  # Disable writes? We don't want Stalwart able to change this?
+            items:
+              - key: config.json
+                path: config.json
       containers:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16.1
@@ -101,6 +103,4 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - name: config
-              subPath: config.json
               mountPath: /etc/stalwart/
-              readOnly: true
