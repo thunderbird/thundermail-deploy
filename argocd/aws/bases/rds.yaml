@@ -40,8 +40,8 @@ spec:
   masterUsername: admin
   masterUserPassword:
     namespace: thundermail
-    name: STALWART_POSTGRESQL_ADMIN_PASSWORD
-    key: "null"
+    name: stalwart-postgresql-admin-password
+    key: STALWART_POSTGRESQL_ADMIN_PASSWORD
   dbSubnetGroupName: stalwart-rds-subnet-group
   # vpcSecurityGroupIDs:
   #   - "TODO: BUILD SGS AND POPULATE THIS FIELD"
