@@ -95,6 +95,3 @@ spec:
               subPath: config.json
               mountPath: /etc/stalwart/config.json
               readOnly: true
-            - name: data
-              mountPath: /var/lib/stalwart
-      
