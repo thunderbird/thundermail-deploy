@@ -32,6 +32,7 @@ spec:
           image: stalwartlabs/stalwart:v0.16.1
           imagePullPolicy: IfNotPresent
           command: ["/bin/cat", "/etc/stalwart/config.json"]
+          args: []
           resources:
             requests:
               cpu: 1
