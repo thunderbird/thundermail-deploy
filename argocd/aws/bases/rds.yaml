@@ -30,7 +30,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   dbInstanceIdentifier: stalwart-postgresql
-  engine: postgresql
+  engine: postgres
   engineVersion: "18.3"
   dbInstanceClass: db.t4g.small
   allocatedStorage: 20
