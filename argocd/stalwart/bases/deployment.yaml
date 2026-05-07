@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: stalwart
+  namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
