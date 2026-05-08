@@ -46,11 +46,12 @@ spec:
       app: stalwart
   securityGroups:
     groupIds:
-      - sg-07624df6ceb8865ec  # EKS cluster security group
-      # - Add ID for stalwart-server app SG
+      - sg-07624df6ceb8865ec  # EKS cluster
+      - sg-0225f0469688b6324  # Stalwart pods
 
 # Build security groups for each backend service (RDS, Redis) allowing access from the app SGs
 ---
+# SG for the RDS Postgres instance
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
@@ -72,11 +73,41 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules: []
-  # ingressRules:
-  #   - fromPort: 5432
-  #     toPort: 5432
-  #     ipProtocol: tcp
-  #     userIDGroupPairs:
-  #       - description: Allow traffic from Stalwart's server containers
-  #         groupId: Add ID for stalwart-server app SG
+  ingressRules:
+    - fromPort: 5432
+      toPort: 5432
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwart's server containers
+          groupId: sg-0225f0469688b6324  # Stalwart pods
+
+---
+# SG for the Redis host
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-elasticache-redis
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for Stalwarts backend Redis instance on ElastiCache
+  name: stalwart-elasticache-redis
+  tags:
+    - key: Name
+      value: stalwart-elasticache-redis
+  vpcID: vpc-0e0f4b8d603d463e0
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwart's server containers
+          groupId: sg-0225f0469688b6324  # Stalwart pods
