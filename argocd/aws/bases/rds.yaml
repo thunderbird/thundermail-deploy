@@ -43,8 +43,8 @@ spec:
     name: stalwart-postgresql-admin-password
     key: STALWART_POSTGRESQL_ADMIN_PASSWORD
   dbSubnetGroupName: stalwart-rds-subnet-group
-  # vpcSecurityGroupIDs:
-  #   - "TODO: BUILD SGS AND POPULATE THIS FIELD"
+  vpcSecurityGroupIDs:
+    - sg-00be3c1c345ddb7d2  # stalwart-rds-postgresql
   multiAZ: false
   backupRetentionPeriod: 7
   preferredBackupWindow: "03:00-04:00"
