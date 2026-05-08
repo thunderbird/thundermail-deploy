@@ -110,4 +110,4 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow traffic from Stalwart's server containers
-          groupId: sg-0225f0469688b6324  # Stalwart pods
+          groupID: sg-0225f0469688b6324  # Stalwart pods
