@@ -38,7 +38,7 @@ spec:
   replicasPerNodeGroup: 0
   cacheSubnetGroupName: stalwart-redis-subnet-group
   securityGroupIDs:
-    - sg-0f5667ffc7f3ed467  # stalwart-elasticache-redis
+    - sg-08578875898923ec8  # stalwart-elasticache-redis
   transitEncryptionEnabled: true
   atRestEncryptionEnabled: true
   automaticFailoverEnabled: false
