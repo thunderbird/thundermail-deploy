@@ -20,32 +20,31 @@ spec:
     - key: managed-by
       value: ack
 
-# ---
-# apiVersion: elasticache.services.k8s.aws/v1alpha1
-# kind: ReplicationGroup
-# metadata:
-#   name: stalwart-redis
-#   namespace: thundermail
-#   annotations:
-#     argocd.argoproj.io/sync-wave: "2"
-# spec:
-#   replicationGroupID: stalwart-redis
-#   description: "Stalwart Redis - Spam filtering, intercluster comms, etc."
-#   engine: redis
-#   engineVersion: "7.1"
-#   cacheNodeType: cache.t3.micro
-#   numNodeGroups: 1
-#   replicasPerNodeGroup: 0
-#   cacheSubnetGroupName: stalwart-redis-subnet-group
-#   securityGroupIDs:
-#     - sg-0f5667ffc7f3ed467  # stalwart-elasticache-redis
-#   transitEncryptionEnabled: true
-#   atRestEncryptionEnabled: true
-#   automaticFailoverEnabled: false
-#   tags:
-#     - key: project
-#       value: thundermail
-#     - key: managed-by
-#       value: ack
-# 
-# 
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: ReplicationGroup
+metadata:
+  name: stalwart-redis
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicationGroupID: stalwart-redis
+  description: "Stalwart Redis - Spam filtering, intercluster comms, etc."
+  engine: redis
+  engineVersion: "7.1"
+  cacheNodeType: cache.t3.micro
+  numNodeGroups: 1
+  replicasPerNodeGroup: 0
+  cacheSubnetGroupName: stalwart-redis-subnet-group
+  securityGroupIDs:
+    - sg-0f5667ffc7f3ed467  # stalwart-elasticache-redis
+  transitEncryptionEnabled: true
+  atRestEncryptionEnabled: true
+  automaticFailoverEnabled: false
+  tags:
+    - key: project
+      value: thundermail
+    - key: managed-by
+      value: ack
+
