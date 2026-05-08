@@ -78,7 +78,7 @@ spec:
       toPort: 5432
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow traffic from Stalwart's server containers
+        - description: Allow traffic from Stalwarts server containers
           groupID: sg-0225f0469688b6324  # Stalwart pods
 
 ---
@@ -109,5 +109,5 @@ spec:
       toPort: 6379
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow traffic from Stalwart's server containers
+        - description: Allow traffic from Stalwarts server containers
           groupID: sg-0225f0469688b6324  # Stalwart pods
