@@ -20,13 +20,6 @@ spec:
         fsGroup: 2000
         runAsUser: 2000
         runAsGroup: 2000
-      volumes:
-        - name: config
-          configMap:
-            name: stalwart-config
-            items:
-              - key: config.json
-                path: config.json
       containers:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16.1
@@ -101,5 +94,14 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
-            - name: config
-              mountPath: /etc/stalwart/
+            - name: stalwart-config
+              mountPath: /etc/stalwart/config.json
+              subPath: config.json
+      volumes:
+        - name: stalwart-config
+          configMap:
+            name: stalwart-config
+            optional: false
+            items:
+              - key: config.json
+                path: config.json
