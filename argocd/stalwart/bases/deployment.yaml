@@ -31,8 +31,8 @@ spec:
             limits:
               cpu: 2
               memory: 4Gi
-          command: ["/bin/ls"]
-          args: ["-lh", "/etc/stalwart/"]
+          command: ["/bin/cat"]
+          args: ["/etc/stalwart/config.json"]
           # args:
           #   - "--config"
           #   - "/etc/stalwart/config.json"
