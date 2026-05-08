@@ -31,11 +31,9 @@ spec:
             limits:
               cpu: 2
               memory: 4Gi
-          command: ["/bin/cat"]
-          args: ["/etc/stalwart/config.json"]
-          # args:
-          #   - "--config"
-          #   - "/etc/stalwart/config.json"
+          args:
+            - "--config"
+            - "/etc/stalwart/config.json"
           env:
             # - name: STALWART_ROLE
             #   value: https://stalw.art/docs/configuration/environment-variables/#clustering
