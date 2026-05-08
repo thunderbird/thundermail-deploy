@@ -12,7 +12,7 @@ data:
   # Ref: https://stalw.art/docs/ref/object/data-store/
   config.json: |
     {
-      @type: "PostgreSql",
+      "@type": "PostgreSql",
       "host": "stalwart-postgresql.cf6we8ukyqsy.eu-central-1.rds.amazonaws.com",
       "authSecret": {
         "EnvironmentVariable": {
