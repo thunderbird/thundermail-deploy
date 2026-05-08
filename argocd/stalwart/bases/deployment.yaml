@@ -24,6 +24,8 @@ spec:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16.1
           imagePullPolicy: IfNotPresent
+          command: ["/bin/ls"]
+          args: ["-lh", "/etc/stalwart/"]
           resources:
             requests:
               cpu: 1
