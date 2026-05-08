@@ -17,5 +17,5 @@ data:
       "authSecret": {
         "@type": "EnvironmentVariable",
         "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
-      },
+      }
     }
