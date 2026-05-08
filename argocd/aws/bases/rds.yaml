@@ -20,46 +20,47 @@ spec:
     - key: managed-by
       value: ack
 
----
-apiVersion: rds.services.k8s.aws/v1alpha1
-kind: DBInstance
-metadata:
-  name: stalwart-postgresql
-  namespace: thundermail
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  allocatedStorage: 20
-  availabilityZone: eu-central-1a
-  autoMinorVersionUpgrade: true
-  backupRetentionPeriod: 7
-  copyTagsToSnapshot: true
-  dbInstanceClass: db.t4g.small
-  dbInstanceIdentifier: stalwart-postgresql
-  dbName: stalwart
-  dbSubnetGroupName: stalwart-rds-subnet-group
-  deletionProtection: true
-  # enableCloudwatchLogsExports: []  # If we ever want DB logs
-  # enableIAMDatabaseAuthentication: true  # If we want to tie DB auth to IAM instead of a user/password
-  engine: postgres
-  engineVersion: "18.3"
-  masterUsername: stalwart
-  masterUserPassword:
-    namespace: thundermail
-    name: stalwart-postgresql-admin-password
-    key: STALWART_POSTGRESQL_ADMIN_PASSWORD
-  maxAllocatedStorage: 50
-  multiAZ: false
-  preferredBackupWindow: "03:00-04:00"
-  preferredMaintenanceWindow: "sun:05:00-sun:06:00"
-  publiclyAccessible: false
-  storageEncrypted: true
-  # storageThroughput: ... # If we run into disk I/O issues
-  storageType: gp3
-  tags:
-    - key: project
-      value: thundermail
-    - key: managed-by
-      value: ack
-  vpcSecurityGroupIDs:
-    - sg-00be3c1c345ddb7d2  # stalwart-rds-postgresql
+# ---
+# apiVersion: rds.services.k8s.aws/v1alpha1
+# kind: DBInstance
+# metadata:
+#   name: stalwart-postgresql
+#   namespace: thundermail
+#   annotations:
+#     argocd.argoproj.io/sync-wave: "2"
+# spec:
+#   allocatedStorage: 20
+#   availabilityZone: eu-central-1a
+#   autoMinorVersionUpgrade: true
+#   backupRetentionPeriod: 7
+#   copyTagsToSnapshot: true
+#   dbInstanceClass: db.t4g.small
+#   dbInstanceIdentifier: stalwart-postgresql
+#   dbName: stalwart
+#   dbSubnetGroupName: stalwart-rds-subnet-group
+#   deletionProtection: true
+#   # enableCloudwatchLogsExports: []  # If we ever want DB logs
+#   # enableIAMDatabaseAuthentication: true  # If we want to tie DB auth to IAM instead of a user/password
+#   engine: postgres
+#   engineVersion: "18.3"
+#   masterUsername: stalwart
+#   masterUserPassword:
+#     namespace: thundermail
+#     name: stalwart-postgresql-admin-password
+#     key: STALWART_POSTGRESQL_ADMIN_PASSWORD
+#   maxAllocatedStorage: 50
+#   multiAZ: false
+#   preferredBackupWindow: "03:00-04:00"
+#   preferredMaintenanceWindow: "sun:05:00-sun:06:00"
+#   publiclyAccessible: false
+#   storageEncrypted: true
+#   # storageThroughput: ... # If we run into disk I/O issues
+#   storageType: gp3
+#   tags:
+#     - key: project
+#       value: thundermail
+#     - key: managed-by
+#       value: ack
+#   vpcSecurityGroupIDs:
+#     - sg-00be3c1c345ddb7d2  # stalwart-rds-postgresql
+# 
