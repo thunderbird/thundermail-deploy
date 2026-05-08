@@ -14,8 +14,15 @@ data:
     {
       "@type": "PostgreSql",
       "host": "stalwart-postgresql.cf6we8ukyqsy.eu-central-1.rds.amazonaws.com",
+      "port": 5432,
+      "database": "stalwart",
+      "authUsername": "stalwart",
       "authSecret": {
         "@type": "EnvironmentVariable",
         "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
-      }
+      },
+      "useTls": true,
+      "allowInvalidCerts": false,
+      "timeout": 15000,
+      "poolMaxConnections": 10
     }
