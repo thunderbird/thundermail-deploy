@@ -16,6 +16,7 @@ spec:
       labels:
         app: stalwart
     spec:
+      restartPolicy: Never
       securityContext:
         fsGroup: 2000
         runAsUser: 2000
