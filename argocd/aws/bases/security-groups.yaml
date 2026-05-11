@@ -50,7 +50,7 @@ spec:
       app: stalwart
   securityGroups:
     groupIds:
-      # - sg-07624df6ceb8865ec  # EKS cluster
+      - sg-07624df6ceb8865ec  # EKS cluster
       - sg-0225f0469688b6324  # Stalwart pods
 
 # Build security groups for each backend service (RDS, Redis) allowing access from the app SGs
