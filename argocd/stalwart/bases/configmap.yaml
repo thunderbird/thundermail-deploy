@@ -22,7 +22,7 @@ data:
         "@type": "EnvironmentVariable",
         "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
       },
-      "useTls": true,
+      "useTls": false,
       "allowInvalidCerts": false,
       "timeout": 15000,
       "poolMaxConnections": 10
