@@ -6,7 +6,8 @@ metadata:
   name: stalwart-tunnel
   namespace: thundermail
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
+    # Stage 4 is late enough that the deployment and service are created but still before the tunnel binding
+    argocd.argoproj.io/sync-wave: "4"  
 spec:
   newTunnel:
     name: stalwart-mzla-eks-tb-dev01
@@ -23,6 +24,7 @@ metadata:
   name: tb-dev-stalwart-admin-binding
   namespace: thundermail
   annotations:
+    # Make sure the tunnel exists before trying to bind it
     argocd.argoproj.io/sync-wave: "5"
 subjects:
   - kind: Service
