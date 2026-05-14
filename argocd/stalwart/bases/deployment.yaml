@@ -59,24 +59,14 @@ spec:
                   name: stalwart-recovery-admin
                   key: STALWART_RECOVERY_ADMIN
           ports:
-            - name: smtp
-              containerPort: 25
             - name: smtps
               containerPort: 465
             - name: submission
               containerPort: 587
-            - name: imap
-              containerPort: 143
             - name: imaps
               containerPort: 993
-            - name: pop3
-              containerPort: 110
-            - name: pop3s
-              containerPort: 995
             - name: sieve
               containerPort: 4190
-            - name: http
-              containerPort: 80
             - name: https
               containerPort: 443
             - name: mgmt
