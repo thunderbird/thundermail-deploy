@@ -16,24 +16,23 @@ spec:
     secret: cloudflare-secrets
     accountId: "407a3cd7b36b3ec71bf765856c90ae8c"
 
-# ---
-# # Bind the above tunnel to the Stalwart service
-# apiVersion: networking.cfargotunnel.com/v1alpha1
-# kind: TunnelBinding
-# metadata:
-#   name: tb-dev-stalwart-admin-binding
-#   namespace: thundermail
-#   annotations:
-#     # Make sure the tunnel exists before trying to bind it
-#     argocd.argoproj.io/sync-wave: "5"
-# subjects:
-#   - kind: Service
-#     name: stalwart
-#     spec:
-#       fqdn: mail.dev-thundermail.com
-#       protocol: http
-#       target: http://stalwart.thundermail.svc:8080
-# tunnelRef:
-#   kind: Tunnel
-#   name: stalwart-tunnel
-# 
+---
+# Bind the above tunnel to the Stalwart service
+apiVersion: networking.cfargotunnel.com/v1alpha1
+kind: TunnelBinding
+metadata:
+  name: tb-dev-stalwart-admin-binding
+  namespace: thundermail
+  annotations:
+    # Make sure the tunnel exists before trying to bind it
+    argocd.argoproj.io/sync-wave: "5"
+subjects:
+  - kind: Service
+    name: stalwart
+    spec:
+      fqdn: mail.dev-thundermail.com
+      protocol: http
+      target: http://stalwart.thundermail.svc:8080
+tunnelRef:
+  kind: Tunnel
+  name: stalwart-tunnel
