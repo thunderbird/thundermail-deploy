@@ -37,6 +37,8 @@ spec:
           env:
             # - name: STALWART_ROLE
             #   value: https://stalw.art/docs/configuration/environment-variables/#clustering
+            - name: STALWART_HOSTNAME
+              value: "mail.dev-thundermail.com"
             - name: STALWART_PUSH_SHARD
               value: ""
             - name: STALWART_RECOVERY_MODE
