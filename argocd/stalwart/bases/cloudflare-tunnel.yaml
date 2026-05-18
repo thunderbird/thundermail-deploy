@@ -12,7 +12,7 @@ spec:
   newTunnel:
     name: stalwart-mzla-eks-tb-dev01
   cloudflare:
-    domain: dev-thundermail.com
+    domain: thunderbird.net
     secret: cloudflare-secrets
     accountId: "407a3cd7b36b3ec71bf765856c90ae8c"
 
