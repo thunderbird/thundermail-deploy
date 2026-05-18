@@ -35,5 +35,5 @@ subjects:
       target: http://stalwart.stalwart.svc:8080
 tunnelRef:
   kind: Tunnel
-  name: stalwart-admin-tunnel
+  name: stalwart-tunnel
 
