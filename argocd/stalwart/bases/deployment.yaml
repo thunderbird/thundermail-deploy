@@ -37,7 +37,7 @@ spec:
           env:
             # - name: STALWART_ROLE
             #   value: https://stalw.art/docs/configuration/environment-variables/#clustering
-            - name: STALWART_HOSTNAME
+            - name: STALWART_PUBLIC_URL
               value: "mail.dev-thundermail.com"
             - name: STALWART_PUSH_SHARD
               value: ""
