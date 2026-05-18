@@ -32,7 +32,7 @@ subjects:
     spec:
       fqdn: mail.dev-thundermail.com
       protocol: http
-      target: http://stalwart.stalwart.svc:8080
+      target: http://stalwart.thundermail.svc:8080
 tunnelRef:
   kind: Tunnel
   name: stalwart-tunnel
