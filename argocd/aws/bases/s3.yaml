@@ -2,7 +2,7 @@
 apiVersion: s3.services.k8s.aws/v1alpha1
 kind: Bucket
 metadata:
-  name: stalwart-s3-bucket
+  name: stalwart-s3-bucket-718959508124-eu-central-1-an
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "2"
