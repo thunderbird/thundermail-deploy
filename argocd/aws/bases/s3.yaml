@@ -9,7 +9,9 @@ metadata:
 spec:
   name: mzla-eks-tb-dev-stalwart-blob-storage
   encryption:
-    sseAlgorithm: AES256
+    rules:
+      applyServerSideEncryptionByDefault:
+        sseAlgorithm: AES256
   namespace: account-regional
   versioning:
     status: Enabled
