@@ -10,8 +10,8 @@ spec:
   name: mzla-eks-tb-dev-stalwart-blob-storage
   encryption:
     rules:
-      applyServerSideEncryptionByDefault:
-        sseAlgorithm: AES256
+      - applyServerSideEncryptionByDefault:
+          sseAlgorithm: AES256
   namespace: account-regional
   versioning:
     status: Enabled
