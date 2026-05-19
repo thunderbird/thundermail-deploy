@@ -82,16 +82,18 @@ spec:
               containerPort: 4190
             - name: https
               containerPort: 443
+            - name: mgmt
+              containerPort: 8080
           livenessProbe:
             httpGet:
               path: /healthz/live
-              port: https
+              port: mgmt
             initialDelaySeconds: 30
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /healthz/ready
-              port: https
+              port: mgmt
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
