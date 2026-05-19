@@ -35,10 +35,19 @@ spec:
             - "--config"
             - "/etc/stalwart/config.json"
           env:
-            # - name: STALWART_ROLE
-            #   value: https://stalw.art/docs/configuration/environment-variables/#clustering
-            - name: STALWART_PUBLIC_URL
-              value: "mail.dev-thundermail.com"
+            # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
+            # database password from this environment variable. Here, we populate this
+            # variable from a secret, preventing us from ever having to cleartext it.
+            - name: STALWART_POSTGRESQL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-postgresql-admin-password
+                  key: STALWART_POSTGRESQL_ADMIN_PASSWORD
+
+            # Reference for the remainder of these variables:
+            #   https://stalw.art/docs/configuration/environment-variables/
+
+            # Recovery and bootstrap
             - name: STALWART_PUSH_SHARD
               value: ""
             - name: STALWART_RECOVERY_MODE
@@ -47,19 +56,21 @@ spec:
               value: "8080"
             - name: STALWART_RECOVERY_MODE_LOG_LEVEL
               value: info
-            # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
-            # database password from this environment variable. Here, we populate this
-            # variable from a secret, preventing us from ever having to cleartext it.)
-            - name: STALWART_POSTGRESQL_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: stalwart-postgresql-admin-password
-                  key: STALWART_POSTGRESQL_ADMIN_PASSWORD
             - name: STALWART_RECOVERY_ADMIN
               valueFrom:
                 secretKeyRef:
                   name: stalwart-recovery-admin
                   key: STALWART_RECOVERY_ADMIN
+
+            # Public URLs
+            - name: STALWART_PUBLIC_URL
+              value: "https://mail.dev-thundermail.com"
+
+            # Clustering
+            # - name: STALWART_HOSTNAME
+            #   value:
+            # - name: STALWART_ROLE
+            #   value:
           ports:
             - name: smtps
               containerPort: 465
