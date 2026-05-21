@@ -47,4 +47,3 @@ spec:
       value: thundermail
     - key: managed-by
       value: ack
-
