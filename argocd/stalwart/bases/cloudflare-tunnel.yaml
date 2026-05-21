@@ -10,7 +10,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "4"  
 spec:
   newTunnel:
-    name: stalwart-mzla-eks-tb-dev01
+    name: stalwart-admin-mzla-eks-tb-dev01
   cloudflare:
     domain: dev-thundermail.com
     secret: cloudflare-secrets
