@@ -28,9 +28,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "5"
 subjects:
   - kind: Service
-    name: stalwart
+    name: stalwart-admin
     spec:
-      fqdn: mail.dev-thundermail.com
+      fqdn: admin.dev-thundermail.com
       protocol: http
       target: http://stalwart.thundermail.svc:8080
 tunnelRef:
