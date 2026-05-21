@@ -16,7 +16,7 @@ spec:
       labels:
         app: stalwart
     spec:
-      serviceAccountName: stalwart
+      # serviceAccountName: stalwart
       securityContext:
         fsGroup: 2000
         runAsUser: 2000
