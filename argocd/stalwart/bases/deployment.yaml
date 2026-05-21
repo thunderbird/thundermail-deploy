@@ -36,10 +36,6 @@ spec:
             - "--config"
             - "/etc/stalwart/config.json"
           env:
-            # TODO: Remove debug thingie
-            - name: CHANGE_TO_FORCE_DEPLOYMENT
-              value: changeme
-
             # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
             # database password from this environment variable. Here, we populate this
             # variable from a secret, preventing us from ever having to cleartext it.
