@@ -2,13 +2,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart
+  name: stalwart-admin
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   type: ClusterIP
   selector:
-    app: stalwart-admin
+    app: stalwart
   ports:
     - name: mgmt
       port: 8080
@@ -18,7 +18,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart
+  name: stalwart-mail
   annotations:
     argocd.argoproj.io/sync-wave: "2"
     # EKS-specific annotations are documented in "Use Service Annotations to configure Network Load Balancers":
@@ -33,7 +33,7 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app: stalwart-mail
+    app: stalwart
   loadBalancerClass: external
   loadBalancerSourceRanges: 
     - 0.0.0.0/0
