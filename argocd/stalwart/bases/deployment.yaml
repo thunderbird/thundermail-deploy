@@ -38,7 +38,7 @@ spec:
           env:
             # TODO: Remove debug thingie
             - name: CHANGE_TO_FORCE_DEPLOYMENT
-              value: changemeback
+              value: changeme
 
             # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
             # database password from this environment variable. Here, we populate this
