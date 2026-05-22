@@ -55,4 +55,4 @@ spec:
       targetPort: https
     - name: mgmt
       port: 8080
-      targetPort:mgmt
+      targetPort: mgmt
