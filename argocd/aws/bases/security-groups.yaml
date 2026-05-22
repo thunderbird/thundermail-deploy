@@ -16,11 +16,11 @@ spec:
   tags:
     - key: Name
       value: stalwart-server
-    - key: project
+    - key: application
       value: thundermail
     - key: managed-by
       value: ack
-  vpcID: vpc-0e0f4b8d603d463e0
+  vpcID: "" # Populate with Kustomize
   egressRules:
     - fromPort: 0
       toPort: 0
@@ -28,13 +28,7 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules:
-    - fromPort: 8080
-      toPort: 8080
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - groupID: sg-08c51d43c4a250a81
-          description: Kubelet probes from EKS cluster SG (mzla-eks-tb-dev01)
+  ingressRules: [] # Populate with Kustomize
 
 # Build SecurityGroupPolicies matching each pod deployment with each app SG
 # (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
@@ -49,9 +43,7 @@ spec:
     matchLabels:
       app: stalwart
   securityGroups:
-    groupIds:
-      - sg-07624df6ceb8865ec  # EKS cluster
-      - sg-0225f0469688b6324  # Stalwart pods
+    groupIds: [] # Populate with Kustomize
 
 # Build security groups for each backend service (RDS, Redis) allowing access from the app SGs
 ---
@@ -69,11 +61,11 @@ spec:
   tags:
     - key: Name
       value: stalwart-rds-postgresql
-    - key: project
+    - key: application
       value: thundermail
     - key: managed-by
       value: ack
-  vpcID: vpc-0e0f4b8d603d463e0
+  vpcID: "" # Populate with Kustomize
   egressRules:
     - fromPort: 0
       toPort: 0
@@ -81,13 +73,7 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules:
-    - fromPort: 5432
-      toPort: 5432
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow traffic from Stalwarts server containers
-          groupID: sg-0225f0469688b6324  # Stalwart pods
+  ingressRules: [] # Populate with Kustomize
 
 ---
 # SG for the Redis host
@@ -104,11 +90,11 @@ spec:
   tags:
     - key: Name
       value: stalwart-elasticache-redis
-    - key: project
+    - key: application
       value: thundermail
     - key: managed-by
       value: ack
-  vpcID: vpc-0e0f4b8d603d463e0
+  vpcID: "" # Populate with Kustomize
   egressRules:
     - fromPort: 0
       toPort: 0
@@ -116,10 +102,4 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules:
-    - fromPort: 6379
-      toPort: 6379
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow traffic from Stalwarts server containers
-          groupID: sg-0225f0469688b6324  # Stalwart pods
+  ingressRules: [] # Populate with Kustomize

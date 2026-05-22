@@ -7,7 +7,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  name: mzla-eks-tb-dev-stalwart-blob-storage
+  name: ""  # Populate with Kustomize
   encryption:
     rules:
       - applyServerSideEncryptionByDefault:

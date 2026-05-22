@@ -1,26 +1,4 @@
 ---
-# RDS PostgreSQL instance for Stalwart's relational database backend.
-# Master password sourced from K8s secret (synced by ExternalSecret).
-apiVersion: rds.services.k8s.aws/v1alpha1
-kind: DBSubnetGroup
-metadata:
-  name: stalwart-rds-subnet-group
-  namespace: thundermail
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  name: stalwart-rds-subnet-group
-  description: "Stalwart RDS subnet group - private subnets in tb-dev VPC"
-  subnetIDs:
-    - "subnet-044e18f3022fb9ee1"  # eu-central-1a
-    - "subnet-01084662e5e16dce9"  # eu-central-1b
-  tags:
-    - key: project
-      value: thundermail
-    - key: managed-by
-      value: ack
-
----
 # DBInstance spec: https://github.com/aws-controllers-k8s/rds-controller/blob/main/config/crd/bases/rds.services.k8s.aws_dbinstances.yaml
 apiVersion: rds.services.k8s.aws/v1alpha1
 kind: DBInstance
@@ -62,5 +40,4 @@ spec:
       value: thundermail
     - key: managed-by
       value: ack
-  vpcSecurityGroupIDs:
-    - sg-00be3c1c345ddb7d2  # stalwart-rds-postgresql
+  vpcSecurityGroupIDs: [] # Populate with Kustomize

@@ -1,14 +1,13 @@
 ---
 namespace: thundermail
 
-# Listed in sync wave order
 resources:
-  - bases/configmap.yaml         # 1
-  - bases/secret.yaml            # 1
-  - bases/serviceaccount.yaml    # 1
-  - bases/service.yaml           # 2
-  - bases/deployment.yaml        # 3
-  - bases/cloudflare-tunnel.yaml # 4, 5
+  - bases/cloudflare-tunnel.yaml
+  - bases/configmap.yaml
+  - bases/deployment.yaml
+  - bases/secrets.yaml
+  - bases/service.yaml
+  - bases/serviceaccount.yaml
 
 commonLabels:
   app: stalwart

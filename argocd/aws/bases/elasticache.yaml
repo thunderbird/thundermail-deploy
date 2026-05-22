@@ -1,33 +1,11 @@
 ---
-# ElastiCache Redis for Stalwart's spam filtering, inter-cluster communications, and other functions
-# Single-node, no replicas, transit encryption enabled.
-apiVersion: elasticache.services.k8s.aws/v1alpha1
-kind: CacheSubnetGroup
-metadata:
-  name: stalwart-redis-subnet-group
-  namespace: thundermail
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  cacheSubnetGroupName: stalwart-redis-subnet-group
-  cacheSubnetGroupDescription: "Stalwart Redis subnet group - private subnets in tb-dev VPC"
-  subnetIDs:
-    - "subnet-044e18f3022fb9ee1"  # eu-central-1a
-    - "subnet-01084662e5e16dce9"  # eu-central-1b
-  tags:
-    - key: project
-      value: thundermail
-    - key: managed-by
-      value: ack
-
----
 apiVersion: elasticache.services.k8s.aws/v1alpha1
 kind: ReplicationGroup
 metadata:
   name: stalwart-redis
   namespace: thundermail
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   replicationGroupID: stalwart-redis
   description: "Stalwart Redis - Spam filtering, intercluster comms, etc."
@@ -37,13 +15,12 @@ spec:
   numNodeGroups: 1
   replicasPerNodeGroup: 0
   cacheSubnetGroupName: stalwart-redis-subnet-group
-  securityGroupIDs:
-    - sg-08578875898923ec8  # stalwart-elasticache-redis
+  securityGroupIDs: []  # Populate with Kustomize
   transitEncryptionEnabled: true
   atRestEncryptionEnabled: true
   automaticFailoverEnabled: false
   tags:
-    - key: project
+    - key: application
       value: thundermail
     - key: managed-by
       value: ack
