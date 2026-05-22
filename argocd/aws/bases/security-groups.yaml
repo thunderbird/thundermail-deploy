@@ -1,6 +1,3 @@
-# Throughout these documents, we make reference to VPC vpc-0e0f4b8d603d463e0,
-#  which is the "mzla-tb-dev-vpc".
-
 # Build security groups for each app
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
@@ -28,7 +25,13 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules: [] # Populate with Kustomize
+  ingressRules:
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - groupID: "" # Populate with Kustomize
+          description: Kubelet probes from EKS cluster SG
 
 # Build SecurityGroupPolicies matching each pod deployment with each app SG
 # (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
@@ -73,7 +76,14 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules: [] # Populate with Kustomize
+  ingressRules:
+    - fromPort: 5432
+      toPort: 5432
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: "" # Populate with Kustomize
+  
 
 ---
 # SG for the Redis host
@@ -102,4 +112,10 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all egress"
-  ingressRules: [] # Populate with Kustomize
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: "" # Populate with Kustomize
