@@ -10,7 +10,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "4"  
 spec:
   newTunnel:
-    name: stalwart-admin-mzla-eks-tb-dev01
+    name: stalwart-mzla-eks-tb-dev01
   cloudflare:
     domain: dev-thundermail.com
     secret: cloudflare-secrets
@@ -21,14 +21,14 @@ spec:
 apiVersion: networking.cfargotunnel.com/v1alpha1
 kind: TunnelBinding
 metadata:
-  name: tb-dev-stalwart-admin-binding
+  name: tb-dev-stalwart-binding
   namespace: thundermail
   annotations:
     # Make sure the tunnel exists before trying to bind it
     argocd.argoproj.io/sync-wave: "5"
 subjects:
   - kind: Service
-    name: stalwart-admin
+    name: stalwart
     spec:
       fqdn: admin.dev-thundermail.com
       protocol: http

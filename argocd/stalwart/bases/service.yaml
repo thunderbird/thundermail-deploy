@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart-admin
+  name: stalwart
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
@@ -13,31 +13,6 @@ spec:
     - name: mgmt
       port: 8080
       targetPort: mgmt
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-mail
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-    # EKS-specific annotations are documented in "Use Service Annotations to configure Network Load Balancers":
-    # https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: TCP
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "443"
-    service.beta.kubernetes.io/aws-load-balancer-subnets: "mzla-tb-dev-public-eu-central-1a,mzla-tb-dev-public-eu-central-1b"
-    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
-    service.beta.kubernetes.io/aws-load-balancer-attributes: "cross_zone_load_balancing.enable=true"
-spec:
-  type: LoadBalancer
-  selector:
-    app: stalwart
-  loadBalancerClass: external
-  loadBalancerSourceRanges: 
-    - 0.0.0.0/0
-  ports:
     - name: smtps
       port: 465
       targetPort: smtps
@@ -53,6 +28,49 @@ spec:
     - name: https
       port: 443
       targetPort: https
-    - name: mgmt
-      port: 8080
-      targetPort: mgmt
+
+# ------- BELOW STUFF ---------
+#  This ought to be good code, but we need to install the AWS load balancer controller first.
+
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: stalwart-mail
+#   annotations:
+#     argocd.argoproj.io/sync-wave: "2"
+#     # EKS-specific annotations are documented in "Use Service Annotations to configure Network Load Balancers":
+#     # https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html
+#     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+#     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+#     service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: TCP
+#     service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "443"
+#     service.beta.kubernetes.io/aws-load-balancer-subnets: "mzla-tb-dev-public-eu-central-1a,mzla-tb-dev-public-eu-central-1b"
+#     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
+#     service.beta.kubernetes.io/aws-load-balancer-attributes: "cross_zone_load_balancing.enable=true"
+# spec:
+#   type: LoadBalancer
+#   selector:
+#     app: stalwart
+#   loadBalancerClass: external
+#   loadBalancerSourceRanges: 
+#     - 0.0.0.0/0
+#   ports:
+#     - name: smtps
+#       port: 465
+#       targetPort: smtps
+#     - name: submission
+#       port: 587
+#       targetPort: submission
+#     - name: imaps
+#       port: 993
+#       targetPort: imaps
+#     - name: sieve
+#       port: 4190
+#       targetPort: sieve
+#     - name: https
+#       port: 443
+#       targetPort: https
+#     - name: mgmt
+#       port: 8080
+#       targetPort: mgmt
