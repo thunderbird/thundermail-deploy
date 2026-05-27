@@ -1,0 +1,13 @@
+---
+namespace: thundermail
+
+resources:
+  - cloudflare-tunnel.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - secrets.yaml
+  - serviceaccount.yaml
+  - service.yaml
+
+commonLabels:
+  app: stalwart

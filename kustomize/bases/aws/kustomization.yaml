@@ -1,0 +1,13 @@
+---
+namespace: thundermail
+
+resources:
+  - elasticache-subnet-group.yaml
+  - elasticache.yaml
+  - rds-subnet-group.yaml
+  - rds.yaml
+  - s3.yaml
+  - security-groups.yaml
+
+commonLabels:
+  app: stalwart

@@ -2,5 +2,5 @@
 namespace: thundermail
 
 resources:
-  - aws
-  - stalwart
+  - bases/aws
+  - bases/stalwart
