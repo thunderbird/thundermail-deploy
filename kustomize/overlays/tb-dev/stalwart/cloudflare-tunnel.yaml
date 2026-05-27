@@ -1,0 +1,21 @@
+---
+apiVersion: networking.cfargotunnel.com/v1alpha2
+kind: Tunnel
+metadata:
+  name: stalwart-tunnel
+spec:
+  newTunnel:
+    name: stalwart-mzla-eks-tb-dev01
+  cloudflare:
+    accountId: "407a3cd7b36b3ec71bf765856c90ae8c"
+    domain: dev-thundermail.com
+
+---
+apiVersion: networking.cfargotunnel.com/v1alpha1
+kind: TunnelBinding
+metadata:
+  name: stalwart-tunnel-binding
+subjects:
+  - spec:
+      fqdn: mail.dev-thundermail.com
+      target: http://stalwart.thundermail.svc:8080

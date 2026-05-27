@@ -12,9 +12,9 @@ spec: # Populate empty fields with Kustomize
   newTunnel:
     name: ""
   cloudflare:
+    accountId: ""
     domain: ""
     secret: cloudflare-secrets
-    accountId: ""
 
 ---
 # Bind the above tunnel to the Stalwart service

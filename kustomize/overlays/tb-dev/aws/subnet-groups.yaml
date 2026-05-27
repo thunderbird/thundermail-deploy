@@ -1,0 +1,20 @@
+---
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBSubnetGroup
+metadata:
+  name: stalwart-rds-subnet-group
+spec:
+  subnetIDs:
+    - "subnet-044e18f3022fb9ee1"  # eu-central-1a
+    - "subnet-01084662e5e16dce9"  # eu-central-1b
+
+---
+# Set the appropriate subnet IDs for tb-dev's private network subnets
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: CacheSubnetGroup
+metadata:
+  name: stalwart-redis-subnet-group
+spec:
+  subnetIDs:
+    - "subnet-044e18f3022fb9ee1"  # eu-central-1a
+    - "subnet-01084662e5e16dce9"  # eu-central-1b

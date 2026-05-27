@@ -1,0 +1,31 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stalwart-config
+data:
+  # NOTE: In this configuration, `useTls` is enabled because this is automatic in RDS, but
+  # `allowInvalidCerts` is also enabled because RDS uses self-signed certs by default. We could
+  # enable validation on the database, but this would require us to download from AWS the cert
+  # bundle and configure the client with it, which Stalwart does not support. Therefore, we enable
+  # both of these options. For reference:
+  # - "Using SSL/TLS to encrypt a connection to a DB instance or cluster":
+  #   https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
+  # - "DataStore" in Stalwart docs:
+  #   https://stalw.art/docs/ref/object/data-store/#type-postgresql
+  config.json: |
+    {
+      "@type": "PostgreSql",
+      "host": "stalwart-postgresql.cf6we8ukyqsy.eu-central-1.rds.amazonaws.com",
+      "port": 5432,
+      "database": "stalwart",
+      "authUsername": "stalwart",
+      "authSecret": {
+        "@type": "EnvironmentVariable",
+        "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
+      },
+      "useTls": true,
+      "allowInvalidCerts": true,
+      "timeout": 15000,
+      "poolMaxConnections": 10
+    }
