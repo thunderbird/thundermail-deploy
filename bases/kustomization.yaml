@@ -1,0 +1,10 @@
+---
+namespace: thundermail
+
+resources:
+  - aws
+  - stalwart
+
+labels:
+  - pairs:
+      app: stalwart
