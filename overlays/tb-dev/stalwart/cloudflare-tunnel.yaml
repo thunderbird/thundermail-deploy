@@ -18,6 +18,12 @@ metadata:
   name: stalwart-tunnel-binding
   namespace: thundermail
 subjects:
-  - spec:
+  - kind: Service
+    name: stalwart
+    spec:
       fqdn: mail.dev-thundermail.com
+      protocol: http
       target: http://stalwart.thundermail.svc:8080
+tunnelRef:
+  kind: Tunnel
+  name: stalwart-tunnel
