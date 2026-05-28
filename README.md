@@ -52,6 +52,7 @@ This project assumes that it is being installed on an AWS EKS cluster with [Secu
         - `secrets.yaml`: Uses `ExternalSecret` resources to import secret data from AWS Secrets Manager
         - `serviceaccount.yaml`: Binds the Stalwart pod to an IAM role via IRSA
 - `overlays`: Contains Kustomize patches for different installations. See "Overlay Structure" below.
+- `util`: Contains offhand scripts useful to this repo
 
 
 ### Overlay Structure
