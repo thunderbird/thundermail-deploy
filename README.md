@@ -22,6 +22,11 @@ A [controller](https://github.com/aws-controllers-k8s) must be installed for eac
 We define certain resources on the Cloudflare platform in a very similar way that we use ACK to build AWS resources. We define Cloudflare resources as Kubernetes manifests. The [Cloudflare Kubernetes operator](https://github.com/adyanth/cloudflare-operator/tree/main) then reconciles custom Kubernetes resources into Cloudflare resources. The operator is installed via [platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/tb-dev-cloudflare-tunnel-operator.yaml).
 
 
+### External Secrets
+
+The `bases/stalwart/secrets.yaml` manifest converts secret data from its origin in [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/) secrets into [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/) via the intermediary [External Secrets Operator](https://external-secrets.io/). That operator must be installed on the cluster for this project to work. The operator is installed via the [platform-infrastructure repo](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/external-secrets-operator.yaml).
+
+
 ### IAM Roles for Service Accounts (IRSA)
 
 Stalwart needs to interact with other AWS services via API calls. In order to grant granular permission to services, we use Kubernetes `ServiceAccount`s bound to AWS IAM roles using the [IRSA model](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
@@ -66,6 +71,7 @@ Each overlay file should contain enough information to uniquely identify the res
 
 To install this project into a Kubernetes cluster, follow this checklist:
 
+- Build a `stalwart-server` IRSA role via the [platform-infrastructure Pulumi configurations](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml).
 - Configure an appropriate set of overlays for your use case. There will be some which you cannot fill out correctly. This is because some of these manifests generate AWS resources like security groups which others of these manifests depend upon. Use "empty" values in these cases, such as empty strings (`""`) or empty arrays (`[]`).
 - Build an [ArgoCD `AppProject`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/AppProject) allowing this repo to be deployed to your cluster. [Ref: thundermail in platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/projects/thundermail.yaml)
 - For each installation, define an [ArgoCD `Application`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/Application) with this repo as the source. Set the `path` option to the overlay directory corresponding to this installation. [Ref: thundermail in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/thundermail.yaml)
@@ -82,6 +88,7 @@ stalwart-server              sg-gfedcba0123456789
 
 - Finish the overlay by placing these values where they belong in those configs.
 - Deploy via ArgoCD again. This sync should complete.
+- Update the platform-infrastructure Pulumi config to allow DNS traffic to the EKS cluster security group, a la [this example in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L76-L89). `pulumi up` to apply this change.
 
 
 ## Development and Debugging
