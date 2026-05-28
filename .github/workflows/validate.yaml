@@ -26,4 +26,4 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build all Kustomize overlays
-        run: ./utils/kustomize-build-all.sh
+        run: ./util/kustomize-build-all.sh
