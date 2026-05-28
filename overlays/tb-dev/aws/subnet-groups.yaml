@@ -3,6 +3,7 @@ apiVersion: rds.services.k8s.aws/v1alpha1
 kind: DBSubnetGroup
 metadata:
   name: stalwart-rds-subnet-group
+  namespace: thundermail
 spec:
   subnetIDs:
     - "subnet-044e18f3022fb9ee1"  # eu-central-1a
@@ -14,6 +15,7 @@ apiVersion: elasticache.services.k8s.aws/v1alpha1
 kind: CacheSubnetGroup
 metadata:
   name: stalwart-redis-subnet-group
+  namespace: thundermail
 spec:
   subnetIDs:
     - "subnet-044e18f3022fb9ee1"  # eu-central-1a

@@ -3,6 +3,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: stalwart-config
+  namespace: thundermail
 data:
   # NOTE: In this configuration, `useTls` is enabled because this is automatic in RDS, but
   # `allowInvalidCerts` is also enabled because RDS uses self-signed certs by default. We could

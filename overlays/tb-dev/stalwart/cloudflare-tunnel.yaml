@@ -3,6 +3,7 @@ apiVersion: networking.cfargotunnel.com/v1alpha2
 kind: Tunnel
 metadata:
   name: stalwart-tunnel
+  namespace: thundermail
 spec:
   newTunnel:
     name: stalwart-mzla-eks-tb-dev01
@@ -15,6 +16,7 @@ apiVersion: networking.cfargotunnel.com/v1alpha1
 kind: TunnelBinding
 metadata:
   name: stalwart-tunnel-binding
+  namespace: thundermail
 subjects:
   - spec:
       fqdn: mail.dev-thundermail.com

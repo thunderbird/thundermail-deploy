@@ -6,8 +6,9 @@ resources:
   - configmap.yaml
   - deployment.yaml
   - secrets.yaml
-  - serviceaccount.yaml
   - service.yaml
+  - serviceaccount.yaml
 
-commonLabels:
-  app: stalwart
+labels:
+  - pairs:
+      app: stalwart
