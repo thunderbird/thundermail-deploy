@@ -1,0 +1,59 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-elasticache-redis
+  namespace: thundermail
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: ""  # Stalwart pods
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - sg-01502e50caccc6795  # EKS cluster
+      # - ""  # Stalwart pods
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+          groupID: "" # eks-cluster-sg-mzla-eks-tb-dev01
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-rds-postgresql
+  namespace: thundermail
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 5432
+      toPort: 5432
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: ""  # Stalwart pods

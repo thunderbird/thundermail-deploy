@@ -12,5 +12,23 @@ data:
   #
   # The format of this config file is a JSON representation of a Stalwart DataStore object.
   # Ref: https://stalw.art/docs/ref/object/data-store/
+  #
+  # Ideally, you only have to populate the "host" field here. However, this being a string in this
+  # context and not an actual JSON object, you will have to duplicate the full string into your
+  # Kustomize overlay.
   config.json: |
-    {}
+    {
+      "@type": "PostgreSql",
+      "host": "",
+      "port": 5432,
+      "database": "stalwart",
+      "authUsername": "stalwart",
+      "authSecret": {
+        "@type": "EnvironmentVariable",
+        "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
+      },
+      "useTls": true,
+      "allowInvalidCerts": true,
+      "timeout": 15000,
+      "poolMaxConnections": 10
+    }

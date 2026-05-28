@@ -1,0 +1,9 @@
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: ReplicationGroup
+metadata:
+  name: stalwart-redis
+  namespace: thundermail
+spec:
+  securityGroupIDs:
+    - ""  # stalwart-elasticache-redis

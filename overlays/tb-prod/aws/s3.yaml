@@ -1,0 +1,8 @@
+---
+apiVersion: s3.services.k8s.aws/v1alpha1
+kind: Bucket
+metadata:
+  name: stalwart-s3-bucket
+  namespace: thundermail
+spec:
+  name: mzla-eks-tb-prod-stalwart-blob-storage
