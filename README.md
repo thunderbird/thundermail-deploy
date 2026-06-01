@@ -76,7 +76,13 @@ To install this project into a Kubernetes cluster, follow this checklist:
 - Build an [ArgoCD `AppProject`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/AppProject) allowing this repo to be deployed to your cluster. [Ref: thundermail in platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/projects/thundermail.yaml)
 - For each installation, define an [ArgoCD `Application`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/Application) with this repo as the source. Set the `path` option to the overlay directory corresponding to this installation. [Ref: thundermail in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/thundermail.yaml)
 - Deploy via ArgoCD. Expect this sync to partially fail due to missing information.
-- Locate the IDs of the resources which you need to reference. This is usually as simple as running a `get` call against the resource kind:
+- Locate the IDs of the resources which do get built. Make the following changes:
+    - Add the stalwart-elasticache-redis security group ID to the `elasticache.yaml` overlay.
+    - Add the stalwart-rds-postgresql security group ID to the `rds.yaml` overlay.
+    - Set the eks-cluster-sg-mzla-eks-tb-prod01 security group ID on the `stalwart-server` `SecurityGroup` resource in `security-groups.yaml`.
+    - Set the `stalwart-server` security group ID on the `stalwart-rds-postgresql` `SecurityGroup` resource in `security-groups.yaml`.
+
+To find these IDs, either use the AWS web console to identify them, or issue `kubectl` commands like this one showing security group IDs:
 
 ```
 # kubectl -n thundermail get securitygroup
@@ -86,8 +92,7 @@ stalwart-rds-postgresql      sg-abcdefg9876543210
 stalwart-server              sg-gfedcba0123456789
 ```
 
-- Finish the overlay by placing these values where they belong in those configs.
-- Deploy via ArgoCD again. This sync should complete.
+- Deploy via ArgoCD again. This sync should again fail.
 - Update the platform-infrastructure Pulumi config to allow DNS traffic to the EKS cluster security group, a la [this example in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L76-L89). `pulumi up` to apply this change.
 
 
@@ -119,3 +124,18 @@ These logs reveal problems related to the controller's ability to work within AW
 **Second,** you can look at events on the custom resources themselves, which reveal things like bad configurations and the results of `400 Bad Request` responses from the AWS API. For example, to investigate a security group, you might run:
 
     kubectl -n thundermail describe securitygroup stalwart-elasticache-redis
+
+
+#### Service Linked Roles for the RDS ACK Controller
+
+[Service Linked Roles for ACK documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAM.ServiceLinkedRoles.html) says this about the RDS controller's dependency upon its service linked role:
+
+> You don't need to manually create a service-linked role. When you create a DB instance, Amazon RDS creates the service-linked role for you.
+>
+> ...
+>
+> If you delete this service-linked role, and then need to create it again, you can use the same process to recreate the role in your account. When you create a DB instance, Amazon RDS creates the service-linked role for you again.
+
+Though one might expect this role to pop into existence when ACK tries to create a database, it does not. If the RDS ACK Controller logs show `400` errors from the API with a `Missing necessary credentials` error, it may be because the `AWSServiceRoleForRDS` IAM role has not been created, or has been deleted since it was initially created.
+
+To resolve this, you can create any database at all in RDS (the fastest way is the quick setup wizard) and then delete it. RDS should automatically create the IAM role when you create the database.

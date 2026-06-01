@@ -6,4 +6,4 @@ metadata:
   namespace: thundermail
 spec:
   securityGroupIDs:
-    - ""  # stalwart-elasticache-redis
+    - "sg-0f0b4f8140771a1cf"  # stalwart-elasticache-redis
