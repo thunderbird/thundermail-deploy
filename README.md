@@ -72,7 +72,8 @@ Each overlay file should contain enough information to uniquely identify the res
 To install this project into a Kubernetes cluster, follow this checklist:
 
 - Build a `stalwart-server` IRSA role via the [platform-infrastructure Pulumi configurations](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml).
-- Configure an appropriate set of overlays for your use case. There will be some which you cannot fill out correctly. This is because some of these manifests generate AWS resources like security groups which others of these manifests depend upon. Use "empty" values in these cases, such as empty strings (`""`) or empty arrays (`[]`).
+- Update the platform-infrastructure Pulumi config to allow DNS traffic to the EKS cluster security group, a la [this example in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L76-L89). `pulumi up` to apply this change.
+- Configure an appropriate set of Kustomize overlays for your use case. There will be some which you cannot fill out correctly. This is because some of these manifests generate AWS resources like security groups which others of these manifests depend upon. Use "empty" values in these cases, such as empty strings (`""`) or empty arrays (`[]`).
 - Build an [ArgoCD `AppProject`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/AppProject) allowing this repo to be deployed to your cluster. [Ref: thundermail in platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/projects/thundermail.yaml)
 - For each installation, define an [ArgoCD `Application`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/Application) with this repo as the source. Set the `path` option to the overlay directory corresponding to this installation. [Ref: thundermail in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/thundermail.yaml)
 - Deploy via ArgoCD. Expect this sync to partially fail due to missing information.
@@ -92,8 +93,9 @@ stalwart-rds-postgresql      sg-abcdefg9876543210
 stalwart-server              sg-gfedcba0123456789
 ```
 
-- Deploy via ArgoCD again. This sync should again fail.
-- Update the platform-infrastructure Pulumi config to allow DNS traffic to the EKS cluster security group, a la [this example in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L76-L89). `pulumi up` to apply this change.
+- Deploy via ArgoCD again. This sync should again partially succeed. In particular, this should cause the RDS `DBInstance` resource to build. Wait for that to complete, then grab its connection endpoint.
+- Update your environment's overlay for the `configmap.yaml` file so that the database config includes the connection endpoint as the `Host` field.
+- Deploy via ArgoCD again.
 
 
 ## Development and Debugging

@@ -17,7 +17,7 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "",
+      "host": "stalwart-postgresql.c92weu8c8qxs.eu-central-1.rds.amazonaws.com",
       "port": 5432,
       "database": "stalwart",
       "authUsername": "stalwart",
