@@ -16,7 +16,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow traffic from Stalwarts server containers
-          groupId: "sg-07f59e7e9ea8b2f0f"  # Stalwart pods
+          groupID: sg-07f59e7e9ea8b2f0f  # Stalwart pods
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
@@ -28,7 +28,7 @@ spec:
   securityGroups:
     groupIds:
       - sg-01502e50caccc6795  # EKS cluster
-      - "sg-07f59e7e9ea8b2f0f"  # Stalwart pods
+      - sg-07f59e7e9ea8b2f0f  # Stalwart pods
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
@@ -48,7 +48,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
-          groupID: "sg-08711bcc50c7b1e18" # eks-cluster-sg-mzla-eks-tb-prod01
+          groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
@@ -68,4 +68,4 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow traffic from Stalwarts server containers
-          groupID: "sg-07f59e7e9ea8b2f0f"  # Stalwart pods
+          groupID: sg-07f59e7e9ea8b2f0f  # Stalwart pods
