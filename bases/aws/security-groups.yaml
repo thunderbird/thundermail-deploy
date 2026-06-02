@@ -1,0 +1,121 @@
+# Build security groups for each app
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for Stalwart server containers running in Kubernetes
+  name: stalwart-server
+  tags:
+    - key: Name
+      value: stalwart-server
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - groupID: "" # Populate with Kustomize
+          description: Kubelet probes from EKS cluster SG
+
+# Build SecurityGroupPolicies matching each pod deployment with each app SG
+# (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  podSelector:
+    matchLabels:
+      app: stalwart
+  securityGroups:
+    groupIds: [] # Populate with Kustomize
+
+# Build security groups for each backend service (RDS, Redis) allowing access from the app SGs
+---
+# SG for the RDS Postgres instance
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-rds-postgresql
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for Stalwarts backend PostgreSQL instance on RDS
+  name: stalwart-rds-postgresql
+  tags:
+    - key: Name
+      value: stalwart-rds-postgresql
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 5432
+      toPort: 5432
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: "" # Populate with Kustomize
+  
+
+---
+# SG for the Redis host
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-elasticache-redis
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for Stalwarts backend Redis instance on ElastiCache
+  name: stalwart-elasticache-redis
+  tags:
+    - key: Name
+      value: stalwart-elasticache-redis
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: "" # Populate with Kustomize

@@ -1,0 +1,71 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-elasticache-redis
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+    services.k8s.aws/adoption-fields: |
+      {"id": "sg-0f0b4f8140771a1cf"}
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: sg-07f59e7e9ea8b2f0f  # Stalwart pods
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - sg-01502e50caccc6795  # EKS cluster
+      - sg-07f59e7e9ea8b2f0f  # Stalwart pods
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+    services.k8s.aws/adoption-fields: |
+      {"id": "sg-07f59e7e9ea8b2f0f"}
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+          groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-rds-postgresql
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+    services.k8s.aws/adoption-fields: |
+      {"id": "sg-00987c533757d1a25"}
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 5432
+      toPort: 5432
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: sg-07f59e7e9ea8b2f0f  # Stalwart pods

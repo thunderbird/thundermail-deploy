@@ -1,0 +1,38 @@
+---
+# Cloudflare Tunnel for our various mail services
+apiVersion: networking.cfargotunnel.com/v1alpha2
+kind: Tunnel
+metadata:
+  name: stalwart-tunnel
+  namespace: thundermail
+  annotations:
+    # Stage 4 is late enough that the deployment and service are created but still before the tunnel binding
+    argocd.argoproj.io/sync-wave: "4"  
+spec: # Populate empty fields with Kustomize
+  newTunnel:
+    name: ""
+  cloudflare:
+    accountId: ""
+    domain: ""
+    secret: cloudflare-secrets
+
+---
+# Bind the above tunnel to the Stalwart service
+apiVersion: networking.cfargotunnel.com/v1alpha1
+kind: TunnelBinding
+metadata:
+  name: stalwart-tunnel-binding
+  namespace: thundermail
+  annotations:
+    # Make sure the tunnel exists before trying to bind it
+    argocd.argoproj.io/sync-wave: "5"
+subjects:
+  - kind: Service
+    name: stalwart
+    spec:
+      fqdn: # Populate with Kustomize
+      protocol: http
+      target: http://stalwart.thundermail.svc:8080
+tunnelRef:
+  kind: Tunnel
+  name: stalwart-tunnel

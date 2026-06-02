@@ -1,0 +1,39 @@
+---
+# RDS PostgreSQL instance for Stalwart's relational database backend.
+# Master password sourced from K8s secret (synced by ExternalSecret).
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBSubnetGroup
+metadata:
+  name: stalwart-rds-subnet-group
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  name: stalwart-rds-subnet-group
+  description: "Stalwart RDS private subnet group"
+  subnetIDs: [] # Populate with Kustomize
+  tags:
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+
+---
+# ElastiCache Redis for Stalwart's spam filtering, inter-cluster communications, and other functions
+# Single-node, no replicas, transit encryption enabled.
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: CacheSubnetGroup
+metadata:
+  name: stalwart-redis-subnet-group
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cacheSubnetGroupName: stalwart-redis-subnet-group
+  cacheSubnetGroupDescription: "Stalwart Redis subnet group"
+  subnetIDs: []  # Set appropriate values with Kustomize patch
+  tags:
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack

@@ -1,0 +1,16 @@
+---
+apiVersion: s3.services.k8s.aws/v1alpha1
+kind: Bucket
+metadata:
+  name: stalwart-s3-bucket
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  name: ""  # Populate with Kustomize
+  encryption:
+    rules:
+      - applyServerSideEncryptionByDefault:
+          sseAlgorithm: AES256
+  versioning:
+    status: Enabled

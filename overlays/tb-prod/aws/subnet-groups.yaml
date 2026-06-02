@@ -1,0 +1,22 @@
+---
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBSubnetGroup
+metadata:
+  name: stalwart-rds-subnet-group
+  namespace: thundermail
+spec:
+  subnetIDs:
+    - "subnet-085a71891b27bd24c"  # eu-central-1a
+    - "subnet-0b863a1876ec121cb"  # eu-central-1b
+
+---
+# Set the appropriate subnet IDs for tb-dev's private network subnets
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: CacheSubnetGroup
+metadata:
+  name: stalwart-redis-subnet-group
+  namespace: thundermail
+spec:
+  subnetIDs:
+    - "subnet-085a71891b27bd24c"  # eu-central-1a
+    - "subnet-0b863a1876ec121cb"  # eu-central-1b

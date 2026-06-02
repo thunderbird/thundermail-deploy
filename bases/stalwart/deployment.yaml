@@ -1,0 +1,115 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stalwart
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stalwart
+  template:
+    metadata:
+      labels:
+        app: stalwart
+    spec:
+      serviceAccountName: stalwart
+      securityContext:
+        fsGroup: 2000
+        runAsUser: 2000
+        runAsGroup: 2000
+      containers:
+        - name: stalwart
+          image: stalwartlabs/stalwart:v0.16
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 1
+              memory: 2Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+          args:
+            - "--config"
+            - "/etc/stalwart/config.json"
+          env:
+            # TODO: Remove debug thingie
+            - name: CHANGE_TO_FORCE_DEPLOYMENT
+              value: changemeback
+
+            # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
+            # database password from this environment variable. Here, we populate this
+            # variable from a secret, preventing us from ever having to cleartext it.
+            - name: STALWART_POSTGRESQL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-postgresql-admin-password
+                  key: STALWART_POSTGRESQL_ADMIN_PASSWORD
+
+            # Reference for the remainder of these variables:
+            #   https://stalw.art/docs/configuration/environment-variables/
+
+            # Recovery and bootstrap
+            - name: STALWART_PUSH_SHARD
+              value: ""
+            - name: STALWART_RECOVERY_MODE
+              value: "false"
+            - name: STALWART_RECOVERY_MODE_PORT
+              value: "8080"
+            - name: STALWART_RECOVERY_MODE_LOG_LEVEL
+              value: info
+            - name: STALWART_RECOVERY_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery-admin
+                  key: STALWART_RECOVERY_ADMIN
+
+            # Public URLs
+            - name: STALWART_PUBLIC_URL
+              value: "https://mail.dev-thundermail.com"
+
+            # Clustering
+            # - name: STALWART_HOSTNAME
+            #   value:
+            # - name: STALWART_ROLE
+            #   value:
+          ports:
+            - name: smtps
+              containerPort: 465
+            - name: submission
+              containerPort: 587
+            - name: imaps
+              containerPort: 993
+            - name: sieve
+              containerPort: 4190
+            - name: https
+              containerPort: 443
+            - name: mgmt
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: mgmt
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: mgmt
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: stalwart-config
+              mountPath: /etc/stalwart/config.json
+              subPath: config.json
+      volumes:
+        - name: stalwart-config
+          configMap:
+            name: stalwart-config
+            optional: false
+            items:
+              - key: config.json
+                path: config.json
