@@ -16,7 +16,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow traffic from Stalwarts server containers
-        - "sg-07f59e7e9ea8b2f0f"  # Stalwart pods
+          "sg-07f59e7e9ea8b2f0f"  # Stalwart pods
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
