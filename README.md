@@ -141,3 +141,30 @@ These logs reveal problems related to the controller's ability to work within AW
 Though one might expect this role to pop into existence when ACK tries to create a database, it does not. If the RDS ACK Controller logs show `400` errors from the API with a `Missing necessary credentials` error, it may be because the `AWSServiceRoleForRDS` IAM role has not been created, or has been deleted since it was initially created.
 
 To resolve this, you can create any database at all in RDS (the fastest way is the quick setup wizard) and then delete it. RDS should automatically create the IAM role when you create the database.
+
+
+### Debugging Per-Pod Security Group Issues
+
+In this project, pods are assigned security groups through `SecurityGroupPolicy` resources which match pods with the `app=stalwart` label to the ID for the `stalwart-server` security group. To find out if something related to a security group is causing a problem, you can launch a debugging container with that label:
+
+    kubectl -n thundermail run \
+        -i \
+        --tty \
+        --rm debug \
+        --image=alpine:latest \
+        --restart=Never \
+        --labels 'app=stalwart' \
+        -- sh
+
+The VPC CNI will assign the appropriate security groups. You can confirm this by looking at the events for your debug pod:
+
+    > kubectl -n thundermail describe pod debug
+    
+      ...
+
+      Type     Reason                  Age    From                     Message
+      ----     ------                  ----   ----                     -------
+      Normal   SecurityGroupRequested  6m53s  vpc-resource-controller  Pod will get the following Security Groups [sg-01502e50caccc6795 sg-07f59e7e9ea8b2f0f]
+
+
+
