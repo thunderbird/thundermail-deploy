@@ -21,3 +21,13 @@ patches:
   - path: stalwart/configmap.yaml
   - path: stalwart/secrets.yaml
   - path: stalwart/serviceaccount.yaml
+
+  - target:
+      kind: Deployment
+      name: stalwart
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: STALWART_PUBLIC_URL
+          value: "https://mail.dev-thundermail.com"
