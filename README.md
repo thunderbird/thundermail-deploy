@@ -128,7 +128,7 @@ These logs reveal problems related to the controller's ability to work within AW
     kubectl -n thundermail describe securitygroup stalwart-elasticache-redis
 
 
-#### Service Linked Roles for the RDS ACK Controller
+#### Service Linked Roles for the Elasticache and RDS ACK Controllers
 
 [Service Linked Roles for ACK documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAM.ServiceLinkedRoles.html) says this about the RDS controller's dependency upon its service linked role:
 
@@ -138,9 +138,35 @@ These logs reveal problems related to the controller's ability to work within AW
 >
 > If you delete this service-linked role, and then need to create it again, you can use the same process to recreate the role in your account. When you create a DB instance, Amazon RDS creates the service-linked role for you again.
 
-Though one might expect this role to pop into existence when ACK tries to create a database, it does not. If the RDS ACK Controller logs show `400` errors from the API with a `Missing necessary credentials` error, it may be because the `AWSServiceRoleForRDS` IAM role has not been created, or has been deleted since it was initially created.
+Though one might expect this role to pop into existence when ACK tries to create a database, it does not. Related to this project, this problem can also happen with Elasticache.
 
-To resolve this, you can create any database at all in RDS (the fastest way is the quick setup wizard) and then delete it. RDS should automatically create the IAM role when you create the database.
+There are three sure signs of this problem, demonstrated below. The examples given here are for RDS, but you can substitute Elasticache in if that's where your issue is.
+
+**The IAM role for your service does not exist.**
+
+Run:
+
+    aws iam get-role --role-name AWSServiceRoleForRDS
+
+If you get `aws: [ERROR]: An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name AWSServiceRoleForRDS cannot be found.`, then this is your problem.
+
+**The RDS ACK Controller logs show `400`s.**
+
+Check the logs for the ACK Controller for the problem service to see if it reports `400` responses from the AWS API, with the `Missing necessary credentials` reason.
+
+**The custom resource status shows permission errors.**
+
+Run:
+
+    kubectl -n thundermail describe dbinstance stalwart-postgresql
+
+You have this problem if you see the following message in the status:
+
+    ServiceLinkedRoleNotFoundFault: This action cannot be completed due to insufficient permissions.
+
+**Resolution**
+
+To resolve this, you can create any database at all in RDS or cache in Elasticache and then delete it. The role should automatically be created when you create the resource.
 
 
 ### Debugging Per-Pod Security Group Issues
