@@ -90,7 +90,7 @@ To install this project into a Kubernetes cluster, follow this checklist:
     - Set the eks-cluster-sg-mzla-eks-tb-prod01 security group ID on the `stalwart-server` `SecurityGroup` resource in `security-groups.yaml`.
     - Set the `stalwart-server` security group ID on the `stalwart-rds-postgresql` `SecurityGroup` resource in `security-groups.yaml`.
 
-To find these IDs, either use the AWS web console to identify them, or issue `kubectl` commands like this one showing security group IDs:
+To find these IDs, either use the AWS CLI or web console to identify them, or issue `kubectl` commands like this one showing security group IDs:
 
 ```
 # kubectl -n thundermail get securitygroup
