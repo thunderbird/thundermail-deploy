@@ -36,10 +36,6 @@ spec:
             - "--config"
             - "/etc/stalwart/config.json"
           env:
-            # TODO: Remove debug thingie
-            - name: CHANGE_TO_FORCE_DEPLOYMENT
-              value: changemeback
-
             # In the config.json that we feed Stalwart, we instruct Stalwart to pull the
             # database password from this environment variable. Here, we populate this
             # variable from a secret, preventing us from ever having to cleartext it.
@@ -67,9 +63,9 @@ spec:
                   name: stalwart-recovery-admin
                   key: STALWART_RECOVERY_ADMIN
 
-            # Public URLs
-            - name: STALWART_PUBLIC_URL
-              value: "https://mail.dev-thundermail.com"
+            # Public URLs -- Apply per-environment through a Kustomize patch
+            # - name: STALWART_PUBLIC_URL
+            #   value: ""
 
             # Clustering
             # - name: STALWART_HOSTNAME

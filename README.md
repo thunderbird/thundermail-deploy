@@ -73,6 +73,13 @@ To install this project into a Kubernetes cluster, follow this checklist:
 
 - Build a `stalwart-server` IRSA role via the [platform-infrastructure Pulumi configurations](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml).
 - Update the platform-infrastructure Pulumi config to allow DNS traffic to the EKS cluster security group, a la [this example in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L76-L89). `pulumi up` to apply this change.
+- Create the secrets which need to be imported as `ExternalSecret` resources later. The secrets to create should be named as follows, but you will have to figure out the correct values for your installation:
+    - `mzla/$env_name/stalwart-recovery-admin`: `{"recovery_admin": "username:password"}`
+        - Sets the fallback [recovery administrator](https://stalw.art/docs/configuration/recovery-mode/#recovery-administrator) username and password
+    - `mzla/$env_name/stalwart-postgresql-admin-credential`: `{"password": "admin_password_here"}`
+        - Sets the password used by Stalwart to access its database.
+    - `mzla/$env_name/cloudflare`: `{"apiToken": "cfut_something", "accountID": "0123456789abcdef"}`
+        - Sets the Cloudflare operator's authentication details.
 - Configure an appropriate set of Kustomize overlays for your use case. There will be some which you cannot fill out correctly. This is because some of these manifests generate AWS resources like security groups which others of these manifests depend upon. Use "empty" values in these cases, such as empty strings (`""`) or empty arrays (`[]`).
 - Build an [ArgoCD `AppProject`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/AppProject) allowing this repo to be deployed to your cluster. [Ref: thundermail in platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/projects/thundermail.yaml)
 - For each installation, define an [ArgoCD `Application`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/Application) with this repo as the source. Set the `path` option to the overlay directory corresponding to this installation. [Ref: thundermail in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/thundermail.yaml)
@@ -83,7 +90,7 @@ To install this project into a Kubernetes cluster, follow this checklist:
     - Set the eks-cluster-sg-mzla-eks-tb-prod01 security group ID on the `stalwart-server` `SecurityGroup` resource in `security-groups.yaml`.
     - Set the `stalwart-server` security group ID on the `stalwart-rds-postgresql` `SecurityGroup` resource in `security-groups.yaml`.
 
-To find these IDs, either use the AWS web console to identify them, or issue `kubectl` commands like this one showing security group IDs:
+To find these IDs, either use the AWS CLI or web console to identify them, or issue `kubectl` commands like this one showing security group IDs:
 
 ```
 # kubectl -n thundermail get securitygroup
@@ -108,6 +115,23 @@ You can build these templates locally by [installing `kustomize`](https://kubect
 
 If successful, you should get a series of YAML manifests in the output. If not successful, you will receive a specific error message. These are the same error messages that would surface through ArgoCD if you were to merge and deploy the code, so this is really a requisite development step.
 
+If you want to test builds for all overlays, from the root of this repo, run:
+
+```
+$ ./util/kustomize-build-all.sh 
+***** KUSTOMIZE BUILD REPORT *****
+
+-- tb-dev:
+Build status: ✅
+
+-- tb-prod:
+Build status: ✅
+
+Total build failures: 0
+```
+
+This script will run builds for any overlays it finds and alert you if any produce errors. It will output those errors if they occur. However, for successful builds, the script disposes of the actual output. Remember that a successful build does not necessarily mean you have affected the desired change. Review the manifests before deploying them.
+
 
 ### ACK and Cloudflare Resources
 
@@ -128,7 +152,7 @@ These logs reveal problems related to the controller's ability to work within AW
     kubectl -n thundermail describe securitygroup stalwart-elasticache-redis
 
 
-#### Service Linked Roles for the RDS ACK Controller
+#### Service Linked Roles for the Elasticache and RDS ACK Controllers
 
 [Service Linked Roles for ACK documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAM.ServiceLinkedRoles.html) says this about the RDS controller's dependency upon its service linked role:
 
@@ -138,9 +162,35 @@ These logs reveal problems related to the controller's ability to work within AW
 >
 > If you delete this service-linked role, and then need to create it again, you can use the same process to recreate the role in your account. When you create a DB instance, Amazon RDS creates the service-linked role for you again.
 
-Though one might expect this role to pop into existence when ACK tries to create a database, it does not. If the RDS ACK Controller logs show `400` errors from the API with a `Missing necessary credentials` error, it may be because the `AWSServiceRoleForRDS` IAM role has not been created, or has been deleted since it was initially created.
+Though one might expect this role to pop into existence when ACK tries to create a database, it does not. Related to this project, this problem can also happen with Elasticache.
 
-To resolve this, you can create any database at all in RDS (the fastest way is the quick setup wizard) and then delete it. RDS should automatically create the IAM role when you create the database.
+There are three sure signs of this problem, demonstrated below. The examples given here are for RDS, but you can substitute Elasticache in if that's where your issue is.
+
+**The IAM role for your service does not exist.**
+
+Run:
+
+    aws iam get-role --role-name AWSServiceRoleForRDS
+
+If you get `aws: [ERROR]: An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name AWSServiceRoleForRDS cannot be found.`, then this is your problem.
+
+**The RDS ACK Controller logs show `400`s.**
+
+Check the logs for the ACK Controller for the problem service to see if it reports `400` responses from the AWS API, with the `Missing necessary credentials` reason.
+
+**The custom resource status shows permission errors.**
+
+Run:
+
+    kubectl -n thundermail describe dbinstance stalwart-postgresql
+
+You have this problem if you see the following message in the status:
+
+    ServiceLinkedRoleNotFoundFault: This action cannot be completed due to insufficient permissions.
+
+**Resolution**
+
+To resolve this, you can create any database at all in RDS or cache in Elasticache and then delete it. The role should automatically be created when you create the resource.
 
 
 ### Debugging Per-Pod Security Group Issues
