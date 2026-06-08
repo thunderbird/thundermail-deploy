@@ -1,9 +1,0 @@
----
-apiVersion: rds.services.k8s.aws/v1alpha1
-kind: DBInstance
-metadata:
-  name: stalwart-postgresql
-  namespace: thundermail
-spec:
-  vpcSecurityGroupIDs:
-    - sg-00987c533757d1a25  # stalwart-rds-postgresql
