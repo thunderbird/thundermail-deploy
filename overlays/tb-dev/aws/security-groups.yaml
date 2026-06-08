@@ -42,18 +42,3 @@ spec:
         - description: Kubelet probes from EKS cluster SG
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
 
----
-apiVersion: ec2.services.k8s.aws/v1alpha1
-kind: SecurityGroup
-metadata:
-  name: stalwart-rds-postgresql
-  namespace: thundermail
-spec:
-  vpcID: vpc-0e0f4b8d603d463e0
-  ingressRules:
-    - fromPort: 5432
-      toPort: 5432
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow traffic from Stalwarts server containers
-          groupID: sg-0225f0469688b6324  # Stalwart pods

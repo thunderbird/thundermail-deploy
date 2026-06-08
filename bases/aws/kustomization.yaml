@@ -3,7 +3,6 @@ namespace: thundermail
 
 resources:
   - elasticache.yaml
-  - rds.yaml
   - s3.yaml
   - security-groups.yaml
   - subnet-groups.yaml

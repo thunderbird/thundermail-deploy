@@ -13,7 +13,6 @@ images:
 
 patches:
   - path: aws/elasticache.yaml
-  - path: aws/rds.yaml
   - path: aws/s3.yaml
   - path: aws/security-groups.yaml
   - path: aws/subnet-groups.yaml
