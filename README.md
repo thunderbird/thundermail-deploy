@@ -73,6 +73,13 @@ To install this project into a Kubernetes cluster, follow this checklist:
 
 - Build a `stalwart-server` IRSA role via the [platform-infrastructure Pulumi configurations](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml).
 - Update the platform-infrastructure Pulumi config to allow DNS traffic to the EKS cluster security group, a la [this example in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L76-L89). `pulumi up` to apply this change.
+- Create the secrets which need to be imported as `ExternalSecret` resources later. The secrets to create should be named as follows, but you will have to figure out the correct values for your installation:
+    - `mzla/$env_name/stalwart-recovery-admin`: `{"recovery_admin": "username:password"}`
+        - Sets the fallback [recovery administrator](https://stalw.art/docs/configuration/recovery-mode/#recovery-administrator) username and password
+    - `mzla/$env_name/stalwart-postgresql-admin-credential`: `{"password": "admin_password_here"}`
+        - Sets the password used by Stalwart to access its database.
+    - `mzla/$env_name/cloudflare`: `{"apiToken": "cfut_something", "accountID": "0123456789abcdef"}`
+        - Sets the Cloudflare operator's authentication details.
 - Configure an appropriate set of Kustomize overlays for your use case. There will be some which you cannot fill out correctly. This is because some of these manifests generate AWS resources like security groups which others of these manifests depend upon. Use "empty" values in these cases, such as empty strings (`""`) or empty arrays (`[]`).
 - Build an [ArgoCD `AppProject`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/AppProject) allowing this repo to be deployed to your cluster. [Ref: thundermail in platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/projects/thundermail.yaml)
 - For each installation, define an [ArgoCD `Application`](https://kubespec.dev/argo-cd/argoproj.io/v1alpha1/Application) with this repo as the source. Set the `path` option to the overlay directory corresponding to this installation. [Ref: thundermail in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/thundermail.yaml)
