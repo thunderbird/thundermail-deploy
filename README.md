@@ -108,6 +108,23 @@ You can build these templates locally by [installing `kustomize`](https://kubect
 
 If successful, you should get a series of YAML manifests in the output. If not successful, you will receive a specific error message. These are the same error messages that would surface through ArgoCD if you were to merge and deploy the code, so this is really a requisite development step.
 
+If you want to test builds for all overlays, from the root of this repo, run:
+
+```
+$ ./util/kustomize-build-all.sh 
+***** KUSTOMIZE BUILD REPORT *****
+
+-- tb-dev:
+Build status: ✅
+
+-- tb-prod:
+Build status: ✅
+
+Total build failures: 0
+```
+
+This script will run builds for any overlays it finds and alert you if any produce errors. It will output those errors if they occur. However, for successful builds, the script disposes of the actual output. Remember that a successful build does not necessarily mean you have affected the desired change. Review the manifests before deploying them.
+
 
 ### ACK and Cloudflare Resources
 
