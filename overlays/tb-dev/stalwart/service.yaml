@@ -7,4 +7,3 @@ metadata:
     # Subnets: mzla-tb-dev-public-eu-central-1a, mzla-tb-dev-public-eu-central-1b"
     service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0f9e53dca9f65b704, subnet-05af2f16f56e5b830"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
-    eks.amazonaws.com/role-arn: "arn:aws:iam::718959508124:role/mzla-tb-dev-aws-lb-controller"
