@@ -19,6 +19,7 @@ patches:
   - path: stalwart/cloudflare-tunnel.yaml
   - path: stalwart/configmap.yaml
   - path: stalwart/secrets.yaml
+  - path: stalwart/service.yaml
   - path: stalwart/serviceaccount.yaml
 
   - target:
