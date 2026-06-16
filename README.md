@@ -17,6 +17,13 @@ This project makes use of [AWS Controllers for Kubernetes (ACK)](https://aws-con
 A [controller](https://github.com/aws-controllers-k8s) must be installed for each service category (EC2, RDS, etc.) in order for these manifests to become real resources. We install these via the [platform-infrastructure repo](https://github.com/thunderbird/platform-infrastructure/). As a reference example, [here is the S3 controller installation](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/ack-s3-controller.yaml) for the tb-dev cluster.
 
 
+### AWS Load Balancer Controller
+
+We use this controller to allow load balanced traffic to our Stalwart pods from outside the network. The controller responds to various conditions in an EKS cluster to create AWS load balancers. In particular, we use an annotation on a `Service` that triggers the creation of a load balancer for mail services.
+
+In the [platform-infrastructure repo](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/aws-lb-controller.yaml), we install this into the relevant repos using the [Helm installation method](https://docs.aws.amazon.com/eks/latest/userguide/lbc-helm.html). We [annotate a service](./bases/stalwart/service.yaml) to build a load balancer (with listeners and target groups) allowing traffic to our mail services. Valid annotations and the rest of the product's features are [documented here](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/).
+
+
 ### Cloudflare
 
 We define certain resources on the Cloudflare platform in a very similar way that we use ACK to build AWS resources. We define Cloudflare resources as Kubernetes manifests. The [Cloudflare Kubernetes operator](https://github.com/adyanth/cloudflare-operator/tree/main) then reconciles custom Kubernetes resources into Cloudflare resources. The operator is installed via [platform-infrastructure](https://github.com/thunderbird/platform-infrastructure/blob/main/argocd/tb-dev/apps/tb-dev-cloudflare-tunnel-operator.yaml).
@@ -89,6 +96,7 @@ To install this project into a Kubernetes cluster, follow this checklist:
     - Add the stalwart-elasticache-redis security group ID to the `elasticache.yaml` overlay.
     - Add the stalwart-rds-postgresql security group ID to the `rds.yaml` overlay.
     - Set the eks-cluster-sg-mzla-eks-tb-prod01 security group ID on the `stalwart-server` `SecurityGroup` resource in `security-groups.yaml`.
+    - Add ingress rules from the security group for the load balancer created by the `Service` resource to the `stalwart-server` security group.
     - Set the `stalwart-server` security group ID on the `stalwart-rds-postgresql` `SecurityGroup` resource in `security-groups.yaml`.
 
 To find these IDs, either use the AWS CLI or web console to identify them, or issue `kubectl` commands like this one showing security group IDs:
