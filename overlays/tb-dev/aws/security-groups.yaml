@@ -21,31 +21,31 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the public stalwart load balancer
-          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
     - fromPort: 587
       toPort: 587
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTP Submission service traffic from the public stalwart load balancer
-          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the public stalwart load balancer
-          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the public stalwart load balancer
-          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the public stalwart load balancer
-          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
