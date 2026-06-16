@@ -14,7 +14,7 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: http
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8080"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/healthz/ready"
-    service.beta.kubernetes.io/aws-load-balancer-attributes: "cross_zone_load_balancing.enabled=true"
+    service.beta.kubernetes.io/aws-load-balancer-attributes: "cross-zone-load-balancing-enabled=true"
     
     # Update the below values in overlays
     service.beta.kubernetes.io/aws-load-balancer-subnets: ""
