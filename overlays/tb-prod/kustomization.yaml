@@ -16,9 +16,9 @@ patches:
   - path: aws/s3.yaml
   - path: aws/security-groups.yaml
   - path: aws/subnet-groups.yaml
-  - path: stalwart/cloudflare-tunnel.yaml
   - path: stalwart/configmap.yaml
   - path: stalwart/secrets.yaml
+  - path: stalwart/service.yaml
   - path: stalwart/serviceaccount.yaml
 
   - target:

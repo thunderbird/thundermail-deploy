@@ -2,17 +2,50 @@
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
-  name: stalwart-elasticache-redis
+  name: stalwart-server
   namespace: thundermail
 spec:
   vpcID: vpc-0e0f4b8d603d463e0
   ingressRules:
-    - fromPort: 6379
-      toPort: 6379
+    - fromPort: 8080
+      toPort: 8080
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow traffic from Stalwarts server containers
-          groupID: sg-0225f0469688b6324  # Stalwart pods
+        - description: Kubelet probes from EKS cluster SG
+          groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
+    # 993:31891/TCP
+    # 4190:30613/TCP
+    # 443:30799/TCP
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTPS service traffic from the public stalwart load balancer
+          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP Submission service traffic from the public stalwart load balancer
+          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow IMAPS service traffic from the public stalwart load balancer
+          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the public stalwart load balancer
+          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow HTTPS service traffic from the public stalwart load balancer
+          groupID: sg-0b02aa9b88287bd7b  # k8s-thunderm-stalwart-eab83ec41e
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
@@ -30,15 +63,14 @@ spec:
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
-  name: stalwart-server
+  name: stalwart-elasticache-redis
   namespace: thundermail
 spec:
   vpcID: vpc-0e0f4b8d603d463e0
   ingressRules:
-    - fromPort: 8080
-      toPort: 8080
+    - fromPort: 6379
+      toPort: 6379
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Kubelet probes from EKS cluster SG
-          groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
-
+        - description: Allow traffic from Stalwarts server containers
+          groupID: sg-0225f0469688b6324  # Stalwart pods
