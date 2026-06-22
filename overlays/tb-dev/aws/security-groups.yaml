@@ -13,39 +13,42 @@ spec:
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
-    # 993:31891/TCP
-    # 4190:30613/TCP
-    # 443:30799/TCP
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Management port access from public load balancer
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 587
       toPort: 587
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTP Submission service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-330d40919d
+          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
