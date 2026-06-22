@@ -269,12 +269,14 @@ You can now run `stalwart-cli` commands:
 
 Create the allowance first:
 
-    stalwart-cli --url http://$STALWART_CONTAINER_IP:8080/ \
+    # stalwart-cli --url http://$STALWART_CONTAINER_IP:8080/ \
         --user $RECOVERY_USER \
         --password $RECOVERY_PASSWORD \
         create AllowedIp \
         --field address=$VPC_CIDR' \
-        --reason='Allow all internal traffic from the VPC'
+        --field reason='Allow all internal traffic from the VPC'
+    
+    Created AllowedIp ixf91jeeauqa
 
 Then remove the blocks. To figure out what blocks exist, `query` for `BlockedIp`:
 
