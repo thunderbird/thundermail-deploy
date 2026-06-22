@@ -13,12 +13,6 @@ spec:
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
-    - fromPort: 8080
-      toPort: 8080
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Management port access from public load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
