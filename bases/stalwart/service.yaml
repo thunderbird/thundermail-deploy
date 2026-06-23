@@ -38,7 +38,7 @@ spec:
       targetPort: https
 
 ---
-# The stalwart-admin service creates a ClusterIp service to keep this private. The Tailscale ingress
+# The stalwart-admin service creates a ClusterIP service to keep this private. The Tailscale ingress
 # set up in the platform-infrastructure repo will expose this through the private meshnet.
 apiVersion: v1
 kind: Service
@@ -47,7 +47,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  type: ClusterIp
+  type: ClusterIP
   selector:
     app: stalwart
   ports:
