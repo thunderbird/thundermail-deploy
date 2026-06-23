@@ -227,7 +227,7 @@ Now traffic from internal systems will always be allowed.
 
 ### Resolving IP Address Blocks
 
-As mentioned above, if the load balancer IPs get blocked, you will have all kinds of problems accessing the web console to unblock your load balancer. You will need to create a backdoor to the Stalwart management port and use `stalwart-cli` to create an IP allowance and unblock the blocked IPs.
+As mentioned above, if the load balancer IPs get blocked, you will have all kinds of problems accessing the web console to unblock your load balancer. You will need to connect to the Stalwart management port and use `stalwart-cli` to create an IP allowance and unblock the blocked IPs.
 
 First, get the IP address of a Stalwart container. It doesn't matter which one, so long as port 8080 is open and connectable.
 
@@ -237,9 +237,7 @@ First, get the IP address of a Stalwart container. It doesn't matter which one, 
     # kubectl -n thundermail describe pod stalwart-54bf5f6bc6-rhsmv | grep IP
     IP:               10.120.73.236
 
-Now create a new security group rule on your environment's `stalwart-server` security group allowing ingress to port 8080 from your VPC's CIDR. This will enable you to connect from another container on the cluster. We'll delete it later.
-
-Run a live debug container. See [Debugging Per-Pod Security Group Issues](#debugging-per-pod-security-group-issues) for details on the following command, which will connect you to an interactive Alpine Linux container using the `stalwart-server` security group.
+The `stalwart-server` security group has a rule allowing connections from itself, so you need to run a live debug container that uses it. See [Debugging Per-Pod Security Group Issues](#debugging-per-pod-security-group-issues) for details on the following command, which will connect you to an interactive Alpine Linux container using the `stalwart-server` security group.
 
     kubectl -n thundermail run \
         -i \
@@ -312,8 +310,6 @@ Now reload the blocked IPs list:
     Created Action bvdtkxh
 
 And you should be back up very soon.
-
-Don't forget to delete the temporary rule allowing full VPC CIDR access to `stalwart-server` before you wrap up.
 
 
 # NeonDB Setup
