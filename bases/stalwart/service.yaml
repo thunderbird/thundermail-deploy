@@ -1,4 +1,5 @@
 ---
+# The stalwart-mail service creates a public load balancer exposing mail services to the world.
 apiVersion: v1
 kind: Service
 metadata:
@@ -35,3 +36,21 @@ spec:
     - name: https
       port: 443
       targetPort: https
+
+---
+# The stalwart-admin service creates a ClusterIp service to keep this private. The Tailscale ingress
+# set up in the platform-infrastructure repo will expose this through the private meshnet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-admin
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIp
+  selector:
+    app: stalwart
+  ports:
+    - name: mgmt
+      port: 8080
+      targetPort: mgmt
