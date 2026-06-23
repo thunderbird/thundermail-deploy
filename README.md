@@ -125,22 +125,22 @@ Determine your domain. For this example, we'll use `mail.example.com`.
 
 Using AWS Certificate Manager, request a certificate for your domain:
 
-    aws --profile your-profile acm request-certificate \
+    aws --profile $AWS_PROFILE acm request-certificate \
         --domain-name '*.example.com' \
         --validation-method DNS \
         --options Export=ENABLED \
         --tags Key=project,Value=thundermail Key=environment,Value=your-env \
-        --output CertificateArn
+        --query CertificateArn
 
 That outputs the ARN of the certificate you requested. Now get the information for the DNS record you need to create to validate the domain:
 
-    aws --profile your-profile acm describe-certificate \
+    aws --profile $AWS_PROFILE acm describe-certificate \
         --certificate-arn $CERTIFICATE_ARN \
         --query 'Certificate.DomainValidationOptions[*].ResourceRecord'
 
 In Cloudflare (or wherever this domain's DNS zone is hosted), create a CNAME Record using those values. In short order, the validation should complete. You can grab the validation status like so:
 
-    aws --profile your-profile acm describe-certificate \
+    aws --profile $AWS_PROFILE acm describe-certificate \
         --certificate-arn $CERTIFICATE_ARN \
         --query 'Certificate.DomainValidationOptions[*].ValidationStatus'
 
@@ -151,7 +151,7 @@ When the status is `SUCCESS`, you are ready to proceed.
 
 As long as you used the `Export=ENABLED` option in the previous step, exporting a certificate is easy enough:
 
-    aws --profile your-profile acm export-certificate \
+    aws --profile $AWS_PROFILE acm export-certificate \
         --certificate-arn $CERTIFICATE_ARN \
         --passphrase $(echo -n 'password' | base64) \
         --output text \
@@ -183,13 +183,22 @@ Log into your Stalwart's admin web console. Here are the known instances:
 
 You can get the login credentials from the relevant `stalwart-recovery-admin` secret in AWS Secrets Manager.
 
+First, configure a domain.
+
+- Go to Management ⇢ Domains ⇢ Domains.
+- Click `+ Create domain`.
+- Enter your domain name and leave all other options at defaults.
+- Click `🖫 Create`.
+
+Next, configure a TLS certificate using the exported cert and key from above.
+
 - Go to Settings ⇢ TLS ⇢ Certificates.
 - Click `+ Create certificate`
 - Paste the contents of the `.crt` file into the Certificate/Value text box.
 - Paste the contents of the `.key` file into the Private Key/Secret text box.
 - Click `🖫 Create`.
 
-You now have a TLS configuration you can use elsewhere in the config.
+You now have the domain and TLS configuration you need to set up the general network settings.
 
 - Go to Settings ⇢ Network ⇢ General.
 - Set the default hostname to your domain, the domain covered by the certificate, by clicking the `🔍` icon and selecting the domain from the drop-down.
