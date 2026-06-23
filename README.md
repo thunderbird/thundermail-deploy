@@ -179,7 +179,7 @@ You can now use these files in Stalwart.
 Log into your Stalwart's admin web console. Here are the known instances:
 
 - [tb-dev](https://mail.dev-thundermail.com/admin/login)
-- [tb-prod](https://mail.glamroc.com/admin/login)
+- [tb-prod](https://mail.tb.email/admin/login)
 
 You can get the login credentials from the relevant `stalwart-recovery-admin` secret in AWS Secrets Manager.
 
