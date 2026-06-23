@@ -13,6 +13,8 @@ spec:
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
+        - description: Allow management port traffic only from other stalwart-server sources
+          groupID: sg-0225f0469688b6324 # stalwart-server
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
