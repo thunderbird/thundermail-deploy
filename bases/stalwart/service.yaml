@@ -26,9 +26,6 @@ spec:
     - name: smtps
       port: 465
       targetPort: smtps
-    - name: submission
-      port: 587
-      targetPort: submission
     - name: imaps
       port: 993
       targetPort: imaps
