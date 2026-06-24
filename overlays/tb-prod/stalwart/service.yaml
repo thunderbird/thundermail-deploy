@@ -6,3 +6,15 @@ metadata:
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-subnets: "mzla-tb-prod-public-eu-central-1a,mzla-tb-prod-public-eu-central-1b"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-prod"
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-admin
+  annotations:
+    # Subnets: mzla-tb-prod-private-eu-central-1a, mzla-tb-prod-private-eu-central-1b
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-085a71891b27bd24c, subnet-0b863a1876ec121cb"
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-prod"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-07a13b4ef1abfc7c0" # stalwart-admin-lb
