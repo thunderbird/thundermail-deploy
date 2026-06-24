@@ -33,7 +33,7 @@ spec:
         - groupID: "" # Populate with Kustomize
           description: Kubelet probes from EKS cluster SG
 
-# Build SecurityGroupPolicies matching each pod deployment with each app SG
+# --- Build SecurityGroupPolicies matching each pod deployment with each app SG ---
 # (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
@@ -48,7 +48,43 @@ spec:
   securityGroups:
     groupIds: [] # Populate with Kustomize
 
-# Build security groups for each backend service (Redis) allowing access from the app SGs
+---
+# Security group for the admin/mgmt service's load balancer
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-admin-lb
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for private Stalwart admin access via load balancer
+  name: stalwart-admin
+  tags:
+    - key: Name
+      value: stalwart-admin
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - groupID: "" # Populate with Kustomize
+          description: Kubelet probes from EKS cluster SG
+
+
+# --- Build security groups for each backend service (Redis) allowing access from the app SGs ---
 ---
 # SG for the Redis host
 apiVersion: ec2.services.k8s.aws/v1alpha1

@@ -66,6 +66,24 @@ spec:
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
+  name: stalwart-admin-lb
+  namespace: thundermail
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow access from Accounts API in prod
+          groupID: 768512802988/sg-034b36952ac31b87b
+        - description: Allow access from Accounts Celery in prod
+          groupID: 768512802988/sg-0ede6c1f9f8a4b676
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
   name: stalwart-elasticache-redis
   namespace: thundermail
   annotations:
