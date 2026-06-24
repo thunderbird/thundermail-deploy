@@ -59,10 +59,10 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   description: SG for private Stalwart admin access via load balancer
-  name: stalwart-admin
+  name: stalwart-admin-lb
   tags:
     - key: Name
-      value: stalwart-admin
+      value: stalwart-admin-lb
     - key: application
       value: thundermail
     - key: managed-by
