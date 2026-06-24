@@ -47,6 +47,24 @@ spec:
           groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
 
 ---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-admin-lb
+  namespace: thundermail
+spec:
+  vpcID: vpc-0e0f4b8d603d463e0
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow access from Accounts API in stage
+          groupID: 768512802988/sg-0a711c607f9e0b959
+        - description: Allow access from Accounts Celery in stage
+          groupID: 768512802988/sg-02700bcc4c090da45
+
+---
 apiVersion: vpcresources.k8s.aws/v1beta1
 kind: SecurityGroupPolicy
 metadata:
