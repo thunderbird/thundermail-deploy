@@ -53,7 +53,7 @@ spec:
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
-  name: stalwart-admin
+  name: stalwart-admin-lb
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
