@@ -80,9 +80,9 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow access from Accounts API in prod
-          groupID: 768512802988/sg-034b36952ac31b87b
+          groupID: sg-034b36952ac31b87b
         - description: Allow access from Accounts Celery in prod
-          groupID: 768512802988/sg-0ede6c1f9f8a4b676
+          groupID: sg-0ede6c1f9f8a4b676
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1

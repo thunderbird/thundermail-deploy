@@ -64,9 +64,9 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow access from Accounts API in stage
-          groupID: 768512802988/sg-0a711c607f9e0b959
+          groupID: sg-0a711c607f9e0b959
         - description: Allow access from Accounts Celery in stage
-          groupID: 768512802988/sg-02700bcc4c090da45
+          groupID: sg-02700bcc4c090da45
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
