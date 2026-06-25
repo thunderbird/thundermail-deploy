@@ -157,21 +157,25 @@ As long as you used the `Export=ENABLED` option in the previous step, exporting 
         --output text \
         --no-cli-pager
 
-The above command will produce a lot of output containing multiple certificates (yours and a CA trust chain) and an encrypted private key. In a temporary directory, copy this data into two files: `example.com.crt` (containing all certificates) and `example.com.key` (containing the encrypted key).
+The above command will produce a lot of output containing multiple certificates (yours and a CA trust chain) and an encrypted private key. In a temporary directory, copy the key data into a file, `example.com.key` (containing the encrypted key).
 
-There are two problems now. First, Stalwart wants the certificates in PEM format. Second, Stalwart cannot handle passphrase-encrypted private keys. We must fix both things.
-
-First, strip the passphrase off the RSA key with `openssl`:
+AWS Certificate Manager requires that you encrypt the key with a passphrase for export, but Stalwart cannot handle passphrase-encrypted private keys. Fix this by stripping the passphrase off the RSA key with `openssl`:
 
     openssl rsa -in example.com.key -out example.com.key
 
 You'll be prompted for the passphrase, which is `password` (or whatever else you may have used in the previous command), and the key file will be replaced by one without a passphrase.
 
-Now reformat the certificate:
+To use the certificate:
 
-    openssl x509 -in example.com.crt -outform PEM -out example.com.crt
+- In the Stalwart web console, go to Settings ⇢ TLS ⇢ Certificates.
+- Click `+ Create certificate`.
+- Leave the "Certificate" field set to "Text value".
+- In the "Value" text entry, enter the certificate for your domain followed by all chain/intermediate certs.
+- Leave the "Private key" field set to "Secret value".
+- In the "Secret" text entry, enter the private key with the passphrase removed.
+- Click `🖫 Create`.
 
-You can now use these files in Stalwart.
+You can now use this certificate in other Stalwart settings, such as the basic network setup.
 
 
 ### Basic Stalwart Network Setup
