@@ -51,10 +51,6 @@ spec:
           groupID: sg-063486073b9b2ba48  # k8s-thunderm-stalwart-ca45b4cfeb
         - description: Allow HTTPS service traffic from the private stalwart load balancer
           groupID: sg-07a13b4ef1abfc7c0  # stalwart-admin-lb
-        - description: Allow HTTPS service traffic from the Accounts API in prod
-          groupID: sg-034b36952ac31b87b  # accounts-prod-sg-cont-accounts in legacy account
-        - description: Allow HTTPS service traffic from Celery in accounts-prod
-          groupID: sg-0ede6c1f9f8a4b676  # accounts-prod-afc-accounts-contsg-celery-prod
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
