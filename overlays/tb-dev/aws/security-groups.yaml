@@ -45,6 +45,8 @@ spec:
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the public stalwart load balancer
           groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
+        - description: Allow HTTPS service traffic from the private stalwart load balancer
+          groupID: sg-003b6b400b4c35131  # stalwart-admin-lb
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
