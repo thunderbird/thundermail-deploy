@@ -33,6 +33,23 @@ spec:
     - name: sieve
       port: 4190
       targetPort: sieve
+
+---
+# The stalwart-https service creates a ClusterIP Service which allows access from other internal
+# services. We could instead use the stalwart-admin Service below, but then we would be routing
+# traffic from nginx on a node out to a load balancer and back intot he cluster. This allows a more
+# direct path from a trusted source.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-https
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart
+  ports:
     - name: https
       port: 443
       targetPort: https

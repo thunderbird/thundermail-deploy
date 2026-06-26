@@ -21,12 +21,6 @@ spec:
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the public stalwart load balancer
           groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
-    - fromPort: 587
-      toPort: 587
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow SMTP Submission service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp

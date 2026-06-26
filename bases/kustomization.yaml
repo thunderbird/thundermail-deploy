@@ -2,7 +2,7 @@
 namespace: thundermail
 
 resources:
-  - aws
+  - nginx
   - stalwart
 
 labels:
