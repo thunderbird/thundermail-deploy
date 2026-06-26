@@ -1,0 +1,71 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for nginx containers proxying HTTPS traffic for Stalwart in Kubernetes
+  name: stalwart-nginx
+  tags:
+    - key: Name
+      value: stalwart-nginx
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # Populate with Kustomize
+        - groupID: ""
+          description: Kubelet probes from EKS cluster SG
+        - groupID: ""
+          description: Allow traffic from AWS service load balancer
+
+---
+# Security group for the stalwart-nginx service's load balancer
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx-lb
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for private Stalwart admin access via load balancer
+  name: stalwart-nginx-lb
+  tags:
+    - key: Name
+      value: stalwart-nginx-lb
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all ingress"
