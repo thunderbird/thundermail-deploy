@@ -54,6 +54,8 @@ spec:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            - name: ssl-certificate
+              mountPath: /etc/nginx/
       volumes:
         - name: nginx-config
           configMap:
@@ -62,4 +64,12 @@ spec:
             items:
               - key: nginx.conf
                 path: nginx.conf
-
+        - name: ssl-certificate
+          configMap:
+            name: dev-thundermail.com-ssl
+            optional: false
+            items:
+              - key: CERTIFICATE_CHAIN
+                path: domain.crt
+              - key: PRIVATE_KEY
+                path: domain.key

@@ -9,7 +9,9 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 data:
-  # Provide an appropriate config file for your environment using Kustomize.
+  # Provide an appropriate config file for your environment using Kustomize. Most of the config
+  # should remain unchanged. For ease of reading, the items which need to be specified in an
+  # environment are marked with `$TODO_KUSTOMIZE`.
   #
   # This secret is an nginx configuration file. nginx has multiple sets of documentation for
   # different audiences, making it hard to refer to one place for info on this file. The top level
@@ -29,22 +31,26 @@ data:
         # pass this traffic directly through for Stalwart to deal with.
         server stalwart-mail;
       }
+
       server {
         listen 465;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-mail;
       }
+
       server {
         listen 993;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-mail;
       }
+
       server {
         listen 4190;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
+        
         proxy_pass stalwart-mail;
       }
     }
@@ -55,11 +61,60 @@ data:
     # functions, even user account self-service functions (since these are handled instead by our
     # own thunderbird-accounts project). All other HTTP-based traffic is sent on to the real
     # Stalwart host upstream.
+    #
+    # Documentation for HTTP server configuration can be found here:
+    # https://nginx.org/en/docs/http/configuring_https_servers.html
+
     http {
-      upstream stalwart-http {
-        server stalwart-mail;
+      # --- SSL Configuration ---
+      # These files are populated as volumes mounted to the pods from secrets drawn from an
+      # external secret store.
+      ssl_certificate /etc/nginx/domain.crt;
+      ssl_certificate_key /etc/nginx/domain.key;
+      ssl_session_cache shared:SSL:10m;
+      ssl_session_timeout 10m;
+
+      upstream stalwart-https {
+        # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
+        # internal sources.
+        server stalwart-https;
       }
       server {
-        
+        server_name $TODO_KUSTOMIZE;
+        listen 443 ssl;
+        keepalive_timeout 60s;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+
+        # Specifically block access to these routes
+        location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
+          return 404;
+        }
+
+        location ^~ /admin {  # Stalwart's web admin console, only accessible by private route
+          return 404;
+        }
+
+        location ^~ /api {  # Stalwart's underlying API system, only accessible by private route
+          return 404;
+        }
+
+        # All other routes are acceptable, and should be proxied to the backend
+        location ^~ / {
+          proxy_pass stalwart-https;
+        }
+      }
+    }
+
+    # Small HTTP server to serve health checks for the nginx service itself.
+    http {
+      listen 80;
+      # Return 200s for calls to exactly `/` (no subpaths)
+      location = / {
+        return 200;
+      }
+      # Return 404s for anything else
+      location / {
+        return 404;
       }
     }
