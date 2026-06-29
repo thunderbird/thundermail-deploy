@@ -1,0 +1,43 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+spec:
+  vpcId: vpc-0e0f4b8d603d463e0
+  ingressRules:
+    # Port 80 is a simple health check implemented in the nginx config file. The Kubelet needs
+    # access to this port so it knows to keep the container alive.
+    - fromPort: 80
+      toPort: 80
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+          groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
+    # The rest of these ports are service ports the load balancer publicizes. These container ports
+    # are exposed only to the load balancer.
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow HTTPS service traffic from the public nginx load balancer
+          groupID: "" # name
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTPS service traffic from the public nginx load balancer
+          groupID: "" # name
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow IMAPS service traffic from the public nginx load balancer
+          groupID: "" # name
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the public nginx load balancer
+          groupID: "" # name
