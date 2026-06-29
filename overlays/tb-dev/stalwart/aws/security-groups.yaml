@@ -25,7 +25,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the nginx containers
-          groupID: "" # name
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
         - description: Allow HTTPS service traffic from the private stalwart load balancer
           groupID: sg-003b6b400b4c35131  # stalwart-admin-lb
     - fromPort: 465
@@ -33,19 +33,19 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the nginx containers
-          groupID: "" # name
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the nginx containers
-          groupID: "" # name
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the nginx containers
-          groupID: "" # name
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
 
 ---
 apiVersion: vpcresources.k8s.aws/v1beta1
