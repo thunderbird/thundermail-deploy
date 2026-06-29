@@ -25,6 +25,8 @@ data:
     # reverse proxy configuration for our purposes.
     #    https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-udp-load-balancer/
 
+    error_log stderr;
+
     stream {
       # The upstream name "stalwart-mail" is for reference in the "server" blocks below.
       upstream stalwart-mail {
@@ -74,6 +76,9 @@ data:
       ssl_certificate_key /etc/nginx/domain.key;
       ssl_session_cache shared:SSL:10m;
       ssl_session_timeout 10m;
+
+      # Enable gzip compression
+      gzip on;
 
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
