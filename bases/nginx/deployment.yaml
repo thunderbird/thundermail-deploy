@@ -52,10 +52,11 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
+              mountPath: /etc/nginx
               subPath: nginx.conf
             - name: ssl-certificate
-              mountPath: /etc/nginx/
+              mountPath: /etc/nginx
+              subPath: domain.crt
       volumes:
         - name: nginx-config
           configMap:
@@ -66,7 +67,7 @@ spec:
                 path: nginx.conf
         - name: ssl-certificate
           secret:
-            secretName: dev-thundermail.com-ssl
+            secretName: ""  # Specify with Kustomize
             optional: false
             items:
               - key: CERTIFICATE_CHAIN
