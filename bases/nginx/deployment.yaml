@@ -65,8 +65,8 @@ spec:
               - key: nginx.conf
                 path: nginx.conf
         - name: ssl-certificate
-          configMap:
-            name: dev-thundermail.com-ssl
+          secret:
+            secretName: dev-thundermail.com-ssl
             optional: false
             items:
               - key: CERTIFICATE_CHAIN
