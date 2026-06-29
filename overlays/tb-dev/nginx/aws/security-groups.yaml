@@ -58,3 +58,14 @@ metadata:
     #   {"id": ""}
 spec:
   vpcID: vpc-0e0f4b8d603d463e0
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - sg-02a94a700e024fc0b  # stalwart-nginx SG

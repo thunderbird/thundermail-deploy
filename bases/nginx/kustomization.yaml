@@ -5,7 +5,7 @@ resources:
   - aws
   - configmap.yaml
   - deployment.yaml
-  - secrets.yaml
+  # - secrets.yaml
   - service.yaml
 
 labels:

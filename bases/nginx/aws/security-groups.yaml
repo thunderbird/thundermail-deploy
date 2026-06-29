@@ -70,3 +70,18 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all ingress"
+
+# --- Build SecurityGroupPolicies matching each pod deployment with each app SG ---
+# (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+spec:
+  podSelector:
+    matchLabels:
+      app: stalwart-nginx
+  securityGroups:
+    groupIds: [] # Populate with Kustomize
