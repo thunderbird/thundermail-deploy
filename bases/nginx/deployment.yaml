@@ -51,26 +51,22 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
           volumeMounts:
-            - name: nginx-config
+            - name: nginx-config-dir
               mountPath: /etc/nginx
-              subPath: nginx.conf
-            - name: ssl-certificate
-              mountPath: /etc/nginx
-              subPath: domain.crt
+              readOnly: true
       volumes:
-        - name: nginx-config
-          configMap:
-            name: nginx-config
-            optional: false
-            items:
-              - key: nginx.conf
-                path: nginx.conf
-        - name: ssl-certificate
-          secret:
-            secretName: ""  # Specify with Kustomize
-            optional: false
-            items:
-              - key: CERTIFICATE_CHAIN
-                path: domain.crt
-              - key: PRIVATE_KEY
-                path: domain.key
+        - name: nginx-config-dir
+          projected:
+            sources:
+              - configMap:
+                  name: nginx-config
+                  items:
+                    - key: nginx.conf
+                      path: nginx.conf
+              - secret:
+                  name: ssl-certificate
+                  items:
+                    - key: CERTIFICATE_CHAIN
+                      path: domain.crt
+                    - key: PRIVATE_KEY
+                      path: domain.key

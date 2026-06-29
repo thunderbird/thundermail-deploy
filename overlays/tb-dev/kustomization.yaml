@@ -34,11 +34,3 @@ patches:
         value:
           name: STALWART_PUBLIC_URL
           value: "https://mail.dev-thundermail.com"
-
-  - target:
-      kind: Deployment
-      name: nginx
-    patch: |
-      - op: replace
-        path: /spec/template/spec/volumes/1/secret/secretName
-        value: dev-thundermail.com-ssl
