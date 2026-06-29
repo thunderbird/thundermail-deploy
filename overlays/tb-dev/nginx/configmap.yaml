@@ -26,14 +26,14 @@ data:
         listen 465;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
-        proxy_pass stalwart-mail;
+        proxy_pass stalwart-mail:465;
       }
 
       server {
         listen 993;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
-        proxy_pass stalwart-mail;
+        proxy_pass stalwart-mail:993;
       }
 
       server {
@@ -41,7 +41,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         
-        proxy_pass stalwart-mail;
+        proxy_pass stalwart-mail:4190;
       }
     }
 
@@ -91,7 +91,7 @@ data:
 
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
-          proxy_pass stalwart-https;
+          proxy_pass stalwart-https:443;
         }
       }
     }
