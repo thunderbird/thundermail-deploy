@@ -1,0 +1,14 @@
+---
+namespace: thundermail
+
+resources:
+  - aws
+  - configmap.yaml
+  - deployment.yaml
+  - secrets.yaml
+  - service.yaml
+
+labels:
+  - pairs:
+      app: nginx
+

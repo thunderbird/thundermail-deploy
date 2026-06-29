@@ -5,7 +5,7 @@ metadata:
   name: stalwart-nginx
   namespace: thundermail
 spec:
-  vpcId: vpc-0e0f4b8d603d463e0
+  vpcID: vpc-0e0f4b8d603d463e0
   ingressRules:
     # Port 80 is a simple health check implemented in the nginx config file. The Kubelet needs
     # access to this port so it knows to keep the container alive.

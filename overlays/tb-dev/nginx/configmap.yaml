@@ -5,18 +5,7 @@ kind: ConfigMap
 metadata:
   name: nginx-config
   namespace: thundermail
-  labels:
-    app.kubernetes.io/name: stalwart-nginx
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
 data:
-  # Provide an appropriate config file for your environment using Kustomize. Most of the config
-  # should remain unchanged. For ease of reading, the items which need to be specified in an
-  # environment are marked with `$TODO_KUSTOMIZE`.
-  #
-  # This secret is an nginx configuration file. nginx has multiple sets of documentation for
-  # different audiences, making it hard to refer to one place for info on this file. The top level
-  # of that documentation is here: https://nginx.org/en/docs/
   nginx.conf: |
     # Nginx does support special mail proxy services --
     #     https://docs.nginx.com/nginx/admin-guide/mail-proxy/mail-proxy/
@@ -81,7 +70,7 @@ data:
         server stalwart-https;
       }
       server {
-        server_name $TODO_KUSTOMIZE;
+        server_name mail.dev-thundermail.com;
         listen 443 ssl;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
