@@ -76,6 +76,12 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all STMPS ingress"
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all STARTTLS ingress"
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
