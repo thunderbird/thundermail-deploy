@@ -69,7 +69,25 @@ spec:
       ipProtocol: tcp
       ipRanges:
         - cidrIP: "0.0.0.0/0"
-          description: "Allow all ingress"
+          description: "Allow all HTTPS ingress"
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all STMPS ingress"
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all IMAPS ingress"
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all ManageSieve ingress"
 
 # --- Build SecurityGroupPolicies matching each pod deployment with each app SG ---
 # (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
