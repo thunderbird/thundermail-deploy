@@ -1,0 +1,9 @@
+---
+namespace: thundermail
+
+resources:
+  - security-groups.yaml
+
+labels:
+  - pairs:
+      app: stalwart-proxy

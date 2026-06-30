@@ -1,0 +1,125 @@
+---
+# Security group for the stalwart-proxy pods
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-proxy
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for Stalwart migration proxy containers
+  name: stalwart-proxy
+  tags:
+    - key: Name
+      value: stalwart-proxy
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    # stalwart-mail has certain private allowances for using port 8080, the management service. This
+    # service is never exposed to public users, and so there is no proxy mechanism for it. The rest
+    # of these are service ports which are exposed through the nginx proxy. We set the migration
+    # proxy up to support those.
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow HTTPS service traffic from the proxy load balancer
+          groupID: "" # Populate with Kustomize
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTPS service traffic from the proxy load balancer
+          groupID: ""  # Populate with Kustomize
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow IMAPS service traffic from the proxy load balancer
+          groupID: ""  # Populate with Kustomize
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the proxy load balancer
+          groupID: ""  # Populate with Kustomize
+
+---
+# Security group for the stalwart-proxy service's load balancer
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-proxy-lb
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  description: SG for public load balancer fronting Stalwart migration proxy containers
+  name: stalwart-proxy-lb
+  tags:
+    - key: Name
+      value: stalwart-proxy-lb
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  vpcID: "" # Populate with Kustomize
+  egressRules:
+    - fromPort: 0
+      toPort: 0
+      ipProtocol: "-1"
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all egress"
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all HTTPS ingress"
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all STMPS ingress"
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all IMAPS ingress"
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all ManageSieve ingress"
+
+# --- Build SecurityGroupPolicies matching each pod deployment with each app SG ---
+# (https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/master/config/crd/bases/vpcresources.k8s.aws_securitygrouppolicies.yaml)
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-proxy
+  namespace: thundermail
+spec:
+  podSelector:
+    matchLabels:
+      app: stalwart-proxy
+  securityGroups:
+    groupIds: [] # Populate with Kustomize
+

@@ -15,14 +15,14 @@ patches:
   - path: nginx/aws/security-groups.yaml
   - path: nginx/configmap.yaml
   - path: nginx/service.yaml
-  - path: stalwart/aws/elasticache.yaml
-  - path: stalwart/aws/s3.yaml
-  - path: stalwart/aws/security-groups.yaml
-  - path: stalwart/aws/subnet-groups.yaml
-  - path: stalwart/configmap.yaml
-  - path: stalwart/secrets.yaml
-  - path: stalwart/service.yaml
-  - path: stalwart/serviceaccount.yaml
+  - path: stalwart-mail/aws/elasticache.yaml
+  - path: stalwart-mail/aws/s3.yaml
+  - path: stalwart-mail/aws/security-groups.yaml
+  - path: stalwart-mail/aws/subnet-groups.yaml
+  - path: stalwart-mail/configmap.yaml
+  - path: stalwart-mail/secrets.yaml
+  - path: stalwart-mail/service.yaml
+  - path: stalwart-mail/serviceaccount.yaml
 
   - target:
       kind: Deployment

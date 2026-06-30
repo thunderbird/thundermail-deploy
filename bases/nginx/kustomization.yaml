@@ -9,5 +9,5 @@ resources:
 
 labels:
   - pairs:
-      app: nginx
+      app: stalwart-nginx
 
