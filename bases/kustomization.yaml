@@ -3,7 +3,7 @@ namespace: thundermail
 
 resources:
   - nginx
-  - stalwart
+  - stalwart-mail
 
 labels:
   - pairs:
