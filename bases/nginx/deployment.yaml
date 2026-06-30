@@ -66,7 +66,7 @@ spec:
               - secret:
                   name: ssl-certificate
                   items:
-                    - key: CERTIFICATE_CHAIN
-                      path: domain.crt
-                    - key: PRIVATE_KEY
-                      path: domain.key
+                    - key: tls.crt
+                      path: tls.crt
+                    - key: tls.key
+                      path: tls.key

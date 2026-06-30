@@ -38,7 +38,7 @@ In Cloudflare (or wherever this domain's DNS zone is hosted), create a CNAME Rec
 When the status is `SUCCESS`, you are ready to proceed.
 
 
-## Export and Format the SSL Certificate for Stalwart
+## Export and Format the SSL Certificate for Stalwart and Nginx
 
 As long as you used the `Export=ENABLED` option in the previous step, exporting a certificate is easy enough:
 
@@ -55,6 +55,16 @@ AWS Certificate Manager requires that you encrypt the key with a passphrase for 
     openssl rsa -in example.com.key -out example.com.key
 
 You'll be prompted for the passphrase, which is `password` (or whatever else you may have used in the previous command), and the key file will be replaced by one without a passphrase.
+
+
+### Using the certificate in Nginx
+
+AWS Secrets Manager doesn't allow for multiline secrets. It converts newline characters into spaces. PEM certificates require newline characters throughout. This means we can't use Secrets Manager to deliver a certificate to Nginx via an ExternalSecret resource like we do for other secret values.
+
+In order to use 
+
+
+### Using the certificate in Stalwart
 
 To use the certificate:
 
