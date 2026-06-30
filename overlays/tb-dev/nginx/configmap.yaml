@@ -72,8 +72,8 @@ data:
       # --- SSL Configuration ---
       # These files are populated as volumes mounted to the pods from secrets drawn from an
       # external secret store.
-      ssl_certificate /etc/nginx/domain.crt;
-      ssl_certificate_key /etc/nginx/domain.key;
+      ssl_certificate /etc/nginx/tls.crt;
+      ssl_certificate_key /etc/nginx/tls.key;
       ssl_session_cache shared:SSL:10m;
       ssl_session_timeout 10m;
   
