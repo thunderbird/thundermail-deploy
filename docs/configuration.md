@@ -61,7 +61,13 @@ You'll be prompted for the passphrase, which is `password` (or whatever else you
 
 AWS Secrets Manager doesn't allow for multiline secrets. It converts newline characters into spaces. PEM certificates require newline characters throughout. This means we can't use Secrets Manager to deliver a certificate to Nginx via an ExternalSecret resource like we do for other secret values.
 
-In order to use 
+In order to use this cert in the nginx config, we have to manually create a TLS secret called `ssl-certificate` in the `thundermail` namespace. Assuming your cert and key can be found at `/tmp/tls.crt` and `/tmp/tls.key`, you should run this command:
+
+    kubectl -n thundermail create secret tls ssl-certificate \
+        --cert /tmp/tls.crt \
+        --key /tmp/tls.key
+
+Nginx is configured to use the secret and keys this command generates.
 
 
 ### Using the certificate in Stalwart
