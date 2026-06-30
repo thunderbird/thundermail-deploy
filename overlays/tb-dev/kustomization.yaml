@@ -14,7 +14,6 @@ images:
 patches:
   - path: nginx/aws/security-groups.yaml
   - path: nginx/configmap.yaml
-  # - path: nginx/secrets.yaml
   - path: nginx/service.yaml
   - path: stalwart/aws/elasticache.yaml
   - path: stalwart/aws/s3.yaml

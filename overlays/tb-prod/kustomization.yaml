@@ -12,6 +12,9 @@ images:
     newTag: v0.16.5
 
 patches:
+  - path: nginx/aws/security-groups.yaml
+  - path: nginx/configmap.yaml
+  - path: nginx/service.yaml
   - path: stalwart/aws/elasticache.yaml
   - path: stalwart/aws/s3.yaml
   - path: stalwart/aws/security-groups.yaml
