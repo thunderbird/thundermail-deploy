@@ -1,0 +1,130 @@
+---
+# ConfigMap containing the nginx configuration file
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: thundermail
+data:
+  nginx.conf: |
+    # Nginx does support special mail proxy services --
+    #     https://docs.nginx.com/nginx/admin-guide/mail-proxy/mail-proxy/
+    # -- but they are built around the needs of legacy mail systems. Stalwart handles these things
+    # for us internally now, and we should allow it to do so. Therefore, we use a standard TCP
+    # reverse proxy configuration for our purposes.
+    #    https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-udp-load-balancer/
+  
+    user nginx;
+    worker_processes auto;
+  
+    error_log stderr;
+    pid /run/nginx.pid;
+  
+    stream {
+      upstream stalwart-smtps {
+        server stalwart-mail:465;
+      }
+  
+      upstream stalwart-imaps {
+        server stalwart-mail:993;
+      }
+  
+      upstream stalwart-managesieve {
+        server stalwart-mail:4190;
+      }
+  
+      server {
+        listen 465;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+        proxy_pass stalwart-smtps;
+      }
+  
+      server {
+        listen 993;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+        proxy_pass stalwart-imaps;
+      }
+  
+      server {
+        listen 4190;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+        
+        proxy_pass stalwart-managesieve;
+      }
+    }
+  
+    # HTTP traffic to Stalwart is always encrypted. We need to decrypt it here so we can determine
+    # if the traffic, based on the HTTP path, is permissible. While most of Stalwart's API functions
+    # are acceptable or required for users to access, we wish to deny access to any administrative
+    # functions, even user account self-service functions (since these are handled instead by our
+    # own thunderbird-accounts project). All other HTTP-based traffic is sent on to the real
+    # Stalwart host upstream.
+    #
+    # Documentation for HTTP server configuration can be found here:
+    # https://nginx.org/en/docs/http/configuring_https_servers.html
+  
+    events {}
+  
+    http {
+      # --- SSL Configuration ---
+      # These files are populated as volumes mounted to the pods from secrets drawn from an
+      # external secret store.
+      ssl_certificate /etc/nginx/tls.crt;
+      ssl_certificate_key /etc/nginx/tls.key;
+      ssl_session_cache shared:SSL:10m;
+      ssl_session_timeout 10m;
+  
+      # Enable gzip compression
+      gzip on;
+  
+      upstream stalwart-https {
+        # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
+        # internal sources.
+        server stalwart-https:443;
+      }
+  
+      server {
+        # This server_name will have to change as we get "Real Prod" ready
+        server_name *.tb.email;
+        listen 443 ssl;
+        keepalive_timeout 60s;
+        proxy_connect_timeout 1s;
+  
+        # Specifically block access to these routes
+        location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
+          return 404;
+        }
+  
+        location ^~ /admin {  # Stalwart's web admin console, only accessible by private route
+          return 404;
+        }
+  
+        location ^~ /api {  # Stalwart's underlying API system, only accessible by private route
+          return 404;
+        }
+  
+        # All other routes are acceptable, and should be proxied to the backend
+        location ^~ / {
+          proxy_pass https://stalwart-https;
+          proxy_set_header Host mail.dev-thundermail.com;
+          proxy_ssl_name mail.dev-thundermail.com;
+        }
+      }
+  
+      # Small HTTP server to serve health checks for the nginx service itself.
+      server {
+        listen 80;
+        # Return 200s for calls to exactly `/` (no subpaths)
+        location = / {
+          return 200;
+        }
+        # Return 404s for anything else
+        location / {
+          return 404;
+        }
+      }
+    }
+

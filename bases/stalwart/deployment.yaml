@@ -27,10 +27,10 @@ spec:
           imagePullPolicy: IfNotPresent
           resources:
             requests:
-              cpu: 1
+              cpu: "1"
               memory: 2Gi
             limits:
-              cpu: 2
+              cpu: "2"
               memory: 4Gi
           args:
             - "--config"
@@ -73,16 +73,15 @@ spec:
             # - name: STALWART_ROLE
             #   value:
           ports:
+            - name: https
+              containerPort: 443
             - name: smtps
               containerPort: 465
-            - name: submission
-              containerPort: 587
             - name: imaps
               containerPort: 993
             - name: sieve
               containerPort: 4190
-            - name: https
-              containerPort: 443
+            # Port 8080 is exposed at the pod level, but not as a public-facing service
             - name: mgmt
               containerPort: 8080
           livenessProbe:

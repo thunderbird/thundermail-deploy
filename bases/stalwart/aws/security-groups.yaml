@@ -83,7 +83,6 @@ spec:
         - groupID: "" # Populate with Kustomize
           description: Kubelet probes from EKS cluster SG
 
-
 # --- Build security groups for each backend service (Redis) allowing access from the app SGs ---
 ---
 # SG for the Redis host

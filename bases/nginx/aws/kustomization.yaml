@@ -2,9 +2,9 @@
 namespace: thundermail
 
 resources:
-  - nginx
-  - stalwart
+  - security-groups.yaml
 
 labels:
   - pairs:
       app: stalwart
+

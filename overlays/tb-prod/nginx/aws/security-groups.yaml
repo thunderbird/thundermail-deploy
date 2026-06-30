@@ -1,0 +1,69 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+    # services.k8s.aws/adoption-fields: |
+    #   {"id": "sg-02a94a700e024fc0b"}
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    # Port 80 is a simple health check implemented in the nginx config file. The Kubelet needs
+    # access to this port so it knows to keep the container alive.
+    - fromPort: 80
+      toPort: 80
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+          groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
+    # The rest of these ports are service ports the load balancer publicizes. These container ports
+    # are exposed only to the load balancer.
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow HTTPS service traffic from the public nginx load balancer
+          groupID: "" # stalwart-nginx-lb
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTPS service traffic from the public nginx load balancer
+          groupID: "" # stalwart-nginx-lb
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow IMAPS service traffic from the public nginx load balancer
+          groupID: "" # stalwart-nginx-lb
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the public nginx load balancer
+          groupID: "" # stalwart-nginx-lb
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx-lb
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - ""  # stalwart-nginx SG

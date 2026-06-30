@@ -5,13 +5,13 @@
 - `kustomization.yaml`: Root configuration for the Kustomize configuration. Seeds the inventory for
     the base manifests.
 - `bases`: Contains the base manifests to Kustomize. Key environment-specific information is omitted in these files.
-    - `aws`: Contains the base manifests describing AWS ACK resources.
-        - `elasticache.yaml`: Stalwart's Redis cache
-        - `kustomization.yaml`: Kustomize inventory for AWS resources
-        - `s3.yaml`: Stalwart's blob storage bucket
-        - `security-groups.yaml`: Security groups used by other resources, including per-pod security groups
-        - `subnet-groups.yaml`: VPC subnet groups for use with managed data stores
     - `stalwart`: Contains the base manifests describing the Stalwart installation
+        - `aws`: Contains the base manifests describing AWS ACK resources for Stalwart.
+            - `elasticache.yaml`: Stalwart's Redis cache
+            - `kustomization.yaml`: Kustomize inventory for AWS resources
+            - `s3.yaml`: Stalwart's blob storage bucket
+            - `security-groups.yaml`: Security groups used by other resources, including per-pod security groups
+            - `subnet-groups.yaml`: VPC subnet groups for use with managed data stores
         - `configmap.yaml`: The minimal config file for Stalwart
         - `deployment.yaml`: The Stalwart deployment
         - `kustomization.yaml`: Kustomize inventory for Stalwart resources

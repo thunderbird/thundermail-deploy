@@ -7,6 +7,9 @@ metadata:
 spec:
   vpcID: vpc-0e0f4b8d603d463e0
   ingressRules:
+    # Port 8080 is the managmement service port, which we do not wish to expose except through the
+    # Tailscale meshnet. These allowances permit health checks from the Kubernetes cluster and
+    # debug traffic from other stalwart pods (for using stalwart-cli, for example).
     - fromPort: 8080
       toPort: 8080
       ipProtocol: tcp
@@ -15,38 +18,46 @@ spec:
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
         - description: Allow management port traffic only from other stalwart-server sources
           groupID: sg-0225f0469688b6324 # stalwart-server
-    - fromPort: 465
-      toPort: 465
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow SMTPS service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
-    - fromPort: 587
-      toPort: 587
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow SMTP Submission service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
-    - fromPort: 993
-      toPort: 993
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow IMAPS service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
-    - fromPort: 4190
-      toPort: 4190
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow ManageSieve service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
+    # The rest of these are service ports which we will expose only to the nginx containers and
+    # other private access routes.
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow HTTPS service traffic from the public stalwart load balancer
-          groupID: sg-093b77d2d5256b162  # k8s-thunderm-stalwart-f5b929f0d2
+        - description: Allow HTTPS service traffic from the nginx containers
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
         - description: Allow HTTPS service traffic from the private stalwart load balancer
           groupID: sg-003b6b400b4c35131  # stalwart-admin-lb
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTPS service traffic from the nginx containers
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow IMAPS service traffic from the nginx containers
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the nginx containers
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - sg-07624df6ceb8865ec  # EKS cluster
+      - sg-0225f0469688b6324  # Stalwart pods
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
@@ -69,18 +80,6 @@ spec:
           groupID: sg-0a711c607f9e0b959
         - description: Allow access from Accounts Celery in stage
           groupID: sg-02700bcc4c090da45
-
----
-apiVersion: vpcresources.k8s.aws/v1beta1
-kind: SecurityGroupPolicy
-metadata:
-  name: stalwart-server
-  namespace: thundermail
-spec:
-  securityGroups:
-    groupIds:
-      - sg-07624df6ceb8865ec  # EKS cluster
-      - sg-0225f0469688b6324  # Stalwart pods
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
