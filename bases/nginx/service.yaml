@@ -39,4 +39,3 @@ spec:
     - name: sieve
       port: 4190
       targetPort: sieve
-

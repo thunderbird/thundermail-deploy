@@ -77,3 +77,22 @@ spec:
     - name: https
       port: 443
       targetPort: https
+
+---
+# The stalwart-mgmt service creates a ClusterIP Service which is used by Tailscale for private
+# management access. This service/port is not exposed outside of the cluster. Technically, other
+# services on the cluster can access this as well, though we should avoid that.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-mgmt
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart
+  ports:
+    - name: mgmt
+      port: 8080
+      targetPort: mgmt
