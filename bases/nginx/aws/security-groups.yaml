@@ -46,7 +46,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  description: SG for private Stalwart admin access via load balancer
+  description: SG for public Stalwart service access via the nginx proxy
   name: stalwart-nginx-lb
   tags:
     - key: Name
