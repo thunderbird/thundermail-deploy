@@ -1,0 +1,33 @@
+# A Redis cluster for the proxy to store its mappings in. This must be redundant because the
+# mappings cannot be determined from system state if the backend data is lost.
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: ServerlessCache
+metadata:
+  name: stalwart-proxy-redis
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  serverlessCacheName: stalwart-proxy-redis
+  description: "Stalwart Proxy Redis - Account migration mappings"
+  engine: redis
+  majorEngineVersion: "7"
+  cacheNodeType: cache.t3.micro
+  cacheSubnetGroupName: stalwart-proxy-redis-subnet-group
+  securityGroupRefs:
+    - from:
+        namespace: thundermail
+        name: stalwart-proxy-elasticache-redis
+  subnetRefs:
+    - from:
+        namespace: thundermail
+        name: mzla-tb-dev-private-eu-central-1a
+    - from:
+        namespace: thundermail
+        name: mzla-tb-dev-private-eu-central-1b
+  tags:
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack

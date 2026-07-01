@@ -3,12 +3,11 @@ namespace: thundermail
 
 resources:
   - aws
-  # - configmap.yaml
-  # - deployment.yaml
-  # - secrets.yaml
-  # - service.yaml
-  # - serviceaccount.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - secrets.yaml
+  - service.yaml
 
 labels:
   - pairs:
-      app: stalwart-proxy
+      app: stalwart-migration-proxy

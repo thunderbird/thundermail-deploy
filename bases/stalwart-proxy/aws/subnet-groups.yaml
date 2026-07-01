@@ -1,0 +1,20 @@
+---
+# Subnet group for the Redis instance used by Stalwart's proxy service
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: CacheSubnetGroup
+metadata:
+  name: stalwart-proxy-redis-subnet-group
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cacheSubnetGroupName: stalwart-proxy-redis-subnet-group
+  cacheSubnetGroupDescription: "Stalwart Proxy Redis subnet group"
+  subnetIDs: []  # Set appropriate values with Kustomize patch
+  tags:
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+
+
