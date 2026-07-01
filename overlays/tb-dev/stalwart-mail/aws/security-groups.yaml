@@ -34,6 +34,12 @@ spec:
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the nginx containers
           groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow STARTTLS service traffic from the nginx containers
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp

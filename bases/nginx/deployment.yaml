@@ -30,6 +30,8 @@ spec:
           ports:
             - name: smtps
               containerPort: 465
+            - name: starttls
+              containerPort: 587
             - name: imaps
               containerPort: 993
             - name: sieve

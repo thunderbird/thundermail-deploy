@@ -19,6 +19,9 @@ spec:
     - name: smtps
       port: 465
       targetPort: smtps
+    - name: starttls
+      port: 587
+      targetPort: starttls
     - name: imaps
       port: 993
       targetPort: imaps
