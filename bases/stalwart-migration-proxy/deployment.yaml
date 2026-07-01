@@ -40,6 +40,11 @@ spec:
             # Location of the proxy's config file
             - name: PROXY_CONFIG
               value: "/etc/proxy/config.toml"
+            
+            # Override the log level here, or in the config map with the log_level option. Valid
+            # values are listed here: https://docs.rs/log/latest/log/enum.Level.html
+            # - name: RUST_LOG
+            #   value: "info"
 
             # Bearer token
             - name: PROXY_ADMIN_TOKEN

@@ -1,0 +1,8 @@
+---
+# The stalwart-migration-proxy-redis service just maps back to the Serverless Redis cache's endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy-redis
+spec:
+  externalName: "" # Redis endpoint
