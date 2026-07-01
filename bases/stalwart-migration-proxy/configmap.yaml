@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: stalwart-proxy-config
+  name: stalwart-migration-proxy-config
   labels:
-    app.kubernetes.io/name: stalwart-proxy
+    app.kubernetes.io/name: stalwart-migration-proxy-config
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 data:
@@ -195,7 +195,7 @@ data:
     # that allows us to run the proxy in redundant fashion. It also prevents us from having to check
     # credentials into this repo in plaintext.
     [mapping.redis]
-    url = "redis://stalwart-proxy-redis:6379"
+    url = "redis://stalwart-migration-proxy-redis:6379"
     key_prefix = "route:"
 
     # The admin block exposes the internal API that we use to manage accounts. This needs to be

@@ -45,8 +45,8 @@ spec:
             - name: PROXY_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: stalwart-proxy-bearer-token
-                  key: STALWART_PROXY_BEARER_TOKEN
+                  name: stalwart-migration-proxy-bearer-token
+                  key: STALWART_MIGRATION_PROXY_BEARER_TOKEN
               
           ports:
             - name: https

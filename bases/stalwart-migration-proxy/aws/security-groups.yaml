@@ -3,16 +3,16 @@
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
-  name: stalwart-proxy-elasticache-redis
+  name: stalwart-migration-proxy-elasticache-redis
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   description: SG for the Stalwart proxys Redis instance on ElastiCache
-  name: stalwart-proxy-elasticache-redis
+  name: stalwart-migration-proxy-elasticache-redis
   tags:
     - key: Name
-      value: stalwart-proxy-elasticache-redis
+      value: stalwart-migration-proxy-elasticache-redis
     - key: application
       value: thundermail
     - key: managed-by
@@ -34,20 +34,20 @@ spec:
           groupID: "" # Populate with Kustomize
 
 ---
-# Security group for the stalwart-proxy pods
+# Security group for the stalwart-migration-proxy pods
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
-  name: stalwart-proxy
+  name: stalwart-migration-proxy
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   description: SG for Stalwart migration proxy containers
-  name: stalwart-proxy
+  name: stalwart-migration-proxy
   tags:
     - key: Name
-      value: stalwart-proxy
+      value: stalwart-migration-proxy
     - key: application
       value: thundermail
     - key: managed-by
@@ -91,20 +91,20 @@ spec:
           groupID: ""  # Populate with Kustomize
 
 ---
-# Security group for the stalwart-proxy service's load balancer
+# Security group for the stalwart-migration-proxy service's load balancer
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
-  name: stalwart-proxy-lb
+  name: stalwart-migration-proxy-lb
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   description: SG for public load balancer fronting Stalwart migration proxy containers
-  name: stalwart-proxy-lb
+  name: stalwart-migration-proxy-lb
   tags:
     - key: Name
-      value: stalwart-proxy-lb
+      value: stalwart-migration-proxy-lb
     - key: application
       value: thundermail
     - key: managed-by
@@ -149,12 +149,12 @@ spec:
 apiVersion: vpcresources.k8s.aws/v1beta1
 kind: SecurityGroupPolicy
 metadata:
-  name: stalwart-proxy
+  name: stalwart-migration-proxy
   namespace: thundermail
 spec:
   podSelector:
     matchLabels:
-      app: stalwart-proxy
+      app: stalwart-migration-proxy
   securityGroups:
     groupIds: [] # Populate with Kustomize
 

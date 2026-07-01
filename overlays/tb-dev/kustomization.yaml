@@ -23,7 +23,7 @@ patches:
   - path: stalwart-mail/secrets.yaml
   - path: stalwart-mail/service.yaml
   - path: stalwart-mail/serviceaccount.yaml
-  - path: stalwart-proxy/aws/security-groups.yaml
+  - path: stalwart-migration-proxy/aws/security-groups.yaml
 
   - target:
       kind: Deployment

@@ -70,6 +70,11 @@ In order to use this cert in the nginx config, we have to manually create a TLS 
 Nginx is configured to use the secret and keys this command generates.
 
 
+### Using the certificate in Stalwart Migration Proxy
+
+The Stalwart Migration Proxy terminates SSL using the same cert as our backend. If you have followed the above instructions on using the certificate in Nginx, then you will have created the `ssl-certificate` secret already. The migration proxy reads this same secret to handle its own SSL configuration.
+
+
 ### Using the certificate in Stalwart
 
 To use the certificate:

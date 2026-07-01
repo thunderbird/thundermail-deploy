@@ -1,9 +1,9 @@
 ---
-# The stalwart-proxy-redis service just maps back to the Serverless Redis cache's endpoint
+# The stalwart-migration-proxy-redis service just maps back to the Serverless Redis cache's endpoint
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart-proxy-redis
+  name: stalwart-migration-proxy-redis
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
@@ -44,7 +44,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart-proxy-api
+  name: stalwart-migration-proxy-api
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:

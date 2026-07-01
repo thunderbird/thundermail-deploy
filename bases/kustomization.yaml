@@ -4,4 +4,4 @@ namespace: thundermail
 resources:
   - nginx
   - stalwart-mail
-  - stalwart-proxy
+  - stalwart-migration-proxy

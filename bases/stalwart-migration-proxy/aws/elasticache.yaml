@@ -4,21 +4,21 @@
 apiVersion: elasticache.services.k8s.aws/v1alpha1
 kind: ServerlessCache
 metadata:
-  name: stalwart-proxy-redis
+  name: stalwart-migration-proxy-redis
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
-  serverlessCacheName: stalwart-proxy-redis
+  serverlessCacheName: stalwart-migration-proxy-redis
   description: "Stalwart Proxy Redis - Account migration mappings"
   engine: redis
   majorEngineVersion: "7"
   cacheNodeType: cache.t3.micro
-  cacheSubnetGroupName: stalwart-proxy-redis-subnet-group
+  cacheSubnetGroupName: stalwart-migration-proxy-redis-subnet-group
   securityGroupRefs:
     - from:
         namespace: thundermail
-        name: stalwart-proxy-elasticache-redis
+        name: stalwart-migration-proxy-elasticache-redis
   subnetRefs:
     - from:
         namespace: thundermail
