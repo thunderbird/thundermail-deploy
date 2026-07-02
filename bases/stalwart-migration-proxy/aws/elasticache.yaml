@@ -13,8 +13,6 @@ spec:
   description: "Stalwart Proxy Redis - Account migration mappings"
   engine: redis
   majorEngineVersion: "7"
-  cacheNodeType: cache.t3.micro
-  cacheSubnetGroupName: stalwart-migration-proxy-redis-subnet-group
   securityGroupRefs:
     - from:
         namespace: thundermail
