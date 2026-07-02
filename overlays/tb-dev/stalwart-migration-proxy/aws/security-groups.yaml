@@ -16,7 +16,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow traffic from Stalwart Proxy server containers
-          groupID: "" # stalwart-migration-proxy SG
+          groupID: "sg-05be6ce3e3ead45fc" # stalwart-migration-proxy SG
 
 ---
 # Security group for the stalwart-migration-proxy pods
