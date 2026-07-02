@@ -17,14 +17,7 @@ spec:
     - from:
         namespace: thundermail
         name: stalwart-migration-proxy-elasticache-redis
-  subnets: [] # Populate with Kustomize
-  subnetRefs:
-    - from:
-        namespace: thundermail
-        name: mzla-tb-dev-private-eu-central-1a
-    - from:
-        namespace: thundermail
-        name: mzla-tb-dev-private-eu-central-1b
+  subnetIDs: [] # Populate with Kustomize
   tags:
     - key: application
       value: thundermail

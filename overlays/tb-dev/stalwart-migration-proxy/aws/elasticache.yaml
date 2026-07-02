@@ -5,6 +5,6 @@ metadata:
   name: stalwart-migration-proxy-redis
   namespace: thundermail
 spec:
-  subnets: 
+  subnetIDs: 
     - subnet-044e18f3022fb9ee1
     - subnet-01084662e5e16dce9
