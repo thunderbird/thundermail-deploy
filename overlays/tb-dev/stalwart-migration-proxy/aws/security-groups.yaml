@@ -5,6 +5,9 @@ kind: SecurityGroup
 metadata:
   name: stalwart-migration-proxy-elasticache-redis
   namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+
 spec:
   vpcID: vpc-0e0f4b8d603d463e0
   ingressRules:

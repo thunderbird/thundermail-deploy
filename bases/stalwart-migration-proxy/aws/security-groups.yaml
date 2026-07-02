@@ -7,6 +7,7 @@ metadata:
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
   description: SG for the Stalwart proxys Redis instance on ElastiCache
   name: stalwart-migration-proxy-elasticache-redis
@@ -42,6 +43,7 @@ metadata:
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
   description: SG for Stalwart migration proxy containers
   name: stalwart-migration-proxy
@@ -99,6 +101,7 @@ metadata:
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
   description: SG for public load balancer fronting Stalwart migration proxy containers
   name: stalwart-migration-proxy-lb
