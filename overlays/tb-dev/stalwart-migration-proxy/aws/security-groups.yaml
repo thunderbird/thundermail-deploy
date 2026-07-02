@@ -32,31 +32,31 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the proxy load balancer
-          groupID: "" # stalwart-migration-proxy-lb
+          groupID: "sg-00ae5ff1222f7f3b8" # stalwart-migration-proxy-lb
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-00ae5ff1222f7f3b8"  # stalwart-migration-proxy-lb
     - fromPort: 587
       toPort: 587
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow STARTTLS submission traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-00ae5ff1222f7f3b8"  # stalwart-migration-proxy-lb
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-00ae5ff1222f7f3b8"  # stalwart-migration-proxy-lb
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-00ae5ff1222f7f3b8"  # stalwart-migration-proxy-lb
 
 ---
 # Security group for the stalwart-migration-proxy service's load balancer
@@ -69,7 +69,7 @@ spec:
   vpcID: vpc-0e0f4b8d603d463e0
 
 ---
-# Security group policy attaching the migrationi proxy security group to its pods
+# Security group policy attaching the migration proxy security group to its pods
 apiVersion: vpcresources.k8s.aws/v1beta1
 kind: SecurityGroupPolicy
 metadata:
@@ -80,6 +80,4 @@ spec:
     matchLabels:
       app: stalwart-migration-proxy
   securityGroups:
-    groupIds: [] # stalwart-migration-proxy-lb
-
-
+    groupIds: ["sg-00ae5ff1222f7f3b8"] # stalwart-migration-proxy-lb
