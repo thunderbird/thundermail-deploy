@@ -1,0 +1,10 @@
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: ServerlessCache
+metadata:
+  name: stalwart-migration-proxy-redis
+  namespace: thundermail
+spec:
+  subnetIDs: 
+    - subnet-044e18f3022fb9ee1
+    - subnet-01084662e5e16dce9
