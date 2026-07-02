@@ -17,6 +17,7 @@ spec:
     - from:
         namespace: thundermail
         name: stalwart-migration-proxy-elasticache-redis
+  subnets: [] # Populate with Kustomize
   subnetRefs:
     - from:
         namespace: thundermail
