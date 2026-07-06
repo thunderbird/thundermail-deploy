@@ -1,8 +1,17 @@
 ---
-# The stalwart-migration-proxy-redis service just maps back to the Serverless Redis cache's endpoint
+# The stalwart-migration-proxy-redis-write service maps to the Serverless Redis cache's master endpoint
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart-migration-proxy-redis
+  name: stalwart-migration-proxy-redis-write
 spec:
-  externalName: "" # Redis endpoint
+  externalName: "master.stalwart-migration-proxy-redis.psueny.euc1.cache.amazonaws.com"
+
+---
+# The stalwart-migration-proxy-redis-read service maps to the Serverless Redis cache's reader endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy-redis-read
+spec:
+  externalName: "replica.stalwart-migration-proxy-redis.psueny.euc1.cache.amazonaws.com"
