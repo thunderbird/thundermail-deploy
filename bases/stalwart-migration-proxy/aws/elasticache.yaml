@@ -2,22 +2,28 @@
 # mappings cannot be determined from system state if the backend data is lost.
 ---
 apiVersion: elasticache.services.k8s.aws/v1alpha1
-kind: ServerlessCache
+kind: ReplicationGroup
 metadata:
   name: stalwart-migration-proxy-redis
   namespace: thundermail
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
-  serverlessCacheName: stalwart-migration-proxy-redis
+  replicationGroupID: stalwart-migration-proxy-redis
   description: "Stalwart Proxy Redis - Account migration mappings"
   engine: redis
-  majorEngineVersion: "7"
+  engineVersion: "7.1"
+  cacheNodeType: cache.t3.micro
+  numNodeGroups: 1
+  replicasPerNodeGroup: 1
+  cacheSubnetGroupName: stalwart-redis-migration-proxy-subnet-group
   securityGroupRefs:
     - from:
-        namespace: thundermail
         name: stalwart-migration-proxy-elasticache-redis
-  subnetIDs: [] # Populate with Kustomize
+        namespace: thundermail
+  transitEncryptionEnabled: true
+  atRestEncryptionEnabled: true
+  automaticFailoverEnabled: false
   tags:
     - key: application
       value: thundermail

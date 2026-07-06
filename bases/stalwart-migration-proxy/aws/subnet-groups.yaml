@@ -1,0 +1,19 @@
+---
+# ElastiCache Redis for Stalwart's migration proxy to use when tracking account migrations.
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: CacheSubnetGroup
+metadata:
+  name: stalwart-migration-proxy-redis-subnet-group
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cacheSubnetGroupName: stalwart-redis-migration-proxy-subnet-group
+  cacheSubnetGroupDescription: "Stalwart migration proxy Redis subnet group"
+  subnetIDs: []  # Set appropriate values with Kustomize patch
+  tags:
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+

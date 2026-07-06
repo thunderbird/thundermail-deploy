@@ -4,6 +4,7 @@ namespace: thundermail
 resources:
   - elasticache.yaml
   - security-groups.yaml
+  - subnet-groups.yaml
 
 labels:
   - pairs:
