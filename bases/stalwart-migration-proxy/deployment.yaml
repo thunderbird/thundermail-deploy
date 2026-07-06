@@ -33,9 +33,6 @@ spec:
             limits:
               cpu: "1"
               memory: 2Gi
-          args:
-            - "--config"
-            - "/etc/stalwart/config.json"
           env:
             # Location of the proxy's config file
             - name: PROXY_CONFIG
@@ -81,14 +78,14 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - name: proxy-config-dir
-              mountPath: /etc/proxy/
+              mountPath: /etc/proxy
               readOnly: true
       volumes:
         - name: proxy-config-dir
           projected:
             sources:
               - configMap:
-                  name: proxy-config
+                  name: stalwart-migration-proxy-config
                   items:
                     - key: config.toml
                       path: config.toml

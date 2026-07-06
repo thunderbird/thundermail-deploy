@@ -42,31 +42,31 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the proxy load balancer
-          groupID: "sg-0e92140ae622913ff" # stalwart-migration-proxy-lb
+          groupID: "sg-07db1ae5d1b0b991f" # stalwart-migration-proxy-lb
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the proxy load balancer
-          groupID: "sg-0e92140ae622913ff"  # stalwart-migration-proxy-lb
+          groupID: "sg-07db1ae5d1b0b991f"  # stalwart-migration-proxy-lb
     - fromPort: 587
       toPort: 587
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow STARTTLS submission traffic from the proxy load balancer
-          groupID: "sg-0e92140ae622913ff"  # stalwart-migration-proxy-lb
+          groupID: "sg-07db1ae5d1b0b991f"  # stalwart-migration-proxy-lb
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the proxy load balancer
-          groupID: "sg-0e92140ae622913ff"  # stalwart-migration-proxy-lb
+          groupID: "sg-07db1ae5d1b0b991f"  # stalwart-migration-proxy-lb
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the proxy load balancer
-          groupID: "sg-0e92140ae622913ff"  # stalwart-migration-proxy-lb
+          groupID: "sg-07db1ae5d1b0b991f"  # stalwart-migration-proxy-lb
 
 ---
 # Security group policy attaching the migration proxy security group to its pods
@@ -80,4 +80,4 @@ spec:
     matchLabels:
       app: stalwart-migration-proxy
   securityGroups:
-    groupIds: ["sg-0e92140ae622913ff"] # stalwart-migration-proxy-lb
+    groupIds: ["sg-07db1ae5d1b0b991f"] # stalwart-migration-proxy-lb

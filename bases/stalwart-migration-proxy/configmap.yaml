@@ -34,14 +34,14 @@ data:
     # This value needs to correspond to the Deployment's terminationGracePeriodSeconds option.
     # See shutdown_grace here: https://stalw.art/docs/migration/proxy/configuration/#server-options
     # And terminationGracePeriodSeconds here: https://stalw.art/docs/migration/proxy/configuration/#server-options
-    shutdown_grace = 30s
+    shutdown_grace = "30s"
 
     # These options should probably remain unset considering that our backend hosts are load
     # balancers. If the LB counts as one host, then that's a full outage at the proxy level. We
     # should ensure our autoscaling is appropriate so this doesn't happen.
     # https://stalw.art/docs/migration/proxy/destinations/#health-and-resilience
     # host_down_threshold = 5
-    # host_down_cooldown = 30s
+    # host_down_cooldown = "30s"
     # backend_connect_retries = 1
 
     # Override the log level here, or with the RUST_LOG env-var. Valid values are listed here:

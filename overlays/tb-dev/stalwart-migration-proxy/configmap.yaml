@@ -11,7 +11,7 @@ data:
     [server]
     threads = 0
     hostname = ""
-    shutdown_grace = 30s
+    shutdown_grace = "30s"
 
     # Override the log level here, or with the RUST_LOG env-var. Valid values are listed here:
     # https://docs.rs/log/latest/log/enum.Level.html
@@ -69,7 +69,7 @@ data:
     [destination.tb-dev-thundermail.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = true
+    forwarding = "proxy"
     
     [destination.tb-dev-thundermail.protocol.smtp]
     port = 465
