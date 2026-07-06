@@ -94,32 +94,32 @@ data:
     [listener.https]
     protocol = "http"
     proxy_protocol = "off"
-    forwarded = "on"  # Not sure about this value, since the docs only describe the "off" value.
-    bind = ["0.0.0.0:443", "[::]:443"]
+    forwarded = "off"
+    bind = ["0.0.0.0:443"]
     tls = "implicit"
 
     [listener.submissions]
     protocol = "submission"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:465", "[::]:465"]
+    bind = ["0.0.0.0:465"]
     tls = "implicit"
 
     [listener.submission]
     protocol = "submission"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:587", "[::]:587"]
+    bind = ["0.0.0.0:587"]
     tls = "starttls"
 
     [listener.imaps]
     protocol = "imap"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:993", "[::]:993"]
+    bind = ["0.0.0.0:993"]
     tls = "implicit"
 
     [listener.managesieve]
     protocol = "managesieve"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:4190", "[::]:4190"]
+    bind = ["0.0.0.0:4190"]
     tls = "starttls"
 
     [mapping]
@@ -131,7 +131,7 @@ data:
     key_prefix = "route:"
 
     [admin]
-    bind = "[::]:8080"
+    bind = "0.0.0.0:8080"
     tls = "implicit"
 
     [routing]

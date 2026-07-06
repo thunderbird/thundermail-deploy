@@ -21,9 +21,9 @@ spec:
     - from:
         name: stalwart-migration-proxy-elasticache-redis
         namespace: thundermail
-  transitEncryptionEnabled: true
+  transitEncryptionEnabled: false
   atRestEncryptionEnabled: true
-  automaticFailoverEnabled: false
+  automaticFailoverEnabled: true
   tags:
     - key: application
       value: thundermail

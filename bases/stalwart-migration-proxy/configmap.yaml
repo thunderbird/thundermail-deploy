@@ -146,32 +146,32 @@ data:
     [listener.https]
     protocol = "http"
     proxy_protocol = "off"
-    forwarded = "on"  # Not sure about this value, since the docs only describe the "off" value.
-    bind = ["0.0.0.0:443", "[::]:443"]
+    forwarded = "off"
+    bind = ["0.0.0.0:443"]
     tls = "implicit"
 
     [listener.submissions]
     protocol = "submission"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:465", "[::]:465"]
+    bind = ["0.0.0.0:465"]
     tls = "implicit"
 
     [listener.submission]
     protocol = "submission"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:587", "[::]:587"]
+    bind = ["0.0.0.0:587"]
     tls = "starttls"
 
     [listener.imaps]
     protocol = "imap"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:993", "[::]:993"]
+    bind = ["0.0.0.0:993"]
     tls = "implicit"
 
     [listener.managesieve]
     protocol = "managesieve"
     proxy_protocol = "off"
-    bind = ["0.0.0.0:4190", "[::]:4190"]
+    bind = ["0.0.0.0:4190"]
     tls = "starttls"
 
     # Opting not to set any capabilities options, relying on the defaults. If we want to change
@@ -200,9 +200,11 @@ data:
     key_prefix = "route:"
 
     # The admin block exposes the internal API that we use to manage accounts. This needs to be
-    # exposed to TailScale for human use and to Accounts for API use.
+    # exposed to TailScale for human use and to Accounts for API use. TLS must be "implicit" here.
+    # No other value is supported, resulting in an error: "invalid configuration: configuration
+    # error: admin.tls must be implicit (plaintext admin is rejected)"
     [admin]
-    bind = "[::]:8080"
+    bind = "0.0.0.0:8080"
     tls = "implicit"
 
     # This would be the token we use to auth against this env, but we override this with the

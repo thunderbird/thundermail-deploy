@@ -68,12 +68,14 @@ spec:
             httpGet:
               path: /healthz
               port: proxy-api
+              scheme: HTTPS
             initialDelaySeconds: 30
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /healthz
               port: proxy-api
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
