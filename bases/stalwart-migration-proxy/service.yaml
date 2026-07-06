@@ -1,21 +1,9 @@
 ---
-# The stalwart-migration-proxy-redis-write service maps to the Serverless Redis cache's master endpoint
+# The stalwart-migration-proxy-redis service maps to the Serverless Redis cache's master endpoint
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart-migration-proxy-redis-write
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  type: ExternalName
-  externalName: "" # Populate with Kustomize
-
----
-# The stalwart-migration-proxy-redis-read service maps to the Serverless Redis cache's reader endpoint
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-migration-proxy-redis-read
+  name: stalwart-migration-proxy-redis
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
