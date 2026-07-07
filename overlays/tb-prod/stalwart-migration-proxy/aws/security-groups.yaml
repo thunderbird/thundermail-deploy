@@ -42,31 +42,31 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the proxy load balancer
-          groupID: "" # stalwart-migration-proxy-lb
+          groupID: "sg-0f7d53a231acfb6fd" # stalwart-migration-proxy-lb
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-0f7d53a231acfb6fd"  # stalwart-migration-proxy-lb
     - fromPort: 587
       toPort: 587
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow STARTTLS submission traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-0f7d53a231acfb6fd"  # stalwart-migration-proxy-lb
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-0f7d53a231acfb6fd"  # stalwart-migration-proxy-lb
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the proxy load balancer
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-0f7d53a231acfb6fd"  # stalwart-migration-proxy-lb
     # Port 8080 is the managmement service port, which we do not wish to expose except through the
     # Tailscale meshnet. These allowances permit health checks from the Kubernetes cluster and
     # debug traffic from other stalwart pods (for using stalwart-cli, for example).
@@ -77,7 +77,7 @@ spec:
         - description: Kubelet probes from EKS cluster SG
           groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
         - description: Allow API traffic from the proxy load balancer for health checks
-          groupID: ""  # stalwart-migration-proxy-lb
+          groupID: "sg-0f7d53a231acfb6fd"  # stalwart-migration-proxy-lb
 
 ---
 # Security group policy attaching the migration proxy security group to its pods
