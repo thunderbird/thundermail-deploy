@@ -1,0 +1,61 @@
+---
+# The stalwart-migration-proxy-redis service maps to the Serverless Redis cache's master endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy-redis
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ExternalName
+  externalName: "" # Populate with Kustomize
+
+---
+# Creates an internal access point for the Stalwart migration proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart-migration-proxy
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+    - name: smtps
+      port: 465
+      targetPort: smtps
+    - name: starttls
+      port: 587
+      targetPort: starttls
+    - name: imaps
+      port: 993
+      targetPort: imaps
+    - name: sieve
+      port: 4190
+      targetPort: sieve
+
+---
+# Exposes the Stalwart migration proxy admin API internally for Tailscale to grant human access
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy-api
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart-migration-proxy
+  ports:
+    - name: proxy-api
+      port: 8080
+      targetPort: proxy-api
+
+# ---
+# Potentially we need another service here to expose 8080 for Legacy Accounts, but only if Accounts
+# is not migrated before we start sending traffic through this proxy.

@@ -1,0 +1,8 @@
+---
+# The stalwart-migration-proxy-redis-write service maps to the Serverless Redis cache's master endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy-redis
+spec:
+  externalName: "stalwart-migration-proxy-redis.psueny.ng.0001.euc1.cache.amazonaws.com"

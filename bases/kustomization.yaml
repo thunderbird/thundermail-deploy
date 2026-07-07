@@ -3,8 +3,5 @@ namespace: thundermail
 
 resources:
   - nginx
-  - stalwart
-
-labels:
-  - pairs:
-      app: stalwart
+  - stalwart-mail
+  - stalwart-migration-proxy

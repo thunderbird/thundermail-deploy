@@ -1,0 +1,100 @@
+---
+# Use PROXY_ADMIN_TOKEN to load the API bearer token used by the proxy from a secret
+
+# Ensure a bearer token secret is mounted at /etc/proxy/admin.token
+# The token must be at least 32 characters.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stalwart-migration-proxy
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stalwart-migration-proxy
+  template:
+    metadata:
+      labels:
+        app: stalwart-migration-proxy
+    spec:
+      containers:
+        - name: stalwart-migration-proxy
+          image: stalwartlabs/proxy:v1.0-alpine
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "0.5"
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          env:
+            # Location of the proxy's config file
+            - name: PROXY_CONFIG
+              value: "/etc/proxy/config.toml"
+            
+            # Override the log level here, or in the config map with the log_level option. Valid
+            # values are listed here: https://docs.rs/log/latest/log/enum.Level.html
+            # - name: RUST_LOG
+            #   value: "info"
+
+            # Bearer token
+            - name: PROXY_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-migration-proxy-bearer-token
+                  key: STALWART_MIGRATION_PROXY_BEARER_TOKEN
+              
+          ports:
+            - name: https
+              containerPort: 443
+            - name: smtps
+              containerPort: 465
+            - name: submission
+              containerPort: 587
+            - name: imaps
+              containerPort: 993
+            - name: sieve
+              containerPort: 4190
+            # Port 8080 is exposed at the pod level, but not as a public-facing service
+            - name: proxy-api
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: proxy-api
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: proxy-api
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: proxy-config-dir
+              mountPath: /etc/proxy
+              readOnly: true
+      volumes:
+        - name: proxy-config-dir
+          projected:
+            sources:
+              - configMap:
+                  name: stalwart-migration-proxy-config
+                  items:
+                    - key: config.toml
+                      path: config.toml
+              - secret:
+                  name: ssl-certificate
+                  items:
+                    - key: tls.crt
+                      path: tls.crt
+                    - key: tls.key
+                      path: tls.key

@@ -30,7 +30,7 @@ spec:
           ports:
             - name: smtps
               containerPort: 465
-            - name: starttls
+            - name: submission
               containerPort: 587
             - name: imaps
               containerPort: 993

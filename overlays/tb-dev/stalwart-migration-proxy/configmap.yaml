@@ -1,0 +1,184 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stalwart-migration-proxy-config
+  namespace: thundermail
+data:
+  config.toml: |
+    # For the moment, we will not configure an "old" server. Let's test with just the one service.
+
+    [server]
+    threads = 0
+    hostname = ""
+    shutdown_grace = "30s"
+
+    # Override the log level here, or with the RUST_LOG env-var. Valid values are listed here:
+    # https://docs.rs/log/latest/log/enum.Level.html
+    log_level = "info"  
+
+    [tls.certificate.primary]
+    cert = "/etc/proxy/tls.crt"
+    key = "/etc/proxy/tls.key"
+    default = true
+
+    [tls.protocols]
+    min_version = "1.2"
+    ignore_client_order = false
+    
+    # Destination naming should be inclusive of at least a cluster name and K8s namespace. This
+    # allows us to build segregated Stalwart installs across namespaces and still proxy them.
+    # Hostname DNS records are resolved at connection time and not cached in Stalwart, so we
+    # **do not** need to bounce Stalwart if we change the record. Ref:
+    # https://stalw.art/docs/migration/proxy/destinations/#host-and-endpoints
+    # [destination.legacy-stage]
+    # host = ""
+    # tls_server_name = ""
+    # proxy_protocol = true
+
+    [destination.tb-dev-thundermail]
+    host = "stalwart-migration-proxy"
+    tls_server_name = "mail.dev-thundermail.com"
+    proxy_protocol = true
+
+    # [destination.old.protocol.http]
+    # port = 443
+    # tls = "implicit"
+    # forwarding = true
+    
+    # [destination.old.protocol.smtp]
+    # port = 465
+    # tls = "implicit"
+    # forwarding = "proxy"
+    
+    # [destination.old.protocol.submission]
+    # port = 587
+    # tls = "starttls"
+    # forwarding = "proxy"
+    
+    # [destination.old.protocol.imap]
+    # port = 993
+    # tls = "implicit"
+    # forwarding = "proxy"
+    
+    # [destination.old.protocol.managesieve]
+    # port = 4190
+    # tls = "starttls"
+    # forwarding = "proxy"
+    
+    [destination.tb-dev-thundermail.protocol.http]
+    port = 443
+    tls = "implicit"
+    forwarding = "proxy"
+    
+    [destination.tb-dev-thundermail.protocol.smtp]
+    port = 465
+    tls = "implicit"
+    forwarding = "proxy"
+    
+    [destination.tb-dev-thundermail.protocol.submission]
+    port = 587
+    tls = "starttls"
+    forwarding = "proxy"
+    
+    [destination.tb-dev-thundermail.protocol.imap]
+    port = 993
+    tls = "implicit"
+    forwarding = "proxy"
+    
+    [destination.tb-dev-thundermail.protocol.managesieve]
+    port = 4190
+    tls = "starttls"
+    forwarding = "proxy"
+    
+    [listener.https]
+    protocol = "http"
+    proxy_protocol = "off"
+    forwarded = "off"
+    bind = ["0.0.0.0:443"]
+    tls = "implicit"
+
+    [listener.submissions]
+    protocol = "submission"
+    proxy_protocol = "off"
+    bind = ["0.0.0.0:465"]
+    tls = "implicit"
+
+    [listener.submission]
+    protocol = "submission"
+    proxy_protocol = "off"
+    bind = ["0.0.0.0:587"]
+    tls = "starttls"
+
+    [listener.imaps]
+    protocol = "imap"
+    proxy_protocol = "off"
+    bind = ["0.0.0.0:993"]
+    tls = "implicit"
+
+    [listener.managesieve]
+    protocol = "managesieve"
+    proxy_protocol = "off"
+    bind = ["0.0.0.0:4190"]
+    tls = "starttls"
+
+    [mapping]
+    source = "redis"
+    normalize = "lowercase"
+
+    [mapping.redis]
+    url = "redis://stalwart-migration-proxy-redis:6379"
+    key_prefix = "route:"
+
+    [admin]
+    bind = "0.0.0.0:8080"
+    tls = "implicit"
+
+    [routing]
+    default_destination = "tb-dev-thundermail"
+    smtp_passthrough_destination = "tb-dev-thundermail"
+
+    # Endpoints served only by the old deployment.
+    # [[http.route]]
+    # match = "/api/oauth"
+    # destination = "old"
+    # [[http.route]]
+    # match = "/authorize"
+    # destination = "old"
+    # [[http.route]]
+    # match = "/authorize/**"
+    # destination = "old"
+    
+    # Endpoints served only by the new deployment.
+    [[http.route]]
+    match = "/api/auth"
+    destination = "tb-dev-thundermail"
+    [[http.route]]
+    match = "/api/discover/**"
+    destination = "tb-dev-thundermail"
+    [[http.route]]
+    match = "/admin/**"
+    destination = "tb-dev-thundermail"
+    [[http.route]]
+    match = "/account/**"
+    destination = "tb-dev-thundermail"
+    [[http.route]]
+    match = "/login"
+    destination = "tb-dev-thundermail"
+    [[http.route]]
+    match = "/device"
+    destination = "tb-dev-thundermail"
+    
+    # OAuth token exchange is shared; route it by the web client that requested it.
+    # Add matching mapping entries:  webadmin  old   and   stalwart-webui  tb-dev-thundermail
+    [[http.route]]
+    match = "/auth/token"
+    extract = { from = "body", regex = "client_id=([^&]+)" }
+    fallback = "default"
+    
+    # Everything else: route by the authenticated account, fall back to default.
+    [[http.route]]
+    match = "/**"
+    extract = { from = "authorization" }
+    fallback = "default"
+
