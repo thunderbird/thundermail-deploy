@@ -13,7 +13,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow traffic from Stalwart Proxy server containers
-          groupID: "" # stalwart-migration-proxy SG
+          groupID: "sg-0c702a72c409c60a0" # stalwart-migration-proxy SG
 
 ---
 # Security group for the stalwart-migration-proxy service's load balancer
@@ -91,4 +91,5 @@ spec:
     matchLabels:
       app: stalwart-migration-proxy
   securityGroups:
-    groupIds: [] # stalwart-migration-proxy
+    groupIds:
+      - sg-0c702a72c409c60a # stalwart-migration-proxy0
