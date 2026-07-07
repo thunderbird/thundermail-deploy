@@ -37,7 +37,7 @@ data:
     # proxy_protocol = true
 
     [destination.tb-dev-thundermail]
-    host = "stalwart-migration-proxy"
+    host = "nginx.thundermail.svc.cluster.local"
     tls_server_name = "mail.dev-thundermail.com"
     proxy_protocol = true
 

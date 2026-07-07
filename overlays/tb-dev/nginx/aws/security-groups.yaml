@@ -25,26 +25,26 @@ spec:
       toPort: 443
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow HTTPS service traffic from the public nginx load balancer
-          groupID: "sg-00473b0f74de5fdaf" # stalwart-nginx-lb
+        - description: Allow HTTPS service traffic from the Stalwart migration proxy pods
+          groupID: sg-0590484da0d3c6702 # stalwart-migration-proxy
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow SMTPS service traffic from the public nginx load balancer
-          groupID: "sg-00473b0f74de5fdaf" # stalwart-nginx-lb
+        - description: Allow SMTPS service traffic from the Stalwart migration proxy pods
+          groupID: sg-0590484da0d3c6702 # stalwart-migration-proxy
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow IMAPS service traffic from the public nginx load balancer
-          groupID: "sg-00473b0f74de5fdaf" # stalwart-nginx-lb
+        - description: Allow IMAPS service traffic from the Stalwart migration proxy pods
+          groupID: sg-0590484da0d3c6702 # stalwart-migration-proxy
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
-        - description: Allow ManageSieve service traffic from the public nginx load balancer
-          groupID: "sg-00473b0f74de5fdaf" # stalwart-nginx-lb
+        - description: Allow ManageSieve service traffic from the Stalwart migration proxy pods
+          groupID: sg-0590484da0d3c6702 # stalwart-migration-proxy
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
