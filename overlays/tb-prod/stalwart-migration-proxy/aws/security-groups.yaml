@@ -6,7 +6,7 @@ metadata:
   name: stalwart-migration-proxy-elasticache-redis
   namespace: thundermail
 spec:
-  vpcID: vpc-0e0f4b8d603d463e0
+  vpcID: vpc-0c7a0ef4fdd2b8275
   ingressRules:
     - fromPort: 6379
       toPort: 6379
@@ -33,7 +33,7 @@ metadata:
   name: stalwart-migration-proxy
   namespace: thundermail
 spec:
-  vpcID: vpc-0e0f4b8d603d463e0
+  vpcID: vpc-0c7a0ef4fdd2b8275
   ingressRules:
     # Port 8080 runs the migration proxy API, which should never be exposed to the public. We
     # instead separate that access off to other services.
