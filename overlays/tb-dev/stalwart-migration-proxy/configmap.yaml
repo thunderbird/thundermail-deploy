@@ -40,6 +40,8 @@ data:
     host = "nginx.thundermail.svc.cluster.local"
     tls_server_name = "mail.dev-thundermail.com"
     proxy_protocol = true
+    forwarding = "proxy"
+    forwarded = true
 
     # [destination.old.protocol.http]
     # port = 443
