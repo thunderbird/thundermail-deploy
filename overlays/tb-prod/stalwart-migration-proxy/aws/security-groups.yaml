@@ -1,0 +1,94 @@
+---
+# Security group for the Redis host used by the proxy to store account mappings
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-migration-proxy-elasticache-redis
+  namespace: thundermail
+spec:
+  vpcID: vpc-0e0f4b8d603d463e0
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwart Proxy server containers
+          groupID: "" # stalwart-migration-proxy SG
+
+---
+# Security group for the stalwart-migration-proxy service's load balancer
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-migration-proxy-lb
+  namespace: thundermail
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+
+---
+# Security group for the stalwart-migration-proxy pods
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-migration-proxy
+  namespace: thundermail
+spec:
+  vpcID: vpc-0e0f4b8d603d463e0
+  ingressRules:
+    # Port 8080 runs the migration proxy API, which should never be exposed to the public. We
+    # instead separate that access off to other services.
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow HTTPS service traffic from the proxy load balancer
+          groupID: "" # stalwart-migration-proxy-lb
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTPS service traffic from the proxy load balancer
+          groupID: ""  # stalwart-migration-proxy-lb
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow STARTTLS submission traffic from the proxy load balancer
+          groupID: ""  # stalwart-migration-proxy-lb
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow IMAPS service traffic from the proxy load balancer
+          groupID: ""  # stalwart-migration-proxy-lb
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the proxy load balancer
+          groupID: ""  # stalwart-migration-proxy-lb
+    # Port 8080 is the managmement service port, which we do not wish to expose except through the
+    # Tailscale meshnet. These allowances permit health checks from the Kubernetes cluster and
+    # debug traffic from other stalwart pods (for using stalwart-cli, for example).
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+          groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
+        - description: Allow API traffic from the proxy load balancer for health checks
+          groupID: ""  # stalwart-migration-proxy-lb
+
+---
+# Security group policy attaching the migration proxy security group to its pods
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-migration-proxy
+  namespace: thundermail
+spec:
+  podSelector:
+    matchLabels:
+      app: stalwart-migration-proxy
+  securityGroups:
+    groupIds: [] # stalwart-migration-proxy
