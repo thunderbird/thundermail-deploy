@@ -79,6 +79,12 @@ spec:
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the proxy load balancer
           groupID: ""  # Populate with Kustomize
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP with STARTTLS service traffic from the proxy load balancer
+          groupID: ""  # Populate with Kustomize
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
@@ -133,6 +139,12 @@ spec:
       ipRanges:
         - cidrIP: "0.0.0.0/0"
           description: "Allow all STMPS ingress"
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      ipRanges:
+        - cidrIP: "0.0.0.0/0"
+          description: "Allow all STMP with STARTTLS ingress"
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp

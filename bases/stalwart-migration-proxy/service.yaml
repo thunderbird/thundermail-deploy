@@ -16,9 +16,10 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
     service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
     
-    # Update the below values in overlays, using public subnets
+    # Update the below values in overlays. Use public subnets, appropriate tags, and the LB's SG.
     service.beta.kubernetes.io/aws-load-balancer-subnets: ""
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "" # stalwart-migration-proxy-lb
 spec:
   type: LoadBalancer
   selector:
