@@ -92,4 +92,4 @@ spec:
       app: stalwart-migration-proxy
   securityGroups:
     groupIds:
-      - sg-0c702a72c409c60a # stalwart-migration-proxy0
+      - sg-0c702a72c409c60a # stalwart-migration-proxy
