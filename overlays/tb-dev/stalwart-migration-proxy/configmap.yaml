@@ -71,56 +71,46 @@ data:
     [destination.tb-dev-thundermail.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = "proxy"
 
     [destination.tb-dev-thundermail.protocol.smtp]
     port = 465
     tls = "implicit"
-    forwarding = "proxy"
 
     [destination.tb-dev-thundermail.protocol.submission]
     port = 587
     tls = "starttls"
-    forwarding = "proxy"
 
     [destination.tb-dev-thundermail.protocol.imap]
     port = 993
     tls = "implicit"
-    forwarding = "proxy"
 
     [destination.tb-dev-thundermail.protocol.managesieve]
     port = 4190
     tls = "starttls"
-    forwarding = "proxy"
 
     [listener.https]
     protocol = "http"
-    proxy_protocol = "off"
     forwarded = "off"
     bind = ["0.0.0.0:443"]
     tls = "implicit"
 
     [listener.submissions]
     protocol = "submission"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:465"]
     tls = "implicit"
 
     [listener.submission]
     protocol = "submission"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:587"]
     tls = "starttls"
 
     [listener.imaps]
     protocol = "imap"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:993"]
     tls = "implicit"
 
     [listener.managesieve]
     protocol = "managesieve"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:4190"]
     tls = "starttls"
 
