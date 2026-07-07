@@ -5,4 +5,4 @@ kind: Service
 metadata:
   name: stalwart-migration-proxy-redis
 spec:
-  externalName: ""
+  externalName: "stalwart-migration-proxy-redis.cfoyzs.ng.0001.euc1.cache.amazonaws.com"
