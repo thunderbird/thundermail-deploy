@@ -20,6 +20,7 @@ data:
     [tls.certificate.primary]
     cert = "/etc/proxy/tls.crt"
     key = "/etc/proxy/tls.key"
+    subjects = "*.dev-thundermail.com"
     default = true
 
     [tls.protocols]
@@ -36,41 +37,43 @@ data:
     # tls_server_name = ""
     # proxy_protocol = true
 
-    [destination.tb-dev-thundermail]
-    host = "nginx.thundermail.svc.cluster.local"
-    tls_server_name = "mail.dev-thundermail.com"
-    proxy_protocol = true
-    forwarding = "proxy"
-    forwarded = true
-
-    # [destination.old.protocol.http]
+    # [destination.legacy-stage.protocol.http]
     # port = 443
     # tls = "implicit"
     # forwarding = true
 
-    # [destination.old.protocol.smtp]
+    # [destination.legacy-stage.protocol.smtp]
     # port = 465
     # tls = "implicit"
     # forwarding = "proxy"
 
-    # [destination.old.protocol.submission]
+    # [destination.legacy-stage.protocol.submission]
     # port = 587
     # tls = "starttls"
     # forwarding = "proxy"
 
-    # [destination.old.protocol.imap]
+    # [destination.legacy-stage.protocol.imap]
     # port = 993
     # tls = "implicit"
     # forwarding = "proxy"
 
-    # [destination.old.protocol.managesieve]
+    # [destination.legacy-stage.protocol.managesieve]
     # port = 4190
     # tls = "starttls"
     # forwarding = "proxy"
 
+    [destination.tb-dev-thundermail]
+    host = "nginx.thundermail.svc.cluster.local"
+    tls_server_name = "mail.dev-thundermail.com"
+    tls_allow_invalid_certs = true  # Debug
+    proxy_protocol = true
+    forwarding = "proxy"
+
     [destination.tb-dev-thundermail.protocol.http]
     port = 443
     tls = "implicit"
+    forwarding = "none"
+    forwarded = true
 
     [destination.tb-dev-thundermail.protocol.smtp]
     port = 465
