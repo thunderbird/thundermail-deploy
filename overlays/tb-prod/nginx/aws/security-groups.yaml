@@ -26,25 +26,31 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow HTTPS service traffic from the public nginx load balancer
-          groupID: "sg-0f0cb73ccfe1356a1" # stalwart-nginx-lb
+          groupID: "sg-0c702a72c409c60a0" # stalwart-migration-proxy
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the public nginx load balancer
-          groupID: "sg-0f0cb73ccfe1356a1" # stalwart-nginx-lb
+          groupID: "sg-0c702a72c409c60a0" # stalwart-migration-proxy
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP STARTTLS service traffic from the public nginx load balancer
+          groupID: "sg-0c702a72c409c60a0" # stalwart-migration-proxy
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow IMAPS service traffic from the public nginx load balancer
-          groupID: "sg-0f0cb73ccfe1356a1" # stalwart-nginx-lb
+          groupID: "sg-0c702a72c409c60a0" # stalwart-migration-proxy
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Allow ManageSieve service traffic from the public nginx load balancer
-          groupID: "sg-0f0cb73ccfe1356a1" # stalwart-nginx-lb
+          groupID: "sg-0c702a72c409c60a0" # stalwart-migration-proxy
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1

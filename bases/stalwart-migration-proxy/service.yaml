@@ -1,27 +1,33 @@
 ---
-# The stalwart-migration-proxy-redis service maps to the Serverless Redis cache's master endpoint
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-migration-proxy-redis
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  type: ExternalName
-  externalName: "" # Populate with Kustomize
-
----
-# Creates an internal access point for the Stalwart migration proxy
+# The stalwart-migration-proxy service creates a public load balancer exposing
+# our migration proxy to the world.
 apiVersion: v1
 kind: Service
 metadata:
   name: stalwart-migration-proxy
   annotations:
     argocd.argoproj.io/sync-wave: "2"
+    # EKS-specific annotations are documented in "Use Service Annotations to configure Network Load Balancers":
+    # https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html
+    # A full list of annotations supported by the AWS Load Balancer controller can be found here:
+    # https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/
+    service.beta.kubernetes.io/aws-load-balancer-name: stalwart-migration-proxy-public
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
+    
+    # Update the below values in overlays. Use public subnets, appropriate tags, and the LB's SG.
+    service.beta.kubernetes.io/aws-load-balancer-subnets: ""
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "" # stalwart-migration-proxy-lb
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
+    # The public load balancer should always route traffic to our internal proxy, which will route
+    # that traffic internally according to our rules.
     app: stalwart-migration-proxy
+  loadBalancerSourceRanges: 
+    - 0.0.0.0/0
   ports:
     - name: https
       port: 443
@@ -38,6 +44,18 @@ spec:
     - name: sieve
       port: 4190
       targetPort: sieve
+
+---
+# The stalwart-migration-proxy-redis service maps to the Serverless Redis cache's master endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy-redis
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ExternalName
+  externalName: "" # Populate with Kustomize
 
 ---
 # Exposes the Stalwart migration proxy admin API internally for Tailscale to grant human access
