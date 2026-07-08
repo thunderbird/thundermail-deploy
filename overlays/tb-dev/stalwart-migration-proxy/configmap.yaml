@@ -20,7 +20,7 @@ data:
     [tls.certificate.primary]
     cert = "/etc/proxy/tls.crt"
     key = "/etc/proxy/tls.key"
-    subjects = "*.dev-thundermail.com"
+    subjects = ["*.dev-thundermail.com"]
     default = true
 
     [tls.protocols]
