@@ -31,45 +31,47 @@ data:
     # Hostname DNS records are resolved at connection time and not cached in Stalwart, so we
     # **do not** need to bounce Stalwart if we change the record. Ref:
     # https://stalw.art/docs/migration/proxy/destinations/#host-and-endpoints
-    # [destination.legacy-stage]
+    # [destination.legacy-prod]
     # host = ""
     # tls_server_name = ""
     # proxy_protocol = true
+
+    # [destination.legacy-prod.protocol.http]
+    # port = 443
+    # tls = "implicit"
+    # forwarding = true
+    
+    # [destination.legacy-prod.protocol.smtp]
+    # port = 465
+    # tls = "implicit"
+    # forwarding = "proxy"
+    
+    # [destination.legacy-prod.protocol.submission]
+    # port = 587
+    # tls = "starttls"
+    # forwarding = "proxy"
+    
+    # [destination.legacy-prod.protocol.imap]
+    # port = 993
+    # tls = "implicit"
+    # forwarding = "proxy"
+    
+    # [destination.legacy-prod.protocol.managesieve]
+    # port = 4190
+    # tls = "starttls"
+    # forwarding = "proxy"
 
     [destination.tb-prod-thundermail]
     host = "stalwart-migration-proxy"
     tls_server_name = "mail.tb.email"
     proxy_protocol = true
+    forwarding = "proxy"
 
-    # [destination.old.protocol.http]
-    # port = 443
-    # tls = "implicit"
-    # forwarding = true
-    
-    # [destination.old.protocol.smtp]
-    # port = 465
-    # tls = "implicit"
-    # forwarding = "proxy"
-    
-    # [destination.old.protocol.submission]
-    # port = 587
-    # tls = "starttls"
-    # forwarding = "proxy"
-    
-    # [destination.old.protocol.imap]
-    # port = 993
-    # tls = "implicit"
-    # forwarding = "proxy"
-    
-    # [destination.old.protocol.managesieve]
-    # port = 4190
-    # tls = "starttls"
-    # forwarding = "proxy"
-    
     [destination.tb-prod-thundermail.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = "proxy"
+    forwarding = "none" # HTTP doesn't support PROXY protocol
+    forwarded = true    # Instead, manipulate the X-Forwarded-For header for proxy chain info
     
     [destination.tb-prod-thundermail.protocol.smtp]
     port = 465

@@ -74,11 +74,13 @@ data:
     host = ""
     tls_server_name = ""
     proxy_protocol = true
+    forwarding = "proxy"
 
     [destination.new]
     host = ""
     tls_server_name = ""
     proxy_protocol = true
+    forwarding = "proxy"
 
     # Explicitly list all supported ports in the old and new installations.
     # "forwarding = proxy" uses PROXY protocol v2 with Stalwart backends and is the correct setting
@@ -88,52 +90,46 @@ data:
     [destination.old.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = true
+    forwarding = "none"
+    forwarded = true
     
     [destination.old.protocol.smtp]
     port = 465
     tls = "implicit"
-    forwarding = "proxy"
     
     [destination.old.protocol.submission]
     port = 587
     tls = "starttls"
-    forwarding = "proxy"
     
     [destination.old.protocol.imap]
     port = 993
     tls = "implicit"
-    forwarding = "proxy"
     
     [destination.old.protocol.managesieve]
     port = 4190
     tls = "starttls"
-    forwarding = "proxy"
     
     [destination.new.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = true
+    forwarding = "none"
+    forwarded = true
     
     [destination.new.protocol.smtp]
     port = 465
     tls = "implicit"
-    forwarding = "proxy"
     
     [destination.new.protocol.submission]
     port = 587
     tls = "starttls"
-    forwarding = "proxy"
     
     [destination.new.protocol.imap]
     port = 993
     tls = "implicit"
-    forwarding = "proxy"
     
     [destination.new.protocol.managesieve]
     port = 4190
     tls = "starttls"
-    forwarding = "proxy"
     
     # Listeners describe services listening on ports which will route to the above destinations.
     # "proxy_protocol = 'off'" (the default value, explicit in our config) disables the use of
@@ -145,32 +141,27 @@ data:
 
     [listener.https]
     protocol = "http"
-    proxy_protocol = "off"
     forwarded = "off"
     bind = ["0.0.0.0:443"]
     tls = "implicit"
 
     [listener.submissions]
     protocol = "submission"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:465"]
     tls = "implicit"
 
     [listener.submission]
     protocol = "submission"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:587"]
     tls = "starttls"
 
     [listener.imaps]
     protocol = "imap"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:993"]
     tls = "implicit"
 
     [listener.managesieve]
     protocol = "managesieve"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:4190"]
     tls = "starttls"
 

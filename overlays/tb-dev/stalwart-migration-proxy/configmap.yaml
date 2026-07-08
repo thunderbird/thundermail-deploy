@@ -15,7 +15,7 @@ data:
 
     # Override the log level here, or with the RUST_LOG env-var. Valid values are listed here:
     # https://docs.rs/log/latest/log/enum.Level.html
-    log_level = "trace"
+    log_level = "info"
 
     [tls.certificate.primary]
     cert = "/etc/proxy/tls.crt"
@@ -72,7 +72,7 @@ data:
     port = 443
     tls = "implicit"
     forwarding = "none" # HTTP doesn't support PROXY protocol
-    forwarded = true # Instead, manipulate the X-Forwarded-For header for proxy chain info
+    forwarded = true    # Instead, manipulate the X-Forwarded-For header for proxy chain info
 
     [destination.tb-dev-thundermail.protocol.smtp]
     port = 465

@@ -1,5 +1,17 @@
+# The stalwart-migration-proxy service creates a public load balancer exposing
+# our migration proxy to the world.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-migration-proxy
+  annotations:
+    # Subnets: mzla-tb-prod-public-eu-central-1a, mzla-tb-prod-public-eu-central-1b
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0f9e53dca9f65b704, subnet-05af2f16f56e5b830"
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-07db1ae5d1b0b991f" # stalwart-migration-proxy-lb
+
 ---
-# The stalwart-migration-proxy-redis-write service maps to the Serverless Redis cache's master endpoint
+# The stalwart-migration-proxy-redis service maps to the Serverless Redis cache's master endpoint
 apiVersion: v1
 kind: Service
 metadata:

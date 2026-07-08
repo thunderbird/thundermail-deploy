@@ -33,6 +33,12 @@ spec:
       userIDGroupPairs:
         - description: Allow SMTPS service traffic from the Stalwart migration proxy pods
           groupID: sg-0590484da0d3c6702 # stalwart-migration-proxy
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP STARTTLS service traffic from the Stalwart migration proxy pods
+          groupID: sg-0590484da0d3c6702 # stalwart-migration-proxy
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
