@@ -65,15 +65,14 @@ data:
     [destination.tb-dev-thundermail]
     host = "nginx.thundermail.svc.cluster.local"
     tls_server_name = "mail.dev-thundermail.com"
-    # tls_allow_invalid_certs = true  # Debug
     proxy_protocol = true
     forwarding = "proxy"
 
     [destination.tb-dev-thundermail.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = "none"
-    forwarded = true
+    forwarding = "none" # HTTP doesn't support PROXY protocol
+    forwarded = true # Instead, manipulate the X-Forwarded-For header for proxy chain info
 
     [destination.tb-dev-thundermail.protocol.smtp]
     port = 465
