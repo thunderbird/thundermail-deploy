@@ -35,7 +35,6 @@ data:
     # [destination.legacy-stage]
     # host = ""
     # tls_server_name = ""
-    # proxy_protocol = true
 
     # [destination.legacy-stage.protocol.http]
     # port = 443
