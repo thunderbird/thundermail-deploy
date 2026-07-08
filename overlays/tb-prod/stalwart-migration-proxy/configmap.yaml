@@ -62,7 +62,7 @@ data:
     # forwarding = "proxy"
 
     [destination.tb-prod-thundermail]
-    host = "stalwart-migration-proxy"
+    host = "nginx.thundermail.svc.cluster.local"
     tls_server_name = "mail.tb.email"
     proxy_protocol = true
     forwarding = "proxy"
