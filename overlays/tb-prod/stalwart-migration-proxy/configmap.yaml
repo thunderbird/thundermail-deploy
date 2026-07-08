@@ -20,6 +20,7 @@ data:
     [tls.certificate.primary]
     cert = "/etc/proxy/tls.crt"
     key = "/etc/proxy/tls.key"
+    subjects = ["*.tb.email"]
     default = true
 
     [tls.protocols]
@@ -34,7 +35,6 @@ data:
     # [destination.legacy-prod]
     # host = ""
     # tls_server_name = ""
-    # proxy_protocol = true
 
     # [destination.legacy-prod.protocol.http]
     # port = 443
@@ -76,51 +76,42 @@ data:
     [destination.tb-prod-thundermail.protocol.smtp]
     port = 465
     tls = "implicit"
-    forwarding = "proxy"
     
     [destination.tb-prod-thundermail.protocol.submission]
     port = 587
     tls = "starttls"
-    forwarding = "proxy"
     
     [destination.tb-prod-thundermail.protocol.imap]
     port = 993
     tls = "implicit"
-    forwarding = "proxy"
     
     [destination.tb-prod-thundermail.protocol.managesieve]
     port = 4190
     tls = "starttls"
-    forwarding = "proxy"
     
     [listener.https]
     protocol = "http"
-    proxy_protocol = "off"
     forwarded = "off"
     bind = ["0.0.0.0:443"]
     tls = "implicit"
 
     [listener.submissions]
     protocol = "submission"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:465"]
     tls = "implicit"
 
     [listener.submission]
     protocol = "submission"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:587"]
     tls = "starttls"
 
     [listener.imaps]
     protocol = "imap"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:993"]
     tls = "implicit"
 
     [listener.managesieve]
     protocol = "managesieve"
-    proxy_protocol = "off"
     bind = ["0.0.0.0:4190"]
     tls = "starttls"
 
