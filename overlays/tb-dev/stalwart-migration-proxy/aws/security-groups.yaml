@@ -78,6 +78,8 @@ spec:
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
         - description: Allow API traffic from the proxy load balancer for health checks
           groupID: "sg-07db1ae5d1b0b991f"  # stalwart-migration-proxy-lb
+        - description: Allow API traffic from the Accounts pods
+          groupID: "sg-0dba8adea7684454f"  # mzla-tb-dev-accounts-pod
 
 ---
 # Security group policy attaching the migration proxy security group to its pods
