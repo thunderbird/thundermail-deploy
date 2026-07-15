@@ -1,0 +1,73 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: thundermail
+spec:
+  template:
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.31
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "0.5"
+              memory: 0.5Gi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          ports:
+            - name: smtps
+              containerPort: 465
+            - name: submission
+              containerPort: 587
+            - name: imaps
+              containerPort: 993
+            - name: sieve
+              containerPort: 4190
+            - name: https
+              containerPort: 443
+            - name: nginx-health
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: nginx-health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: nginx-health
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: nginx-config-dir
+              mountPath: /etc/nginx
+              readOnly: true
+      volumes:
+        - name: nginx-config-dir
+          projected:
+            sources:
+              - configMap:
+                  name: nginx-config
+                  items:
+                    - key: nginx.conf
+                      path: nginx.conf
+              - secret:
+                  name: ssl-dev-thundermail.com
+                  items:
+                    - key: tls.crt
+                      path: dev-thundermail.crt
+                    - key: tls.key
+                      path: dev-thundermail.key
+              - secret:
+                  name: ssl-stage-thundermail.com
+                  items:
+                    - key: tls.crt
+                      path: stage-thundermail.crt
+                    - key: tls.key
+                      path: stage-thundermail.key
+
