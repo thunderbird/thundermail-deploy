@@ -80,6 +80,93 @@ data:
     events {}
   
     http {
+      upstream stalwart-https {
+        # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
+        # internal sources.
+        server stalwart-https:443;
+      }
+  
+      server {
+        # --- Dev domain server ---
+        server_name *.dev-thundermail.com;
+        listen 443 ssl;
+        keepalive_timeout 60s;
+        proxy_connect_timeout 1s;
+
+        # --- SSL Configuration ---
+        # These files are populated as volumes mounted to the pods from secrets drawn from an
+        # external secret store.
+        ssl_certificate /etc/nginx/dev-thundermail.crt;
+        ssl_certificate_key /etc/nginx/dev-thundermail.key;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        # Enable gzip compression
+        gzip on;
+        gzip_types text/html application/json;
+  
+        # Specifically block access to these routes
+        location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
+          return 404;
+        }
+  
+        location ^~ /admin {  # Stalwart's web admin console, only accessible by private route
+          return 404;
+        }
+  
+        location ^~ /api {  # Stalwart's underlying API system, only accessible by private route
+          return 404;
+        }
+  
+        # All other routes are acceptable, and should be proxied to the backend
+        location ^~ / {
+          proxy_pass https://stalwart-https;
+          proxy_set_header Host mail.dev-thundermail.com;
+          proxy_ssl_name mail.dev-thundermail.com;
+        }
+      }
+
+      server {
+        # --- Stage domain server ---
+        server_name *.stage-thundermail.com;
+        listen 443 ssl;
+        keepalive_timeout 60s;
+        proxy_connect_timeout 1s;
+
+        # --- SSL Configuration ---
+        # These files are populated as volumes mounted to the pods from secrets drawn from an
+        # external secret store.
+        ssl_certificate /etc/nginx/stage-thundermail.crt;
+        ssl_certificate_key /etc/nginx/stage-thundermail.key;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        # Enable gzip compression
+        gzip on;
+        gzip_types text/html application/json;
+  
+        # Specifically block access to these routes
+        location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
+          return 404;
+        }
+  
+        location ^~ /admin {  # Stalwart's web admin console, only accessible by private route
+          return 404;
+        }
+  
+        location ^~ /api {  # Stalwart's underlying API system, only accessible by private route
+          return 404;
+        }
+  
+        # All other routes are acceptable, and should be proxied to the backend
+        location ^~ / {
+          proxy_pass https://stalwart-https;
+          proxy_set_header Host mail.stage-thundermail.com;
+          proxy_ssl_name mail.stage-thundermail.com;
+        }
+      }
+  
+    http {
       # --- SSL Configuration ---
       # These files are populated as volumes mounted to the pods from secrets drawn from an
       # external secret store.
