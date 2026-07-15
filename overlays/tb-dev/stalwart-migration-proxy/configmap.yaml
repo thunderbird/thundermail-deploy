@@ -17,10 +17,16 @@ data:
     # https://docs.rs/log/latest/log/enum.Level.html
     log_level = "info"
 
-    [tls.certificate.primary]
-    cert = "/etc/proxy/tls.crt"
-    key = "/etc/proxy/tls.key"
+    [tls.certificate.dev]
+    cert = "/etc/proxy/dev-thundermail.crt"
+    key = "/etc/proxy/dev-thundermail.key"
     subjects = ["*.dev-thundermail.com"]
+    default = true
+
+    [tls.certificate.stage]
+    cert = "/etc/proxy/stage-thundermail.crt"
+    key = "/etc/proxy/stage-thudnermail.key"
+    subjects = ["*.stage-thundermail.com"]
     default = true
 
     [tls.protocols]
