@@ -2,7 +2,6 @@
 
 Once you have a working Stalwart installation, you'll need to fix up a few things in its configuration to reach a baseline point of normal operation. We won't cover full domain setup here, just enough to get Stalwart stable.
 
-
 - [Connect to the Stalwart Admin Console](#connect-to-the-stalwart-admin-console)
 - [Create and Validate an SSL Certificate](#create-and-validate-an-ssl-certificate)
 - [Export and Format the SSL Certificate for Stalwart](#export-and-format-the-ssl-certificate-for-stalwart)
@@ -60,9 +59,13 @@ As long as you used the `Export=ENABLED` option in the previous step, exporting 
         --certificate-arn $CERTIFICATE_ARN \
         --passphrase $(echo -n 'password' | base64) \
         --output text \
-        --no-cli-pager
+        --no-cli-pager \
+        | sed 's/^\s\+//'
 
 The above command will produce a lot of output containing multiple certificates (yours and a CA trust chain) and an encrypted private key. In a temporary directory, copy the key data into a file, `example.com.key` (containing the encrypted key).
+
+> [!TIP]
+> The awscli output often contains additional spaces at the beginning of the lines, which can lead to confusing SSL validation errors. The `sed` command removes these, making it safer to copy and paste this data.
 
 AWS Certificate Manager requires that you encrypt the key with a passphrase for export, but Stalwart cannot handle passphrase-encrypted private keys. Fix this by stripping the passphrase off the RSA key with `openssl`:
 
