@@ -3,11 +3,25 @@
 Once you have a working Stalwart installation, you'll need to fix up a few things in its configuration to reach a baseline point of normal operation. We won't cover full domain setup here, just enough to get Stalwart stable.
 
 
+- [Connect to the Stalwart Admin Console](#connect-to-the-stalwart-admin-console)
 - [Create and Validate an SSL Certificate](#create-and-validate-an-ssl-certificate)
 - [Export and Format the SSL Certificate for Stalwart](#export-and-format-the-ssl-certificate-for-stalwart)
 - [Basic Stalwart Network Setup](#basic-stalwart-network-setup)
 - [Preventing IP Address Blocks](#preventing-ip-address-blocks)
 - [Resolving IP Address Blocks](#resolving-ip-address-blocks)
+
+
+## Connect to the Stalwart Admin Console
+
+Stalwart's web admin console is intentionally made generally unavailable. The nginx proxy accomplishes this by intercepting HTTP traffic and returning a 404 for a handful of paths we do not wish to expose. The admin panel is only accessible through Tailscale. General documentation on our Tailscale implementation can be [found here](https://github.com/thunderbird/platform-infrastructure/blob/main/docs/tailscale.md).
+
+- Log into the [Tailscale web console](https://login.tailscale.com).
+- Click the "Machines" tab along the top.
+- Find and click the machine matching the Stalwart installation you want to log into. This will be labeled something like "tb-dev-stalwart-mgmt".
+- Find the "Full domain" property and copy it.
+- With Tailscale installed and running on your machine, open that domain in a web browser.
+
+This should land you on the Stalwart admin panel login page. Log in with credentials found in the relevant `stalwart-recovery-admin` secret in AWS Secrets Manager for that same environment.
 
 
 ## Create and Validate an SSL Certificate
@@ -91,13 +105,6 @@ You can now use this certificate in other Stalwart settings, such as the basic n
 
 
 ## Basic Stalwart Network Setup
-
-Log into your Stalwart's admin web console. Here are the known instances:
-
-- [tb-dev](https://mail.dev-thundermail.com/admin/login)
-- [tb-prod](https://mail.tb.email/admin/login)
-
-You can get the login credentials from the relevant `stalwart-recovery-admin` secret in AWS Secrets Manager.
 
 First, configure a domain.
 
