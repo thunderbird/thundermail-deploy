@@ -103,7 +103,7 @@ data:
 
         # Enable gzip compression
         gzip on;
-        gzip_types text/html application/json;
+        gzip_types application/json;
   
         # Specifically block access to these routes
         location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
