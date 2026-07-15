@@ -25,7 +25,7 @@ data:
 
     [tls.certificate.stage]
     cert = "/etc/proxy/stage-thundermail.crt"
-    key = "/etc/proxy/stage-thudnermail.key"
+    key = "/etc/proxy/stage-thundermail.key"
     subjects = ["*.stage-thundermail.com"]
     default = true
 
