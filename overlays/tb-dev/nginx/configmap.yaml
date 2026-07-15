@@ -128,7 +128,7 @@ data:
 
       server {
         # --- Stage domain server ---
-        server_name *.stage-thundermail.com *.thundermail.tb-dev.eks.stage-thundermail.com;
+        server_name *.stage-thundermail.com;
         listen 443 ssl;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
