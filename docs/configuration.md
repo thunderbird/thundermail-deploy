@@ -8,6 +8,7 @@ Once you have a working Stalwart installation, you'll need to fix up a few thing
 - [Basic Stalwart Network Setup](#basic-stalwart-network-setup)
 - [Preventing IP Address Blocks](#preventing-ip-address-blocks)
 - [Resolving IP Address Blocks](#resolving-ip-address-blocks)
+- [Storage Settings](#storage-settings)
 
 
 ## Connect to the Stalwart Admin Console
@@ -247,3 +248,28 @@ Now reload the blocked IPs list:
 And you should be back up very soon.
 
 
+## Storage Settings
+
+This stack builds out a Redis server for Stalwart's memory cache (operating cache, spam filtering, etc.) and an S3 Bucket for Stalwart's blob storage (mail contents). As of version 0.16, we can no longer specify these backends in Stalwart's startup config file. Therefore, once you have a live system, you must go into the admin console and configure the backend.
+
+
+### Stalwart Blob Store (S3)
+
+Set the S3 backend in Storage ⇢ Blob Store. In the "Store type" drop-down, select "S3-compatible". In the "Configuration" section that appears, set the "Region" to "eu-central-1" (unless you've built an environment somewhere else). Set the "Name" field to the name of the S3 Bucket built for this purpose. This name will have been set in the environment's overlay, but you can retrieve it from the Kubernetes API as well:
+
+    kubectl -n thundermail \
+        get bucket stalwart-s3-bucket \
+        -o jsonpath='{.spec.name}'
+
+The remaining options can be left at defaults. At the bottom of the page, click `🖫 Save`.
+
+
+### Stalwart In-Memory Store (Redis)
+
+Set the Redis backend in Storage ⇢ In-Memory Store. In the "Store type" drop-down, select "Redis/Valkey". In the "Configuration" section that appears, set the "URL" value. This should use the `rediss://` schema (two s's indicating security in transit) and the primary endpoint from the Elasticache ReplicaGroup. You can pull this from the AWS web console, or you can run this command:
+
+    kubectl -n thundermail \
+        get replicationgroup stalwart-redis \
+        -o=jsonpath='{.status.nodeGroups.*.primaryEndpoint.address}'
+
+The remaining options can be left at defaults. At the bottom of the page, click `🖫 Save`.
