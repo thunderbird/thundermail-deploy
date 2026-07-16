@@ -27,13 +27,14 @@ spec:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16
           imagePullPolicy: IfNotPresent
+          # See Stalwart System Requirements: https://stalw.art/docs/install/requirements/
           resources:
             requests:
               cpu: "1"
-              memory: 2Gi
+              memory: 1Gi
             limits:
               cpu: "2"
-              memory: 4Gi
+              memory: 2Gi
           args:
             - "--config"
             - "/etc/stalwart/config.json"

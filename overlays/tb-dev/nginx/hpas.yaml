@@ -1,0 +1,9 @@
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx
+  namespace: thundermail
+spec:
+  minReplicas: 2
+  maxReplicas: 3

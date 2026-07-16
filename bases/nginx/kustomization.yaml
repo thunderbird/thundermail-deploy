@@ -5,6 +5,7 @@ resources:
   - aws
   - configmap.yaml
   - deployment.yaml
+  - hpas.yaml
   - service.yaml
 
 labels:
