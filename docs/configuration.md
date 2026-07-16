@@ -273,3 +273,19 @@ Set the Redis backend in Storage ⇢ In-Memory Store. In the "Store type" drop-d
         -o=jsonpath='{.status.nodeGroups.*.primaryEndpoint.address}'
 
 The remaining options can be left at defaults. At the bottom of the page, click `🖫 Save`.
+
+
+## Logging
+
+By default, Stalwart outputs logs to a file on disk (`/var/log/stalwart.log`) that is generally inaccessible to us (or ought to be, or at least we don't want to have to go to every instance to see logs). We want logs going to stdout so we can see them in ArgoCD and scrape them with observability tools.
+
+In the admin console, go to Settings ⇢ Telemetry ⇢ Tracers. You'll find one already set up with `INFO` level logging. Click that entry to edit it.
+
+Change the "Tracer type" to "Console". Scroll down and click `🖫 Save`.
+
+
+## Making Changes Take Effect
+
+Changing a setting in the admin console _**is not**_ enough to trigger the change on live servers. To accomplish this, you have to reload server settings.
+
+To do this, go to Management ⇢ Actions. Click `Server Settings`. This causes the server settings to reload across the whole cluster, making your changes effective.
