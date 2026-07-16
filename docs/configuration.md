@@ -9,6 +9,8 @@ Once you have a working Stalwart installation, you'll need to fix up a few thing
 - [Preventing IP Address Blocks](#preventing-ip-address-blocks)
 - [Resolving IP Address Blocks](#resolving-ip-address-blocks)
 - [Storage Settings](#storage-settings)
+- [Logging](#logging)
+- [Making Changes Take Effect](#making-changes-take-effect)
 
 
 ## Connect to the Stalwart Admin Console
