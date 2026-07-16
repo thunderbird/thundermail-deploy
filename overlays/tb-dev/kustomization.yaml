@@ -15,11 +15,13 @@ patches:
   - path: nginx/aws/security-groups.yaml
   - path: nginx/configmap.yaml
   - path: nginx/deployment.yaml
+  - path: nginx/hpas.yaml
   - path: stalwart-mail/aws/elasticache.yaml
   - path: stalwart-mail/aws/s3.yaml
   - path: stalwart-mail/aws/security-groups.yaml
   - path: stalwart-mail/aws/subnet-groups.yaml
   - path: stalwart-mail/configmap.yaml
+  - path: stalwart-mail/hpas.yaml
   - path: stalwart-mail/secrets.yaml
   - path: stalwart-mail/service.yaml
   - path: stalwart-mail/serviceaccount.yaml
@@ -27,6 +29,7 @@ patches:
   - path: stalwart-migration-proxy/aws/subnet-groups.yaml
   - path: stalwart-migration-proxy/configmap.yaml
   - path: stalwart-migration-proxy/deployment.yaml
+  - path: stalwart-migration-proxy/hpas.yaml
   - path: stalwart-migration-proxy/secrets.yaml
   - path: stalwart-migration-proxy/service.yaml
 
