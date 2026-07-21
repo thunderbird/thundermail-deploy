@@ -28,6 +28,14 @@ spec:
           groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
         - description: Allow HTTPS service traffic from the private stalwart load balancer
           groupID: sg-003b6b400b4c35131  # stalwart-admin-lb
+        # tb-dev Accounts now runs in THIS cluster (namespace `accounts`), so it
+        # reaches the Stalwart admin API directly over the in-cluster ClusterIP
+        # `stalwart-https.thundermail.svc` (443) rather than via the admin-lb NLB.
+        # Under strict pod-SG mode the accounts pod SG replaces the node SG, so the
+        # stalwart-server SG must admit it explicitly. See platform-infrastructure#596
+        # (accounts pod SG) / #144.
+        - description: Allow HTTPS admin-API traffic from tb-dev Accounts pods
+          groupID: sg-0dba8adea7684454f # mzla-tb-dev-accounts-pod
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
