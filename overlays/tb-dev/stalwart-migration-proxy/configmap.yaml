@@ -6,8 +6,6 @@ metadata:
   namespace: thundermail
 data:
   config.toml: |
-    # For the moment, we will not configure an "old" server. Let's test with just the one service.
-
     [server]
     threads = 0
     hostname = ""
@@ -16,12 +14,6 @@ data:
     # Override the log level here, or with the RUST_LOG env-var. Valid values are listed here:
     # https://docs.rs/log/latest/log/enum.Level.html
     log_level = "info"
-
-    [tls.certificate.dev]
-    cert = "/etc/proxy/dev-thundermail.crt"
-    key = "/etc/proxy/dev-thundermail.key"
-    subjects = ["*.dev-thundermail.com"]
-    default = true
 
     [tls.certificate.stage]
     cert = "/etc/proxy/stage-thundermail.crt"
@@ -38,34 +30,34 @@ data:
     # Hostname DNS records are resolved at connection time and not cached in Stalwart, so we
     # **do not** need to bounce Stalwart if we change the record. Ref:
     # https://stalw.art/docs/migration/proxy/destinations/#host-and-endpoints
-    # [destination.legacy-stage]
-    # host = ""
-    # tls_server_name = ""
+    [destination.legacy-stage]
+    host = "mail-legacy.stage-thundermail.com"
+    tls_server_name = "mail.stage-thundermail.com"
 
-    # [destination.legacy-stage.protocol.http]
-    # port = 443
-    # tls = "implicit"
-    # forwarding = true
+    [destination.legacy-stage.protocol.http]
+    port = 443
+    tls = "implicit"
+    forwarding = true
 
-    # [destination.legacy-stage.protocol.smtp]
-    # port = 465
-    # tls = "implicit"
-    # forwarding = "proxy"
+    [destination.legacy-stage.protocol.smtp]
+    port = 465
+    tls = "implicit"
+    forwarding = "proxy"
 
-    # [destination.legacy-stage.protocol.submission]
-    # port = 587
-    # tls = "starttls"
-    # forwarding = "proxy"
+    [destination.legacy-stage.protocol.submission]
+    port = 587
+    tls = "starttls"
+    forwarding = "proxy"
 
-    # [destination.legacy-stage.protocol.imap]
-    # port = 993
-    # tls = "implicit"
-    # forwarding = "proxy"
+    [destination.legacy-stage.protocol.imap]
+    port = 993
+    tls = "implicit"
+    forwarding = "proxy"
 
-    # [destination.legacy-stage.protocol.managesieve]
-    # port = 4190
-    # tls = "starttls"
-    # forwarding = "proxy"
+    [destination.legacy-stage.protocol.managesieve]
+    port = 4190
+    tls = "starttls"
+    forwarding = "proxy"
 
     [destination.tb-dev-thundermail]
     host = "nginx.thundermail.svc.cluster.local"
@@ -134,50 +126,61 @@ data:
     tls = "implicit"
 
     [routing]
-    default_destination = "tb-dev-thundermail"
+    # This is where a request for an account that doesn't have an explicit backend mapping yet goes.
+    # We set this to the legacy service until all accounts are migrated.
+    default_destination = "legacy-stage"
+
+    # Unauthenticated SMTP traffic can't be routed based on account. This setting directs this
+    # traffic to a single backend.
+    # Ref: https://stalw.art/docs/migration/proxy/examples/stalwart-upgrade/#destinations-and-default-routing
     smtp_passthrough_destination = "tb-dev-thundermail"
 
     # Endpoints served only by the old deployment.
-    # [[http.route]]
-    # match = "/api/oauth"
-    # destination = "old"
-    # [[http.route]]
-    # match = "/authorize"
-    # destination = "old"
-    # [[http.route]]
-    # match = "/authorize/**"
-    # destination = "old"
+    [[http.route]]
+    match = "/api/oauth"
+    destination = "legacy-stage"
+
+    [[http.route]]
+    match = "/authorize"
+    destination = "legacy-stage"
+
+    [[http.route]]
+    match = "/authorize/**"
+    destination = "legacy-stage"
 
     # Endpoints served only by the new deployment.
     [[http.route]]
     match = "/api/auth"
     destination = "tb-dev-thundermail"
+
     [[http.route]]
     match = "/api/discover/**"
     destination = "tb-dev-thundermail"
+
     [[http.route]]
     match = "/admin/**"
     destination = "tb-dev-thundermail"
+
     [[http.route]]
     match = "/account/**"
     destination = "tb-dev-thundermail"
+
     [[http.route]]
     match = "/login"
     destination = "tb-dev-thundermail"
+
     [[http.route]]
     match = "/device"
     destination = "tb-dev-thundermail"
 
     # OAuth token exchange is shared; route it by the web client that requested it.
-    # Add matching mapping entries:  webadmin  old   and   stalwart-webui  tb-dev-thundermail
     [[http.route]]
     match = "/auth/token"
     extract = { from = "body", regex = "client_id=([^&]+)" }
-    fallback = "default"
+    fallback = "tb-dev-thundermail"
 
     # Everything else: route by the authenticated account, fall back to default.
     [[http.route]]
     match = "/**"
     extract = { from = "authorization" }
-    fallback = "default"
-
+    fallback = "tb-dev-thundermail"

@@ -4,7 +4,7 @@ Once you have a working Stalwart installation, you'll need to fix up a few thing
 
 - [Connect to the Stalwart Admin Console](#connect-to-the-stalwart-admin-console)
 - [Create and Validate an SSL Certificate](#create-and-validate-an-ssl-certificate)
-- [Export and Format the SSL Certificate for Stalwart](#export-and-format-the-ssl-certificate-for-stalwart)
+- [Export and Format the SSL Certificate for Stalwart](#export-and-format-the-ssl-certificate-for-stalwart-and-nginx)
 - [Basic Stalwart Network Setup](#basic-stalwart-network-setup)
 - [Preventing IP Address Blocks](#preventing-ip-address-blocks)
 - [Resolving IP Address Blocks](#resolving-ip-address-blocks)
@@ -171,7 +171,7 @@ First, get the IP address of a Stalwart container. It doesn't matter which one, 
 
     # kubectl -n thundermail get pods | grep stalwart
     stalwart-54bf5f6bc6-rhsmv   1/1     Running   0          141m
-    
+
     # kubectl -n thundermail describe pod stalwart-54bf5f6bc6-rhsmv | grep IP
     IP:               10.120.73.236
 
@@ -211,7 +211,7 @@ Create the allowance first:
         create AllowedIp \
         --field address=$VPC_CIDR' \
         --field reason='Allow all internal traffic from the VPC'
-    
+
     Created AllowedIp ixf91jeeauqa
 
 Then remove the blocks. To figure out what blocks exist, `query` for `BlockedIp`:
@@ -220,8 +220,8 @@ Then remove the blocks. To figure out what blocks exist, `query` for `BlockedIp`
         --user $RECOVERY_USER \
         --password $RECOVERY_PASSWORD \
         query BlockedIp
-    
-    Id            IP Address(es)  Reason                            Expires At  Created At          
+
+    Id            IP Address(es)  Reason                            Expires At  Created At
     iwijj9veabqd  10.120.10.169   Excessive port scanning attempts  <none>      2026-06-17T04:06:51Z
     iwg2zu31abad  10.120.29.151   Excessive port scanning attempts  <none>      2026-06-16T21:37:57Z
     iwghlc9kaaqa  10.120.30.223   Excessive port scanning attempts  <none>      2026-06-16T18:30:28Z
@@ -233,7 +233,7 @@ You can unblock these by ID, using a comma-separated value:
         --password $RECOVERY_PASSWORD \
         delete BlockedIp \
         --ids iwijj9veabqd,iwg2zu31abad,iwghlc9kaaqa
-    
+
     iwijj9veabqd deleted
     iwg2zu31abad deleted
     iwghlc9kaaqa deleted
