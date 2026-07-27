@@ -37,7 +37,8 @@ data:
     [destination.legacy-stage.protocol.http]
     port = 443
     tls = "implicit"
-    forwarding = true
+    forwarding = "none" # HTTP doesn't support PROXY protocol
+    forwarded = true    # Instead, manipulate the X-Forwarded-For header for proxy chain info
 
     [destination.legacy-stage.protocol.smtp]
     port = 465
