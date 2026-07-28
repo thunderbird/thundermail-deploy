@@ -15,6 +15,8 @@ data:
     # https://docs.rs/log/latest/log/enum.Level.html
     log_level = "info"
 
+    # --- TLS Configuration ---
+
     [tls.certificate.stage]
     cert = "/etc/proxy/stage-thundermail.crt"
     key = "/etc/proxy/stage-thundermail.key"
@@ -25,13 +27,20 @@ data:
     min_version = "1.2"
     ignore_client_order = false
 
+
+
+    # --- Destinations ---
+
     # Destination naming should be inclusive of at least a cluster name and K8s namespace. This
     # allows us to build segregated Stalwart installs across namespaces and still proxy them.
     # Hostname DNS records are resolved at connection time and not cached in Stalwart, so we
     # **do not** need to bounce Stalwart if we change the record. Ref:
     # https://stalw.art/docs/migration/proxy/destinations/#host-and-endpoints
 
-    # The legacy-stage destination runs Stalwart v0.15.x on EC2 instances in the legacy account.
+
+    # -- Destination: legacy-stage
+    # The legacy-stage destination runs Stalwart v0.15.x on EC2 instances in the legacy AWS account.
+
     [destination.legacy-stage]
     host = "mail-legacy.stage-thundermail.com"
     tls_server_name = "mail.stage-thundermail.com"
@@ -43,10 +52,6 @@ data:
     port = 443
     tls = "implicit"
     forwarding = "none" # HTTP doesn't support PROXY protocol
-
-    [destination.legacy-stage.protocol.smtp]
-    port = 465
-    tls = "implicit"
 
     [destination.legacy-stage.protocol.submission]
     port = 587
@@ -60,25 +65,26 @@ data:
     port = 4190
     tls = "starttls"
 
-    # The newer tb-dev destination runs Stalwart v0.16.x on an EKS cluster.
+
+    # -- Destination: tb-dev-thundermail
+    # This runs Stalwart v0.16.x in the tb-dev EKS cluster under the "thundermail" namespace.
+
     [destination.tb-dev-thundermail]
     host = "nginx.thundermail.svc.cluster.local"
     tls_server_name = "mail.dev-thundermail.com"
     proxy_protocol = true
     forwarded = true
 
-    [destination.tb-dev-thundermail.protocol.http]
-    port = 443
-    tls = "implicit"
-    forwarding = "none" # HTTP doesn't support PROXY protocol
-
+    # This destination will be where the SMTP passthrough service is routed, so we must have
+    # a listener for this service on this destination (but not on other destinations).
     [destination.tb-dev-thundermail.protocol.smtp]
     port = 25
     tls = "plain"
 
-    # [destination.tb-dev-thundermail.protocol.submission]
-    # port = 465
-    # tls = "implicit"
+    [destination.tb-dev-thundermail.protocol.http]
+    port = 443
+    tls = "implicit"
+    forwarding = "none" # HTTP doesn't support PROXY protocol
 
     [destination.tb-dev-thundermail.protocol.submission]
     port = 587
@@ -91,6 +97,9 @@ data:
     [destination.tb-dev-thundermail.protocol.managesieve]
     port = 4190
     tls = "starttls"
+
+
+    # --- Listeners ---
 
     [listener.https]
     protocol = "http"
@@ -118,6 +127,16 @@ data:
     bind = ["0.0.0.0:4190"]
     tls = "starttls"
 
+    [listener.smtp]
+    protocol = "smtp"
+    bind = ["0.0.0.0:25", "[::]:25"]
+    tls = "plain"
+
+
+    # --- Mapping Configuration ---
+    # This describes the service where the proxy's internal account mappings are stored. We use a
+    # Redis host on ElastiCache.
+
     [mapping]
     source = "redis"
     normalize = "lowercase"
@@ -126,13 +145,21 @@ data:
     url = "redis://stalwart-migration-proxy-redis:6379"
     key_prefix = "route:"
 
+
+    # --- Admin Configuration ---
+    # Describes the interface to the proxy's mapping API.
+
     [admin]
     bind = "0.0.0.0:8080"
     tls = "implicit"
 
+    # --- Routing ----
+    # The rules on how connections are routed through the proxy to different backends.
+
     [routing]
-    # This is where a request for an account that doesn't have an explicit backend mapping yet goes.
-    # We set this to the legacy service until all accounts are migrated.
+    # The default_destination is where a request for an account that doesn't have an explicit
+    # backend mapping yet goes. We set this to the legacy service until all accounts are migrated,
+    # then switch to tb-dev-thundermail.
     default_destination = "legacy-stage"
 
     # Unauthenticated SMTP traffic can't be routed based on account. This setting directs this
@@ -140,7 +167,8 @@ data:
     # Ref: https://stalw.art/docs/migration/proxy/examples/stalwart-upgrade/#destinations-and-default-routing
     smtp_passthrough_destination = "tb-dev-thundermail"
 
-    # Endpoints served only by the old deployment.
+    # -- Endpoints served only by v15 deployments (legacy-stage)
+
     [[http.route]]
     match = "/api/oauth"
     destination = "legacy-stage"
@@ -153,7 +181,9 @@ data:
     match = "/authorize/**"
     destination = "legacy-stage"
 
-    # Endpoints served only by the new deployment.
+
+    # -- Endpoints served only by v16 deployments (tb-dev-thundermail)
+
     [[http.route]]
     match = "/api/auth"
     destination = "tb-dev-thundermail"
@@ -178,13 +208,17 @@ data:
     match = "/device"
     destination = "tb-dev-thundermail"
 
-    # OAuth token exchange is shared; route it by the web client that requested it.
+
+    # -- OAuth token exchange is shared; route it by the web client that requested it.
+
     [[http.route]]
     match = "/auth/token"
     extract = { from = "body", regex = "client_id=([^&]+)" }
     fallback = "tb-dev-thundermail"
 
-    # Everything else: route by the authenticated account, fall back to default.
+
+    # -- Everything else: route by the authenticated account, fall back to default.
+
     [[http.route]]
     match = "/**"
     extract = { from = "authorization" }
