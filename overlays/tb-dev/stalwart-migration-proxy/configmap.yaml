@@ -48,6 +48,12 @@ data:
     forwarding = "none"
     forwarded = true
 
+    # This destination will be where the SMTP passthrough service is routed, so we must have
+    # a listener for this service on this destination (but not on other destinations).
+    [destination.tb-dev-thundermail.protocol.smtp]
+    port = 25
+    tls = "plain"
+
     [destination.legacy-stage.protocol.http]
     port = 443
     tls = "implicit"
@@ -74,12 +80,6 @@ data:
     tls_server_name = "mail.dev-thundermail.com"
     proxy_protocol = true
     forwarded = true
-
-    # This destination will be where the SMTP passthrough service is routed, so we must have
-    # a listener for this service on this destination (but not on other destinations).
-    [destination.tb-dev-thundermail.protocol.smtp]
-    port = 25
-    tls = "plain"
 
     [destination.tb-dev-thundermail.protocol.http]
     port = 443
@@ -165,7 +165,7 @@ data:
     # Unauthenticated SMTP traffic can't be routed based on account. This setting directs this
     # traffic to a single backend.
     # Ref: https://stalw.art/docs/migration/proxy/examples/stalwart-upgrade/#destinations-and-default-routing
-    smtp_passthrough_destination = "tb-dev-thundermail"
+    smtp_passthrough_destination = "legacy-stage"
 
     # -- Endpoints served only by v15 deployments (legacy-stage)
 
