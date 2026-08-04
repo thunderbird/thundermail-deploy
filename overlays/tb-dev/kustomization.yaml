@@ -9,7 +9,7 @@ namespace: thundermail
 
 images:
   - name: stalwartlabs/stalwart
-    newTag: v0.16.13
+    newTag: v0.16.16
 
 patches:
   - path: nginx/aws/security-groups.yaml
