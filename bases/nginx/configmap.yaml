@@ -32,6 +32,10 @@ data:
     pid /run/nginx.pid;
   
     stream {
+      upstream stalwart-smtp {
+        server stalwart-mail:25
+      }
+
       upstream stalwart-smtps {
         server stalwart-mail:465;
       }
