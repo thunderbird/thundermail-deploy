@@ -27,6 +27,8 @@ spec:
               cpu: "1"
               memory: 1Gi
           ports:
+            - name: smtp
+              containerPort: 25
             - name: smtps
               containerPort: 465
             - name: submission

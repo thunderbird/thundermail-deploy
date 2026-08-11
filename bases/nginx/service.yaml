@@ -11,6 +11,9 @@ spec:
   selector:
     app: stalwart-nginx
   ports:
+    - name: smtp
+      port: 25
+      targetPort: smtp
     - name: https
       port: 443
       targetPort: https
