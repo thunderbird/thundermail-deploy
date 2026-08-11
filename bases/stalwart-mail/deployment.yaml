@@ -75,6 +75,8 @@ spec:
             # - name: STALWART_ROLE
             #   value:
           ports:
+            - name: smtp
+              containerPort: 25
             - name: https
               containerPort: 443
             - name: smtps
