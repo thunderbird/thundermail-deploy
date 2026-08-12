@@ -91,6 +91,11 @@ spec:
           groupID: sg-0a711c607f9e0b959
         - description: Allow access from Accounts Celery in stage
           groupID: sg-02700bcc4c090da45
+        # The next rule is temporary while we handle data migration, and should be removed once
+        # that migration is complete. It is safe to add because the SMP does not route traffic to
+        # this otherwise private endpoint.
+        - description: Allow access from Stalwart Migration Proxy in tb-dev
+          groupID: sg-0948f31a90e34eba6
 
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
