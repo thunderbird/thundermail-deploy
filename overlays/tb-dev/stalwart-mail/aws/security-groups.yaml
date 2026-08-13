@@ -93,46 +93,8 @@ spec:
           groupID: sg-01538f32a9bfe7b52
         - description: Allow access from Stalwart node 50 (mgmt) in stage
           groupID: sg-076b3f549a1666834
-    - fromPort: 443
-      toPort: 443
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow access from Stalwart node 1 (mail) in stage
-          groupID: sg-01538f32a9bfe7b52
-        - description: Allow access from Stalwart node 50 (mgmt) in stage
-          groupID: sg-076b3f549a1666834
-    - fromPort: 465
-      toPort: 465
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow access from Stalwart node 1 (mail) in stage
-          groupID: sg-01538f32a9bfe7b52
-        - description: Allow access from Stalwart node 50 (mgmt) in stage
-          groupID: sg-076b3f549a1666834
-    - fromPort: 587
-      toPort: 587
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow access from Stalwart node 1 (mail) in stage
-          groupID: sg-01538f32a9bfe7b52
-        - description: Allow access from Stalwart node 50 (mgmt) in stage
-          groupID: sg-076b3f549a1666834
-    - fromPort: 993
-      toPort: 993
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow access from Stalwart node 1 (mail) in stage
-          groupID: sg-01538f32a9bfe7b52
-        - description: Allow access from Stalwart node 50 (mgmt) in stage
-          groupID: sg-076b3f549a1666834
-    - fromPort: 4190
-      toPort: 4190
-      ipProtocol: tcp
-      userIDGroupPairs:
-        - description: Allow access from Stalwart node 1 (mail) in stage
-          groupID: sg-01538f32a9bfe7b52
-        - description: Allow access from Stalwart node 50 (mgmt) in stage
-          groupID: sg-076b3f549a1666834
+
+# Security group for the admin/mgmt service's load balancer
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
@@ -159,6 +121,7 @@ spec:
         - description: Allow access from Stalwart node 50 (mgmt) in stage
           groupID: sg-076b3f549a1666834
 
+# SG for the Redis host
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
