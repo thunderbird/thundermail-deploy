@@ -11,6 +11,9 @@ metadata:
 spec:
   vpcID: vpc-0c7a0ef4fdd2b8275
   ingressRules:
+    # Port 8080 is the managmement service port, which we do not wish to expose except through the
+    # Tailscale meshnet. These allowances permit health checks from the Kubernetes cluster and
+    # debug traffic from other stalwart pods (for using stalwart-cli, for example).
     - fromPort: 8080
       toPort: 8080
       ipProtocol: tcp
@@ -19,8 +22,16 @@ spec:
           groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
         - description: Allow management port traffic only from other stalwart-server sources
           groupID: sg-07f59e7e9ea8b2f0f # stalwart-server
-        - description: Allow SMTP service traffic from the private mail load balancer
-          groupID: "" # stalwart-mail-private-lb
+    # The rest of these are service ports which we will expose only to the nginx containers and
+    # other private access routes.
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP service traffic from the nginx containers
+          groupID: "sg-0c42a6600ec8831d2" # stalwart-nginx
+        # - description: Allow SMTP service traffic from the private mail load balancer
+        #   groupID: "" # stalwart-mail-private-lb
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
