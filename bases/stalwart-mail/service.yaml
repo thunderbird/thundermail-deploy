@@ -33,26 +33,6 @@ spec:
       targetPort: sieve
 
 ---
-# The stalwart-https service creates a ClusterIP Service which allows access from other internal
-# services. We could instead use the stalwart-admin Service below, but then we would be routing
-# traffic from nginx on a node out to a load balancer and back into the cluster. This allows a more
-# direct path instead, from a trusted source.
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-https
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  type: ClusterIP
-  selector:
-    app: stalwart
-  ports:
-    - name: https
-      port: 443
-      targetPort: https
-
----
 # When the legacy system is behind the SMP, it must relay outbound messages to this SMTP service
 # over a private, trusted connection. Thus, we have a private load balancer for legacy mail services
 # to use port 25 on.
@@ -83,6 +63,25 @@ spec:
       port: 25
       targetPort: smtp
 
+---
+# The stalwart-https service creates a ClusterIP Service which allows access from other internal
+# services. We could instead use the stalwart-admin Service below, but then we would be routing
+# traffic from nginx on a node out to a load balancer and back into the cluster. This allows a more
+# direct path instead, from a trusted source.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-https
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
 
 ---
 # We have to expose the management interface so that Accounts can access it, but a ClusterIP is

@@ -25,6 +25,14 @@ spec:
           groupID: sg-0948f31a90e34eba6
     # The rest of these are service ports which we will expose only to the nginx containers and
     # other private access routes.
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP service traffic from the nginx containers
+          groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
+        - description: Allow SMTP service traffic from the private mail load balancer
+          groupID: sg-0c033fbeec9e341f3 # stalwart-mail-private-lb
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
@@ -63,18 +71,6 @@ spec:
         - description: Allow ManageSieve service traffic from the nginx containers
           groupID: "sg-02a94a700e024fc0b" # stalwart-nginx
 
----
-apiVersion: vpcresources.k8s.aws/v1beta1
-kind: SecurityGroupPolicy
-metadata:
-  name: stalwart-server
-  namespace: thundermail
-spec:
-  securityGroups:
-    groupIds:
-      - sg-07624df6ceb8865ec  # EKS cluster
-      - sg-0225f0469688b6324  # Stalwart pods
-
 # Security group for private mail service access
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
@@ -93,6 +89,18 @@ spec:
           groupID: sg-01538f32a9bfe7b52
         - description: Allow access from Stalwart node 50 (mgmt) in stage
           groupID: sg-076b3f549a1666834
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - sg-07624df6ceb8865ec  # EKS cluster
+      - sg-0225f0469688b6324  # Stalwart pods
 
 # Security group for the admin/mgmt service's load balancer
 ---
