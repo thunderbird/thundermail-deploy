@@ -80,26 +80,6 @@ spec:
       toPort: 25
       ipProtocol: tcp
       userIDGroupPairs: [] # Populate with Kustomize
-    - fromPort: 443
-      toPort: 443
-      ipProtocol: tcp
-      userIDGroupPairs: [] # Populate with Kustomize
-    - fromPort: 465
-      toPort: 465
-      ipProtocol: tcp
-      userIDGroupPairs: [] # Populate with Kustomize
-    - fromPort: 587
-      toPort: 587
-      ipProtocol: tcp
-      userIDGroupPairs: [] # Populate with Kustomize
-    - fromPort: 993
-      toPort: 993
-      ipProtocol: tcp
-      userIDGroupPairs: [] # Populate with Kustomize
-    - fromPort: 4190
-      toPort: 4190
-      ipProtocol: tcp
-      userIDGroupPairs: [] # Populate with Kustomize
 
 ---
 # Security group for the admin/mgmt service's load balancer
