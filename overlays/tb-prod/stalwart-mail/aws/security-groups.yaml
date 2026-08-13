@@ -64,6 +64,34 @@ spec:
       - sg-01502e50caccc6795  # EKS cluster
       - sg-07f59e7e9ea8b2f0f  # Stalwart pods
 
+# Security group for private mail service access
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-mail-private-lb
+  namespace: thundermail
+spec:
+  vpcID: vpc-0c7a0ef4fdd2b8275
+  ingressRules:
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow access from Stalwart node 10 (mail) in prod
+          groupID: sg-052805d070cd91ec9
+        - description: Allow access from Stalwart node 11 (mail) in prod
+          groupID: sg-04ef7e0e4fce5a3ff
+        - description: Allow access from Stalwart node 12 (mail) in prod
+          groupID: sg-0c05aa0b38272e3cc
+        - description: Allow access from Stalwart node 13 (mail) in prod
+          groupID: sg-0160e600c6289bb82
+        - description: Allow access from Stalwart node 60 (mgmt) in prod
+          groupID: sg-02dab3807cc8b3c42
+        - description: Allow access from Stalwart node 61 (mgmt) in prod
+          groupId: sg-0a17325bba7d4d500
+
+# Security group for the admin/mgmt service's load balancer
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
@@ -86,6 +114,7 @@ spec:
         - description: Allow access from Accounts Celery in prod
           groupID: sg-0ede6c1f9f8a4b676
 
+# SG for the Redis host
 ---
 apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
