@@ -91,16 +91,13 @@ spec:
             - name: mgmt
               containerPort: 8080
           livenessProbe:
-            httpGet:
-              path: /healthz/live
-              port: mgmt
+            # We operate Stalwart behind a proxy that uses PROXY protocol. This means that in order
+            # to get a good response from the /healthz endpoint, we have to include a PROXY header.
+            # Kubernetes httpGet livenessProbes do not support this, so we instead use a basic port
+            # test to determine liveness.
+            tcpSocket:
+              port: 8080
             initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /healthz/ready
-              port: mgmt
-            initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
             - name: stalwart-config
