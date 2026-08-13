@@ -89,7 +89,7 @@ spec:
         - description: Allow access from Stalwart node 60 (mgmt) in prod
           groupID: sg-02dab3807cc8b3c42
         - description: Allow access from Stalwart node 61 (mgmt) in prod
-          groupId: sg-0a17325bba7d4d500
+          groupID: sg-0a17325bba7d4d500
 
 # Security group for the admin/mgmt service's load balancer
 ---

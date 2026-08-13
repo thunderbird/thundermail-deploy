@@ -116,10 +116,6 @@ spec:
           groupID: sg-0a711c607f9e0b959
         - description: Allow access from Accounts Celery in stage
           groupID: sg-02700bcc4c090da45
-        - description: Allow access from Stalwart node 1 (mail) in stage
-          groupID: sg-01538f32a9bfe7b52
-        - description: Allow access from Stalwart node 50 (mgmt) in stage
-          groupID: sg-076b3f549a1666834
 
 # SG for the Redis host
 ---

@@ -5,10 +5,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart-admin
+  name: stalwart-mail-private
   annotations:
-    service.beta.kubernetes.io/aws-load-balancer-subnets: "mzla-tb-prod-public-eu-central-1a,mzla-tb-prod-public-eu-central-1b"
-    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-prod"
+    # Subnets: mzla-tb-prod-stalwart-eu-central-1a, mzla-tb-prod-stalwart-eu-central-1b
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0ae96180c6944e64e, subnet-0a6b51fec89209aea"
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "" # stalwart-mail-private-lb
 
 
 ---
