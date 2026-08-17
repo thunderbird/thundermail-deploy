@@ -14,22 +14,16 @@ data:
   #   https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
   # - "DataStore" in Stalwart docs:
   #   https://stalw.art/docs/ref/object/data-store/#type-postgresql
-  
-  # This file has been intentionally updated with special settings for running a test. The original
-  # values are preserved here for reference:
-  #
-  #    "host": "ep-summer-base-as0z2ihy-pooler.c-4.eu-central-1.aws.neon.tech",
-  #      "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "ep-weathered-sea-a25g6epq-pooler.eu-central-1.aws.neon.tech",
+      "host": "ep-summer-base-as0z2ihy-pooler.c-4.eu-central-1.aws.neon.tech",
       "port": 5432,
       "database": "stalwart",
-      "authUsername": "stalwart_owner",
+      "authUsername": "neondb_owner",
       "authSecret": {
         "@type": "EnvironmentVariable",
-        "variableName": "STALWART_RJUNGTEST_POSTGRESQL_ADMIN_PASSWORD"
+        "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
       },
       "useTls": true,
       "allowInvalidCerts": true,
