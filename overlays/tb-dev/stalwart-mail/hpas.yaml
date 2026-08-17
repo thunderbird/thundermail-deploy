@@ -5,8 +5,5 @@ metadata:
   name: stalwart
   namespace: thundermail
 spec:
-  minReplicas: 1
-  maxReplicas: 1
-  # Below are the correct values, currently overriden for a test
-  # minReplicas: 2
-  # maxReplicas: 3
+  minReplicas: 2
+  maxReplicas: 3
