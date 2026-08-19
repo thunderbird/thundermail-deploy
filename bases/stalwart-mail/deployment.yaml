@@ -53,8 +53,9 @@ spec:
             # Recovery and bootstrap
             - name: STALWART_PUSH_SHARD
               value: ""
-            - name: STALWART_RECOVERY_MODE
-              value: "false"
+            # Kustomize to "true" or 1 to enable recovery mode
+            # - name: STALWART_RECOVERY_MODE
+            #   value: "false"
             - name: STALWART_RECOVERY_MODE_PORT
               value: "8080"
             - name: STALWART_RECOVERY_MODE_LOG_LEVEL
