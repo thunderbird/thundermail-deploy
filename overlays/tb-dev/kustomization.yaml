@@ -35,3 +35,17 @@ patches:
         value:
           name: STALWART_PUBLIC_URL
           value: "https://mail.stage-thundermail.com"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MIGRATION_TEST_STALWART_POSTGRESQL_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: migration-test-stalwart-postgresql-admin-password
+              key: STALWART_POSTGRESQL_ADMIN_PASSWORD
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: STALWART_RECOVERY_MODE
+          value: "true"
+
