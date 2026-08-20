@@ -34,7 +34,22 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_PUBLIC_URL
-          value: "https://mail.stage-thundermail.com"
+          # tb-dev Stalwart is an INTERNAL-ONLY deployment, so it advertises its
+          # in-cluster endpoint. Every service it exposes is private: stalwart-https and
+          # stalwart-mgmt are ClusterIP, and stalwart-admin / stalwart-mail-private are
+          # INTERNAL NLBs (10.120.x.x). Its only consumer, Accounts, runs in this cluster
+          # and already reaches it at this address via STALWART_BASE_API_URL.
+          #
+          # This value is not cosmetic: Stalwart returns it as the JMAP session `apiUrl`,
+          # and well-behaved JMAP clients use that for every subsequent call INSTEAD of
+          # whatever URL they were configured with. So whatever is set here is where
+          # clients actually send requests -- and their credentials.
+          #
+          # The cert served on this in-cluster address is *.stage-thundermail.com, not the
+          # Service DNS name, so consumers must skip cert-name verification on this hop.
+          # Accounts already does (VERIFY_PRIVATE_LINK_SSL=false); traffic stays TLS and
+          # never leaves the cluster.
+          value: "https://stalwart-https.thundermail.svc.cluster.local"
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
