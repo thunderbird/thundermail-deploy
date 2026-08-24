@@ -58,8 +58,9 @@ spec:
             #   value: "false"
             - name: STALWART_RECOVERY_MODE_PORT
               value: "8080"
-            - name: STALWART_RECOVERY_MODE_LOG_LEVEL
-              value: info
+            # Kustomize to "debug" or "trace" for more logging
+            # - name: STALWART_RECOVERY_MODE_LOG_LEVEL
+            #   value: info
             - name: STALWART_RECOVERY_ADMIN
               valueFrom:
                 secretKeyRef:
