@@ -17,7 +17,8 @@ data:
     user nginx;
     worker_processes auto;
   
-    error_log stderr;
+    access_log /dev/stdout;
+    error_log /dev/stdout;
     pid /run/nginx.pid;
   
     stream {
@@ -39,6 +40,13 @@ data:
   
       upstream stalwart-managesieve {
         server stalwart-mail:4190;
+      }
+  
+      server {
+        listen 25;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+        proxy_pass stalwart-smtp;
       }
   
       server {
