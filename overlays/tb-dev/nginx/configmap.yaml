@@ -17,7 +17,8 @@ data:
     user nginx;
     worker_processes auto;
   
-    error_log stderr;
+    access_log /dev/stdout;
+    error_log /dev/stdout;
     pid /run/nginx.pid;
   
     stream {
