@@ -39,12 +39,12 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_RECOVERY_MODE_LOG_LEVEL
-          value: "debug"
+          value: "trace"
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_RECOVERY_MODE
-          value: "false"
+          value: "true"
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
