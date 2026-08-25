@@ -18,7 +18,7 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "ep-bitter-water-a297fien-pooler.eu-central-1.aws.neon.tech"
+      "host": "ep-bitter-water-a297fien-pooler.eu-central-1.aws.neon.tech",
       "port": 5432,
       "database": "stalwart",
       "authUsername": "stalwart_owner",
