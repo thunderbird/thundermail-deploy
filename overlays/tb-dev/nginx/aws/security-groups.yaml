@@ -53,17 +53,6 @@ spec:
           groupID: sg-0948f31a90e34eba6 # stalwart-migration-proxy
 
 ---
-apiVersion: ec2.services.k8s.aws/v1alpha1
-kind: SecurityGroup
-metadata:
-  name: stalwart-nginx-lb
-  namespace: thundermail
-  annotations:
-    services.k8s.aws/adoption-policy: "adopt-or-create"
-spec:
-  vpcID: vpc-0e0f4b8d603d463e0
-
----
 apiVersion: vpcresources.k8s.aws/v1beta1
 kind: SecurityGroupPolicy
 metadata:
