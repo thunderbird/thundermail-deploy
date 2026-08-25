@@ -17,7 +17,6 @@ data:
     user nginx;
     worker_processes auto;
   
-    access_log /dev/stdout;
     error_log /dev/stdout;
     pid /run/nginx.pid;
   
@@ -44,6 +43,7 @@ data:
   
       server {
         listen 25;
+        access_log /dev/stdout;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtp;
@@ -51,6 +51,7 @@ data:
   
       server {
         listen 465;
+        access_log /dev/stdout;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtps;
@@ -58,6 +59,7 @@ data:
   
       server {
         listen 587;
+        access_log /dev/stdout;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-starttls;
@@ -65,6 +67,7 @@ data:
   
       server {
         listen 993;
+        access_log /dev/stdout;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
@@ -72,9 +75,9 @@ data:
   
       server {
         listen 4190;
+        access_log /dev/stdout;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
-        
         proxy_pass stalwart-managesieve;
       }
     }
@@ -99,6 +102,9 @@ data:
       }
   
       server {
+        # --- Logging
+        access_log /dev/stdout;
+
         # --- Dev domain server ---
         server_name *.dev-thundermail.com;
         listen 443 ssl;
