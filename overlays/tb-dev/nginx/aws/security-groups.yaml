@@ -19,8 +19,14 @@ spec:
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
           groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
-    # The rest of these ports are service ports the load balancer publicizes. These container ports
-    # are exposed only to the load balancer.
+    # The rest of these ports are service ports available on the K8s service. These container ports
+    # are exposed only to the migration proxy.
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow SMTP service traffic from the Stalwart migration proxy pods
+          groupID: sg-0948f31a90e34eba6 # stalwart-migration-proxy
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
