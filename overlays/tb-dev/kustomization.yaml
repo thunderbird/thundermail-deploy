@@ -34,7 +34,7 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_PUBLIC_URL
-          value: "https://mail.stage-thundermail.com"
+          value: "https://mail.dev-thundermail.com"
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
