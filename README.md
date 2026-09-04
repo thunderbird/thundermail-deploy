@@ -13,3 +13,5 @@ This project is installed into Kubernetes clusters at Thundermail through [Pulum
 - [Configuration](./docs/configuration.md)
 - [NeonDB Setup](./docs/neondb.md)
 - [Development and Debugging](./docs/development.md)
+- [Major Migration Options](./docs/migration.md)
+- [Tools Related to Migration](./docs/migration-tools.md)
