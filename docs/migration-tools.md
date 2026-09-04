@@ -102,6 +102,8 @@ curl -u "$OLD_STALWART_USER:$OLD_STALWART_PASSWORD" \
 
 ### SMP API
 
+[Full documentation.](https://stalw.art/docs/migration/proxy/management/api/)
+
 SMP exposes a small API which we can use to instruct it which destination should handle traffic for an account. The URLs in the following examples refer to `stalwart-migration-proxy-api`, which is a ClusterIP in the same namespace as SMP; this will be valid as-is for any Stalwart installations made by this deploy repo. Because it's internal, we use the `-k` option to accept unsecure TLS connections and avoid errors.
 
 Get the status of an account mapping:
