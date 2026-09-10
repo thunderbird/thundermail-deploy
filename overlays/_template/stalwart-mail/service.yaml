@@ -1,0 +1,48 @@
+# This file contains no overlays for the stalwart-mail and stalwart-https services, which are
+# cluster-internal and do not require additional environment configuration.
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-mail-private
+  annotations:
+    # SETUP: Uncomment the setting below that indicates which subnets you want to deploy these load
+    # balancers on. This is a per-cluster (tb-dev/prod) decision, **BUT ALSO** you need to match
+    # these subnets to the subnets you've deployed the Stalwart pods on. The kustomization.yaml file
+    # has further detail on this topic.
+
+    # **tb-dev, special stalwart subnets**
+    # Subnets: mzla-tb-dev-stalwart-eu-central-1a, mzla-tb-dev-stalwart-eu-central-1b
+    # service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0ae96180c6944e64e, subnet-0a6b51fec89209aea"
+
+    # **tb-dev, normal general subnets**
+    # Subnets: mzla-tb-dev-private-eu-central-1a, mzla-tb-dev-private-eu-central-1b
+    # service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
+    
+    # **tb-prod, special stalwart subnets**
+    # Subnets: mzla-tb-prod-stalwart-eu-central-1a, mzla-tb-prod-stalwart-eu-central-1b
+    # service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0a98c29bd563864be, subnet-0707b308b8b35a48c"
+
+    # **tb-prod, normal general subnets**
+    # Subnets: mzla-tb-prod-private-eu-central-1a, mzla-tb-prod-private-eu-central-1b
+    # service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-085a71891b27bd24c, subnet-0b863a1876ec121cb"
+    
+    # SETUP: Set these tags appropriately
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+    
+    # SETUP: Set this to the ID of the stalwart-mail-private-lb security group
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: ""
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-admin
+  annotations:
+    # SETUP: Set the subnets following the same guidance as above
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
+    # SETUP: Set these tags appropriately
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
+    # SETUP: Set this to the ID of the stalwart-admin-lb security group
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: ""

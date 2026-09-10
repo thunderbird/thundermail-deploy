@@ -1,0 +1,58 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../bases
+
+namespace: thundermail-zulu
+
+images:
+  - name: stalwartlabs/stalwart
+    newTag: v0.16.21
+
+patches:
+  - path: nginx/aws/security-groups.yaml
+  - path: nginx/configmap.yaml
+  - path: nginx/deployment.yaml
+  - path: nginx/hpas.yaml
+  - path: stalwart-mail/aws/elasticache.yaml
+  - path: stalwart-mail/aws/s3.yaml
+  - path: stalwart-mail/aws/security-groups.yaml
+  - path: stalwart-mail/aws/subnet-groups.yaml
+  - path: stalwart-mail/configmap.yaml
+  - path: stalwart-mail/hpas.yaml
+  - path: stalwart-mail/secrets.yaml
+  - path: stalwart-mail/service.yaml
+  - path: stalwart-mail/serviceaccount.yaml
+  
+  # SETUP: If your installation runs behind Stalwart Migration Proxy, uncomment the next path to
+  # create a private ClusterIP service instead of a public entry point on nginx.
+  # - path: nginx/service.yaml
+
+  # SETUP: If your installation runs behind Stalwart Migration Proxy, uncomment the following patch
+  # to ensure no security group for a public load balancer gets created.
+  # - target:
+  #     kind: SecurityGroup
+  #     name: stalwart-nginx-lb
+  #   patch: |
+  #     - op: delete
+
+  # SETUP: Set the value below to a full URL where Stalwart is served from, e.g. "https://mail.my.tld"
+  - target:
+      kind: Deployment
+      name: stalwart
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: STALWART_PUBLIC_URL
+          value: ""
+
+  # SETUP: If your installation **DOES NOT** need to inherit from a legacy Stalwart deployment, then
+  # uncomment the following section to prevent private service resources from being built.
+  # - target:
+  #     kind: SecurityGroup
+  #     name: stalwart-mail-private-lb
+  #   patch: |
+  #     - op: delete

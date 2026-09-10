@@ -1,0 +1,38 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+
+    # SETUP: If you run behind SMP, then we need to do away with a bunch of annotations that only
+    # concern a public AWS load balancer. Uncomment the following line.
+
+    # annotations: {}
+
+    # SETUP: However, if you **DO NOT** run behind SMP, then you only need to update some of those
+    # annotations by uncommenting these lines and filling in the right values.
+
+    # annotations:
+    #   # SETUP: A unique name for the load balancer
+    #   service.beta.kubernetes.io/aws-load-balancer-name: ""
+    #
+    #   # SETUP: Uncomment the line below that matches your deployment environment. These are the
+    #   # normal private subnets for each cluster.
+    #
+    #   # tb-dev:
+    #   service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
+    #
+    #   # tb-prod:
+    #   service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-085a71891b27bd24c, subnet-0b863a1876ec121cb"
+    #
+    #   # SETUP: Fill in appropriate tag values here.
+    #   service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+    #
+    #   # SETUP: Add the security group ID for the load balancer
+    #   service.beta.kubernetes.io/aws-load-balancer-security-groups: ""
+
+spec:
+
+# SETUP: If you run behind SMP, then this service needs to be private, accessible only to the SMP.
+# Uncomment the following line to accomplish this.
+#   type: ClusterIP

@@ -1,0 +1,84 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+spec:
+  # SETUP: Specify your deployment's VPC ID.
+  vpcID: ""
+  ingressRules:
+    # Port 80 is a simple health check implemented in the nginx config file. The Kubelet needs
+    # access to this port so it knows to keep the container alive.
+    - fromPort: 80
+      toPort: 80
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+          # SETUP: Uncomment the groupID below that corresponds to your deployment cluster
+          # groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
+          # groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
+    # The rest of these ports are service ports available on the K8s service. These container ports
+    # are exposed only to the migration proxy.
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      # SETUP: For this and subsequent decisions in this file, decide if you are going to run your
+      # Stalwart deployment behind a Stalwart Migration Proxy. If so, use the `userIDGroupPairs`
+      # option below, and specify the ID of the security group the SMP you run behind is using. If
+      # not, then this is the point of entry for mail services, and you should instead use the ID
+      # for the security group attached to the load balancer created for nginx.
+      #
+      userIDGroupPairs:
+        - description: Allow SMTP service traffic from the <appropriate source descriptor>
+          groupID: ""
+      
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Supply the same source security group ID that you chose above.
+        - description: Allow HTTPS service traffic from the <appropriate source descriptor>
+          groupID: ""
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Supply the same source security group ID that you chose above.
+        - description: Allow SMTPS service traffic from the <appropriate source descriptor>
+          groupID: ""
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Supply the same source security group ID that you chose above.
+        - description: Allow SMTP STARTTLS service traffic from the <appropriate source descriptor>
+          groupID: ""
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Supply the same source security group ID that you chose above.
+        - description: Allow IMAPS service traffic from the <appropriate source descriptor>
+          groupID: ""
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Supply the same source security group ID that you chose above.
+        - description: Allow ManageSieve service traffic from the <appropriate source descriptor>
+          groupID: ""
+
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      # SETUP: Here, set the security group ID used by the nginx pods
+      - ""

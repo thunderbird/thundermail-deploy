@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart-nginx
+  ports:
+    - name: smtp
+      port: 25
+      targetPort: smtp
+    - name: https
+      port: 443
+      targetPort: https
+    - name: smtps
+      port: 465
+      targetPort: smtps
+    - name: starttls
+      port: 587
+      targetPort: starttls
+    - name: imaps
+      port: 993
+      targetPort: imaps
+    - name: sieve
+      port: 4190
+      targetPort: sieve

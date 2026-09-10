@@ -1,0 +1,180 @@
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  vpcID: vpc-0e0f4b8d603d463e0
+  tags:
+    - key: Name
+      value: "" # SETUP: Set a unique name for this security group
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  ingressRules:
+    # Port 8080 is the managmement service port, which we do not wish to expose except through the
+    # Tailscale meshnet. These allowances permit health checks from the Kubernetes cluster and
+    # debug traffic from other stalwart pods (for using stalwart-cli, for example).
+    - fromPort: 8080
+      toPort: 8080
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Kubelet probes from EKS cluster SG
+        # SETUP: Uncomment **ONLY ONE** of the below options, depending on the cluster you're deploying to
+        # groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
+        # groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
+
+        # SETUP: Set this groupID to your Stalwart server's security group ID
+        # - description: Allow management port traffic only from other stalwart-server sources
+        #   groupID: ""
+
+    # The rest of these are service ports which we will expose only to the nginx containers and
+    # other private access routes.
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow SMTP service traffic from the nginx containers
+          groupID: ""
+        # SETUP: If your system is in a state of migration where a legacy Stalwart installation must be able to relay
+        # SMTP traffic through *this* system without proper TLS, it must go through a private, trusted network route.
+        # In this case, uncomment the rule below and set the groupID to your installation's `stalwart-mail-private`
+        # service/LB security group ID.
+        # - description: Allow SMTP service traffic from the private mail load balancer
+        #   groupID: ""
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow HTTPS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow SMTPS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow STARTTLS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow IMAPS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+        # SETUP: Set this groupID to your installation's nginx security group ID
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the nginx containers
+          groupID: ""
+
+# SETUP: Take one of the following actions.
+#   **EITHER**
+#     (a) Uncomment the following SecurityGroup resource and fill out the required fields,
+#   **OR**
+#     (b) Uncomment the section in kustomization.yaml that builds these resources.
+# Take Option A only if you need to inherit from a legacy Stalwart installation.
+
+# Security group for private mail service access
+# ---
+# apiVersion: ec2.services.k8s.aws/v1alpha1
+# kind: SecurityGroup
+# metadata:
+#   name: stalwart-mail-private-lb
+#   namespace: thundermail
+# spec:
+#   vpcID: "" # SETUP: Set your deployment's VPC ID
+#   tags:
+#     - key: Name
+#       value: "" # SETUP: Set a unique name for this security group
+#     - key: application
+#       value: thundermail
+#     - key: managed-by
+#       value: ack
+#   ingressRules:
+#     - fromPort: 25
+#       toPort: 25
+#       ipProtocol: tcp
+#       userIDGroupPairs:
+#         # SETUP: Add a list of rules allowing access from your legacy system
+#         - description: Allow access from legacy Stalwart node
+#           groupID: ""
+
+---
+# Security group policy that attaches 
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      # SETUP: Add here the ID for your stalwart-server pod security group
+      # - ""
+
+# Security group for the admin/mgmt service's load balancer
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-admin-lb
+  namespace: thundermail
+  annotations:
+    services.k8s.aws/adoption-policy: "adopt-or-create"
+spec:
+  vpcID: "" # SETUP: Set the VPC ID of the deployment environment
+  tags:
+    - key: Name
+      value: "" # SETUP: Set a unique name for this security group
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  ingressRules:
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Add rules allowing access from whatever needs to use Stalwart's private admin API
+        # - description: Allow access from Accounts API in some env
+        #   groupID: ""
+        # - description: Allow access from Accounts Celery in some env
+        #   groupID: ""
+
+# SG for the Redis host
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-elasticache-redis
+  namespace: thundermail
+spec:
+  vpcID: "" # SETUP: Set the VPC of your deployment environment
+  tags:
+    - key: Name
+      value: "" # SETUP: Set a unique name for this security group
+    - key: application
+      value: thundermail
+    - key: managed-by
+      value: ack
+  ingressRules:
+    - fromPort: 6379
+      toPort: 6379
+      ipProtocol: tcp
+      userIDGroupPairs:
+        - description: Allow traffic from Stalwarts server containers
+          groupID: "" # SETUP: Set the Stalwart server pod's security group ID
