@@ -178,3 +178,13 @@ spec:
       userIDGroupPairs:
         - description: Allow traffic from Stalwarts server containers
           groupID: "" # SETUP: Set the Stalwart server pod's security group ID
+
+# SETUP: If your installation **DOES NOT** need to inherit from a legacy Stalwart deployment, then
+# uncomment the following patch to not build a security group to expose private service.
+---
+$patch: delete
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-mail-private-lb
+  namespace: thundermail

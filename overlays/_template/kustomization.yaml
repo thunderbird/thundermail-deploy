@@ -49,10 +49,16 @@ patches:
           name: STALWART_PUBLIC_URL
           value: ""
 
-  # SETUP: If your installation **DOES NOT** need to inherit from a legacy Stalwart deployment, then
-  # uncomment the following section to prevent private service resources from being built.
+  # SETUP: Stalwart pods use the nodeSelector field to force deployment onto a special set of nodes.
+  # These nodes live on special subnets where outbound traffic is routed through a special NAT
+  # Gateway. That gateway has certain IP addresses attached to it, so that our outbound mail tends
+  # to have a better reputation. If your deployment does not hinge on IP reputation, you can
+  # uncomment the following patch to deploy on the general nodes instead. If you do this, be sure
+  # to specify the *general* subnets when building Stalwart's load balancer.
   # - target:
-  #     kind: SecurityGroup
-  #     name: stalwart-mail-private-lb
+  #     kind: Deployment
+  #     name: stalwart
   #   patch: |
-  #     - op: delete
+  #     - op: replace
+  #       path: /spec/template/spec/nodeSelector/role
+  #       value: general

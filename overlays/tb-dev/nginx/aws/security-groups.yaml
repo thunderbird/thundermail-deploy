@@ -68,3 +68,11 @@ spec:
   securityGroups:
     groupIds:
       - sg-02a94a700e024fc0b  # stalwart-nginx SG
+
+---
+$patch: delete
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx-lb
+  namespace: thundermail

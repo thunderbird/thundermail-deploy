@@ -82,3 +82,13 @@ spec:
     groupIds:
       # SETUP: Here, set the security group ID used by the nginx pods
       - ""
+
+# SETUP: If you run behind an SMP, then there is no public load balancer for nginx, and there is no
+# need for a security group for that load balancer. Uncomment the following patch to prevent it.
+# ---
+# $patch: delete
+# apiVersion: ec2.services.k8s.aws/v1alpha1
+# kind: SecurityGroup
+# metadata:
+#   name: stalwart-nginx-lb
+#   namespace: thundermail
