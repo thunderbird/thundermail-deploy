@@ -33,45 +33,45 @@ spec:
     - fromPort: 25
       toPort: 25
       ipProtocol: tcp
-      userIDGroupPairs:
+      userIDGroupPairs: []
         # SETUP: Set this groupID to your installation's nginx security group ID
-        - description: Allow SMTP service traffic from the nginx containers
-          groupID: ""
+        # - description: Allow SMTP service traffic from the nginx containers
+        #   groupID: ""
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
-      userIDGroupPairs:
+      userIDGroupPairs: []
         # SETUP: Set this groupID to your installation's nginx security group ID
-        - description: Allow HTTPS service traffic from the nginx containers
-          groupID: ""
+        #  - description: Allow HTTPS service traffic from the nginx containers
+        #    groupID: ""
     - fromPort: 465
       toPort: 465
       ipProtocol: tcp
-      userIDGroupPairs:
+      userIDGroupPairs: []
         # SETUP: Set this groupID to your installation's nginx security group ID
-        - description: Allow SMTPS service traffic from the nginx containers
-          groupID: ""
+        #  - description: Allow SMTPS service traffic from the nginx containers
+        #    groupID: ""
     - fromPort: 587
       toPort: 587
       ipProtocol: tcp
-      userIDGroupPairs:
+      userIDGroupPairs: []
         # SETUP: Set this groupID to your installation's nginx security group ID
-        - description: Allow STARTTLS service traffic from the nginx containers
-          groupID: ""
+        #  - description: Allow STARTTLS service traffic from the nginx containers
+        #    groupID: ""
     - fromPort: 993
       toPort: 993
       ipProtocol: tcp
-      userIDGroupPairs:
+      userIDGroupPairs: []
         # SETUP: Set this groupID to your installation's nginx security group ID
-        - description: Allow IMAPS service traffic from the nginx containers
-          groupID: ""
+        #  - description: Allow IMAPS service traffic from the nginx containers
+        #    groupID: ""
     - fromPort: 4190
       toPort: 4190
       ipProtocol: tcp
         # SETUP: Set this groupID to your installation's nginx security group ID
-      userIDGroupPairs:
-        - description: Allow ManageSieve service traffic from the nginx containers
-          groupID: ""
+      userIDGroupPairs: []
+        #  - description: Allow ManageSieve service traffic from the nginx containers
+        #    groupID: ""
 
 ---
 # Security group policy that attaches 
