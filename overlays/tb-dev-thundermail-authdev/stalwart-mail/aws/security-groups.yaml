@@ -22,7 +22,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
-        groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
+          groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
 
         # SETUP: Set this groupID to your Stalwart server's security group ID
         # - description: Allow management port traffic only from other stalwart-server sources
