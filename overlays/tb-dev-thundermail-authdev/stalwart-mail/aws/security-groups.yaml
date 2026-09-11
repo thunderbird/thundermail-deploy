@@ -30,61 +30,61 @@ spec:
 
     # The rest of these are service ports which we will expose only to the nginx containers and
     # other private access routes.
-    # - fromPort: 25
-    #   toPort: 25
-    #   ipProtocol: tcp
-    #   userIDGroupPairs:
-    #     # SETUP: Set this groupID to your installation's nginx security group ID
-    #     - description: Allow SMTP service traffic from the nginx containers
-    #       groupID: ""
-    # - fromPort: 443
-    #   toPort: 443
-    #   ipProtocol: tcp
-    #   userIDGroupPairs:
-    #     # SETUP: Set this groupID to your installation's nginx security group ID
-    #     - description: Allow HTTPS service traffic from the nginx containers
-    #       groupID: ""
-    # - fromPort: 465
-    #   toPort: 465
-    #   ipProtocol: tcp
-    #   userIDGroupPairs:
-    #     # SETUP: Set this groupID to your installation's nginx security group ID
-    #     - description: Allow SMTPS service traffic from the nginx containers
-    #       groupID: ""
-    # - fromPort: 587
-    #   toPort: 587
-    #   ipProtocol: tcp
-    #   userIDGroupPairs:
-    #     # SETUP: Set this groupID to your installation's nginx security group ID
-    #     - description: Allow STARTTLS service traffic from the nginx containers
-    #       groupID: ""
-    # - fromPort: 993
-    #   toPort: 993
-    #   ipProtocol: tcp
-    #   userIDGroupPairs:
-    #     # SETUP: Set this groupID to your installation's nginx security group ID
-    #     - description: Allow IMAPS service traffic from the nginx containers
-    #       groupID: ""
-    # - fromPort: 4190
-    #   toPort: 4190
-    #   ipProtocol: tcp
-    #     # SETUP: Set this groupID to your installation's nginx security group ID
-    #   userIDGroupPairs:
-    #     - description: Allow ManageSieve service traffic from the nginx containers
-    #       groupID: ""
+    - fromPort: 25
+      toPort: 25
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow SMTP service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 443
+      toPort: 443
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow HTTPS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 465
+      toPort: 465
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow SMTPS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 587
+      toPort: 587
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow STARTTLS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 993
+      toPort: 993
+      ipProtocol: tcp
+      userIDGroupPairs:
+        # SETUP: Set this groupID to your installation's nginx security group ID
+        - description: Allow IMAPS service traffic from the nginx containers
+          groupID: ""
+    - fromPort: 4190
+      toPort: 4190
+      ipProtocol: tcp
+        # SETUP: Set this groupID to your installation's nginx security group ID
+      userIDGroupPairs:
+        - description: Allow ManageSieve service traffic from the nginx containers
+          groupID: ""
 
 ---
 # Security group policy that attaches 
-apiVersion: vpcresources.k8s.aws/v1beta1
-kind: SecurityGroupPolicy
-metadata:
-  name: stalwart-server
-  namespace: thundermail
-spec:
-  securityGroups:
-    groupIds: []
-      # SETUP: Add here the ID for your stalwart-server pod security group
-      # - ""
+# apiVersion: vpcresources.k8s.aws/v1beta1
+# kind: SecurityGroupPolicy
+# metadata:
+#   name: stalwart-server
+#   namespace: thundermail
+# spec:
+#   securityGroups:
+#     groupIds: []
+#       # SETUP: Add here the ID for your stalwart-server pod security group
+#       # - ""
 
 # Security group for the admin/mgmt service's load balancer
 ---
