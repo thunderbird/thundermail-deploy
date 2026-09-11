@@ -24,6 +24,7 @@ spec:
     - fromPort: 25
       toPort: 25
       ipProtocol: tcp
+      #    groupID: "sg-003b6b400b4c35131" # stalwart-admin-lb
       # SETUP: For this and subsequent decisions in this file, decide if you are going to run your
       # Stalwart deployment behind a Stalwart Migration Proxy. If so, use the `userIDGroupPairs`
       # option below, and specify the ID of the security group the SMP you run behind is using. If
