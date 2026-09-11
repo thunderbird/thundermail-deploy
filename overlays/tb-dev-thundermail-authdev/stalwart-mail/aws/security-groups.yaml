@@ -75,16 +75,16 @@ spec:
 
 ---
 # Security group policy that attaches 
-# apiVersion: vpcresources.k8s.aws/v1beta1
-# kind: SecurityGroupPolicy
-# metadata:
-#   name: stalwart-server
-#   namespace: thundermail
-# spec:
-#   securityGroups:
-#     groupIds: []
-#       # SETUP: Add here the ID for your stalwart-server pod security group
-#       # - ""
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      # SETUP: Add here the ID for your stalwart-server pod security group
+      - "sg-046a70fdc18a22232" # SETUP: Default, temporary, replace
 
 # Security group for the admin/mgmt service's load balancer
 ---
