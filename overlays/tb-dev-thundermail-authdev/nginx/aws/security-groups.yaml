@@ -87,6 +87,7 @@ apiVersion: ec2.services.k8s.aws/v1alpha1
 kind: SecurityGroup
 metadata:
   name: stalwart-nginx-lb
+  namespace: thundermail
 spec:
   # SETUP: Specify a unique name for the security group
   name: "stalwart-nginx-lb-authdev"
