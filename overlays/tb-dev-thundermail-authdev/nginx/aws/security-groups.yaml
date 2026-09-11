@@ -7,6 +7,8 @@ metadata:
   annotations:
     services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
+  name: stalwart-authdev-nginx
+  description: SG for nginx containers proxying Stalwart traffic in thundermail-authdev
   vpcID: "vpc-0e0f4b8d603d463e0"
   ingressRules:
     # Port 80 is a simple health check implemented in the nginx config file. The Kubelet needs
@@ -79,3 +81,16 @@ spec:
     groupIds:
       # SETUP: Here, set the security group ID used by the nginx pods
       - ""
+
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-nginx-lb
+spec:
+  # SETUP: Specify a unique name for the security group
+  name: "stalwart-nginx-lb-authdev"
+  # SETUP: Describe what this is used for
+  description: SG for Stalwart's public nginx load balancer in thundermail-authdev
+  # SETUP: Specify your deployment's VPC ID.
+  vpcID: "vpc-0e0f4b8d603d463e0"

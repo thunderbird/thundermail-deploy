@@ -7,6 +7,10 @@ metadata:
   annotations:
     services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
+  # SETUP: Specify a unique name for the security group
+  name: ""
+  # SETUP: Describe what this is used for
+  description: SG for nginx containers proxying Stalwart traffic in <deployment reference>
   # SETUP: Specify your deployment's VPC ID.
   vpcID: ""
   ingressRules:
@@ -92,3 +96,18 @@ spec:
 # metadata:
 #   name: stalwart-nginx-lb
 #   namespace: thundermail
+
+# SETUP: If you **DO NOT** run behind an SMP, then you should customize the security group for the
+# public load balancer. Uncomment and update the following section.
+# ---
+# apiVersion: ec2.services.k8s.aws/v1alpha1
+# kind: SecurityGroup
+# metadata:
+#   name: stalwart-nginx-lb
+# spec:
+#   # SETUP: Specify a unique name for the security group
+#   name: ""
+#   # SETUP: Describe what this is used for
+#   description: SG for Stalwart's public nginx load balancer in <deployment reference>
+#   # SETUP: Specify your deployment's VPC ID.
+#   vpcID: ""

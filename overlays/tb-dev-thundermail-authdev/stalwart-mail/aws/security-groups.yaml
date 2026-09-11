@@ -5,6 +5,8 @@ metadata:
   name: stalwart-server
   namespace: thundermail
 spec:
+  name: "stalwart-server-authdev"
+  description: SG for Stalwart pods in thundermail-authdev
   vpcID: vpc-0e0f4b8d603d463e0
   tags:
     - key: Name
@@ -96,6 +98,8 @@ metadata:
   annotations:
     services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
+  name: "stalwart-admin-lb-authdev"
+  description: SG for Stalwart's admin console access in thundermail-authdev
   vpcID: "vpc-0e0f4b8d603d463e0"
   tags:
     - key: Name
@@ -123,6 +127,8 @@ metadata:
   name: stalwart-elasticache-redis
   namespace: thundermail
 spec:
+  name: "stalwart-elasticache-redis-authdev"
+  description: SG for Stalwart's Redis backend in thundermail-authdev
   vpcID: "vpc-0e0f4b8d603d463e0"
   tags:
     - key: Name

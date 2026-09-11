@@ -5,7 +5,12 @@ metadata:
   name: stalwart-server
   namespace: thundermail
 spec:
-  vpcID: "" # SETUP: Set your deployment's VPC ID
+  # SETUP: Specify a unique name for the security group
+  name: ""
+  # SETUP: Describe what this is used for
+  description: SG for Stalwart pods in <deployment reference>
+  # SETUP: Specify your deployment's VPC ID.
+  vpcID: ""
   tags:
     - key: Name
       value: "" # SETUP: Set a unique name for this security group
@@ -97,7 +102,12 @@ spec:
 #   name: stalwart-mail-private-lb
 #   namespace: thundermail
 # spec:
-#   vpcID: "" # SETUP: Set your deployment's VPC ID
+#   # SETUP: Specify a unique name for the security group
+#   name: ""
+#   # SETUP: Describe what this is used for
+#   description: SG for private Stalwart mail relay access in <deployment reference>
+#   # SETUP: Specify your deployment's VPC ID.
+#   vpcID: ""
 #   tags:
 #     - key: Name
 #       value: "" # SETUP: Set a unique name for this security group
@@ -137,7 +147,12 @@ metadata:
   annotations:
     services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
-  vpcID: "" # SETUP: Set the VPC ID of the deployment environment
+  # SETUP: Specify a unique name for the security group
+  name: ""
+  # SETUP: Describe what this is used for
+  description: SG for Stalwart's admin console access in <deployment reference>
+  # SETUP: Specify your deployment's VPC ID.
+  vpcID: ""
   tags:
     - key: Name
       value: "" # SETUP: Set a unique name for this security group
@@ -164,7 +179,12 @@ metadata:
   name: stalwart-elasticache-redis
   namespace: thundermail
 spec:
-  vpcID: "" # SETUP: Set the VPC of your deployment environment
+  # SETUP: Specify a unique name for the security group
+  name: ""
+  # SETUP: Describe what this is used for
+  description: SG for Stalwart's Redis backend in <deployment reference>
+  # SETUP: Specify your deployment's VPC ID.
+  vpcID: ""
   tags:
     - key: Name
       value: "" # SETUP: Set a unique name for this security group
