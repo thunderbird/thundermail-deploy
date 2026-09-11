@@ -12,7 +12,6 @@ spec:
           image: nginx:1.31
           imagePullPolicy: IfNotPresent
           resources:
-            # SETUP: Adjust your container sizing parameters appropriate to your deployment.
             requests:
               cpu: "0.5"
               memory: 0.5Gi

@@ -5,10 +5,10 @@ metadata:
   name: stalwart-server
   namespace: thundermail
 spec:
-  vpcID: "" # SETUP: Set your deployment's VPC ID
+  vpcID: vpc-0e0f4b8d603d463e0
   tags:
     - key: Name
-      value: "" # SETUP: Set a unique name for this security group
+      value: "stalwart-server-authdev"
     - key: application
       value: thundermail
     - key: managed-by
@@ -22,9 +22,7 @@ spec:
       ipProtocol: tcp
       userIDGroupPairs:
         - description: Kubelet probes from EKS cluster SG
-        # SETUP: Uncomment **ONLY ONE** of the below options, depending on the cluster you're deploying to
-        # groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
-        # groupID: sg-08711bcc50c7b1e18 # eks-cluster-sg-mzla-eks-tb-prod01
+        groupID: sg-08c51d43c4a250a81 # eks-cluster-sg-mzla-eks-tb-dev01
 
         # SETUP: Set this groupID to your Stalwart server's security group ID
         # - description: Allow management port traffic only from other stalwart-server sources
@@ -39,12 +37,6 @@ spec:
         # SETUP: Set this groupID to your installation's nginx security group ID
         - description: Allow SMTP service traffic from the nginx containers
           groupID: ""
-        # SETUP: If your system is in a state of migration where a legacy Stalwart installation must be able to relay
-        # SMTP traffic through *this* system without proper TLS, it must go through a private, trusted network route.
-        # In this case, uncomment the rule below and set the groupID to your installation's `stalwart-mail-private`
-        # service/LB security group ID.
-        # - description: Allow SMTP service traffic from the private mail load balancer
-        #   groupID: ""
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
@@ -81,39 +73,6 @@ spec:
         - description: Allow ManageSieve service traffic from the nginx containers
           groupID: ""
 
-# SETUP: Take one of the following actions.
-#   **EITHER**
-#     (a) Uncomment the following SecurityGroup resource and fill out the required fields,
-#   **OR**
-#     (b) Uncomment the section in stalwart-mail/service.yaml that deletes these resources.
-# Take Option A only if you need to inherit from a legacy Stalwart installation. More detail on this
-# choice is provided in stalwart-mail/service.yaml.
-
-# Security group for private mail service access
-# ---
-# apiVersion: ec2.services.k8s.aws/v1alpha1
-# kind: SecurityGroup
-# metadata:
-#   name: stalwart-mail-private-lb
-#   namespace: thundermail
-# spec:
-#   vpcID: "" # SETUP: Set your deployment's VPC ID
-#   tags:
-#     - key: Name
-#       value: "" # SETUP: Set a unique name for this security group
-#     - key: application
-#       value: thundermail
-#     - key: managed-by
-#       value: ack
-#   ingressRules:
-#     - fromPort: 25
-#       toPort: 25
-#       ipProtocol: tcp
-#       userIDGroupPairs:
-#         # SETUP: Add a list of rules allowing access from your legacy system
-#         - description: Allow access from legacy Stalwart node
-#           groupID: ""
-
 ---
 # Security group policy that attaches 
 apiVersion: vpcresources.k8s.aws/v1beta1
@@ -123,7 +82,7 @@ metadata:
   namespace: thundermail
 spec:
   securityGroups:
-    groupIds:
+    groupIds: []
       # SETUP: Add here the ID for your stalwart-server pod security group
       # - ""
 
@@ -137,10 +96,10 @@ metadata:
   annotations:
     services.k8s.aws/adoption-policy: "adopt-or-create"
 spec:
-  vpcID: "" # SETUP: Set the VPC ID of the deployment environment
+  vpcID: "vpc-0e0f4b8d603d463e0"
   tags:
     - key: Name
-      value: "" # SETUP: Set a unique name for this security group
+      value: "stalwart-authdev-admin-lb"
     - key: application
       value: thundermail
     - key: managed-by
@@ -149,7 +108,7 @@ spec:
     - fromPort: 443
       toPort: 443
       ipProtocol: tcp
-      userIDGroupPairs:
+      userIDGroupPairs: []
         # SETUP: Add rules allowing access from whatever needs to use Stalwart's private admin API
         # - description: Allow access from Accounts API in some env
         #   groupID: ""
@@ -164,10 +123,10 @@ metadata:
   name: stalwart-elasticache-redis
   namespace: thundermail
 spec:
-  vpcID: "" # SETUP: Set the VPC of your deployment environment
+  vpcID: "vpc-0e0f4b8d603d463e0"
   tags:
     - key: Name
-      value: "" # SETUP: Set a unique name for this security group
+      value: "stalwart-authdev-elasticache-redis"
     - key: application
       value: thundermail
     - key: managed-by
@@ -182,10 +141,10 @@ spec:
 
 # SETUP: If your installation **DOES NOT** need to inherit from a legacy Stalwart deployment, then
 # uncomment the following patch to not build a security group to expose private service.
-# ---
-# $patch: delete
-# apiVersion: ec2.services.k8s.aws/v1alpha1
-# kind: SecurityGroup
-# metadata:
-#   name: stalwart-mail-private-lb
-#   namespace: thundermail
+---
+$patch: delete
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: stalwart-mail-private-lb
+  namespace: thundermail

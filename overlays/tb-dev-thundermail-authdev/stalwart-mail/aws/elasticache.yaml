@@ -1,0 +1,10 @@
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: ReplicationGroup
+metadata:
+  name: stalwart-redis
+  namespace: thundermail
+spec:
+  cacheSubnetGroupName: "thundermail-authdev-stalwart-redis"
+  replicationGroupID: "thundermail-authdev-stalwart-redis"
+  securityGroupIDs: [] # SETUP: Add the ID of the Stalwart server security group

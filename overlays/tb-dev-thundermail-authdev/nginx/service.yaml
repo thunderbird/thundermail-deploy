@@ -1,0 +1,21 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+
+  annotations:
+    # EKS-specific annotations are documented in "Use Service Annotations to configure Network Load Balancers":
+    # https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html
+    # A full list of annotations supported by the AWS Load Balancer controller can be found here:
+    # https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/
+  
+    # Subnets: mzla-tb-dev-private-eu-central-1a, mzla-tb-dev-private-eu-central-1b
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
+    service.beta.kubernetes.io/aws-load-balancer-name: "stalwart-authdev-public"
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
+    # SETUP: Set to the nginx load balancer security group ID
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "" # stalwart-nginx-lb

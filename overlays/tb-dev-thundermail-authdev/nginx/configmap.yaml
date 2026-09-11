@@ -101,8 +101,7 @@ data:
       }
   
       server {
-        # SETUP: Supply the domain name this server's certificate resolves TLS for.
-        server_name *.your.tld;
+        server_name *.tbird.email;
         listen 443 ssl;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
@@ -136,12 +135,9 @@ data:
         location ^~ / {
           proxy_pass https://stalwart-https;
 
-          # SETUP: Set the domain your Stalwart installation responds to.
-          proxy_set_header Host mail.your.tld;
+          proxy_set_header Host mail.email.tbird;
 
-          # SETUP: Set the domain your Stalwart installation resolves TLS for. This is usually the
-          # same as the above header setting.
-          proxy_ssl_name mail.your.tld;
+          proxy_ssl_name mail.email.tbird;
         }
       }
   

@@ -53,8 +53,8 @@ metadata:
   name: stalwart-admin
   annotations:
     # SETUP: Set the subnets following the same guidance as above
-    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
+    service.beta.kubernetes.io/aws-load-balancer-subnets: ""
     # SETUP: Set these tags appropriately
-    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
     # SETUP: Set this to the ID of the stalwart-admin-lb security group
     service.beta.kubernetes.io/aws-load-balancer-security-groups: ""

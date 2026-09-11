@@ -1,0 +1,37 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../bases
+
+namespace: thundermail-zulu
+
+images:
+  - name: stalwartlabs/stalwart
+    newTag: v0.16.21
+
+patches:
+  - path: nginx/aws/security-groups.yaml
+  - path: nginx/configmap.yaml
+  - path: nginx/deployment.yaml
+  - path: nginx/hpas.yaml
+  - path: stalwart-mail/aws/elasticache.yaml
+  - path: stalwart-mail/aws/s3.yaml
+  - path: stalwart-mail/aws/security-groups.yaml
+  - path: stalwart-mail/aws/subnet-groups.yaml
+  - path: stalwart-mail/configmap.yaml
+  - path: stalwart-mail/hpas.yaml
+  - path: stalwart-mail/secrets.yaml
+  - path: stalwart-mail/service.yaml
+  - path: stalwart-mail/serviceaccount.yaml
+  
+  - target:
+      kind: Deployment
+      name: stalwart
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: STALWART_PUBLIC_URL
+          value: "https://mail.tbird.email"

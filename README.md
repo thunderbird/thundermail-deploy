@@ -9,7 +9,7 @@ This project is installed into Kubernetes clusters at Thundermail through [Pulum
 
 - [Deployment Platform Components](./docs/components.md)
 - [Repo Structure](./docs/repo-structure.md)
-- [Installation](./docs/installation.md)
+- [New Deployments](./docs/new-deployments.md)
 - [Configuration](./docs/configuration.md)
 - [NeonDB Setup](./docs/neondb.md)
 - [Development and Debugging](./docs/development.md)

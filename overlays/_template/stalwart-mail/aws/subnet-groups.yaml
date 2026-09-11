@@ -6,7 +6,8 @@ metadata:
   name: stalwart-redis-subnet-group
   namespace: thundermail
 spec:
-  # SETUP: Specify a unique name for your cache
+  # SETUP: Specify a unique name for your cache subnet group. This should be similar to or the same
+  # as your cache's name.
   cacheSubnetGroupName: "" 
 
   # SETUP: Specify your deployment in the description
