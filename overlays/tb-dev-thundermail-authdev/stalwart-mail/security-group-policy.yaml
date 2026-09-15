@@ -1,0 +1,12 @@
+# Apply the stalwart pod security group to the Stalwart server pods
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-server
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      # SETUP: Specify the ID of the security group used by the Stalwart pods
+      - "sg-0d07d7c80761ee58d" # stalwart-server-authdev

@@ -15,9 +15,11 @@ patches:
   - path: nginx/configmap.yaml
   - path: nginx/deployment.yaml
   - path: nginx/hpas.yaml
+  - path: nginx/security-group-policy.yaml
   - path: stalwart-mail/configmap.yaml
   - path: stalwart-mail/hpas.yaml
   - path: stalwart-mail/secrets.yaml
+  - path: stalwart-mail/security-group-policy.yaml
   - path: stalwart-mail/service.yaml
   - path: stalwart-mail/serviceaccount.yaml
   

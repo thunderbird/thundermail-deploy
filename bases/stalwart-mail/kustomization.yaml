@@ -6,6 +6,7 @@ resources:
   - deployment.yaml
   - hpas.yaml
   - secrets.yaml
+  - security-group-policy.yaml
   - service.yaml
   - serviceaccount.yaml
 
