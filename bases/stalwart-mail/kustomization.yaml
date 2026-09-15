@@ -2,7 +2,6 @@
 namespace: thundermail
 
 resources:
-  - aws
   - configmap.yaml
   - deployment.yaml
   - hpas.yaml
