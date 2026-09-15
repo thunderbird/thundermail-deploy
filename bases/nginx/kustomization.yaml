@@ -2,10 +2,10 @@
 namespace: thundermail
 
 resources:
-  - aws
   - configmap.yaml
   - deployment.yaml
   - hpas.yaml
+  - security-group-policy.yaml
   - service.yaml
 
 labels:

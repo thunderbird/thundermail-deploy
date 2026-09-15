@@ -1,0 +1,10 @@
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: stalwart
+  namespace: thundermail
+spec:
+  # SETUP: Adjust the scaling options below to suit your Stalwart deployment
+  minReplicas: 1
+  maxReplicas: 1

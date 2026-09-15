@@ -101,7 +101,8 @@ data:
       }
   
       server {
-        server_name *.thundermail.com;
+        # SETUP: Supply the domain name this server's certificate resolves TLS for.
+        server_name *.your.tld;
         listen 443 ssl;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
@@ -134,8 +135,13 @@ data:
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
           proxy_pass https://stalwart-https;
-          proxy_set_header Host mail.thundermail.com;
-          proxy_ssl_name mail.thundermail.com;
+
+          # SETUP: Set the domain your Stalwart installation responds to.
+          proxy_set_header Host mail.your.tld;
+
+          # SETUP: Set the domain your Stalwart installation resolves TLS for. This is usually the
+          # same as the above header setting.
+          proxy_ssl_name mail.your.tld;
         }
       }
   

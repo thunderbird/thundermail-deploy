@@ -12,6 +12,7 @@ spec:
           image: nginx:1.31
           imagePullPolicy: IfNotPresent
           resources:
+            # SETUP: Adjust your container sizing parameters appropriate to your deployment.
             requests:
               cpu: "0.5"
               memory: 0.5Gi
@@ -59,16 +60,9 @@ spec:
                     - key: nginx.conf
                       path: nginx.conf
               - secret:
-                  name: ssl-dev-thundermail.com
+                  name: ssl-certificate
                   items:
                     - key: tls.crt
-                      path: dev-thundermail.crt
+                      path: ssl-certificate.crt
                     - key: tls.key
-                      path: dev-thundermail.key
-              - secret:
-                  name: ssl-stage-thundermail.com
-                  items:
-                    - key: tls.crt
-                      path: stage-thundermail.crt
-                    - key: tls.key
-                      path: stage-thundermail.key
+                      path: ssl-certificate.key

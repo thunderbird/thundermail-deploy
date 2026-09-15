@@ -18,7 +18,7 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "ep-twilight-union-a2exle3e-pooler.eu-central-1.aws.neon.tech",
+      "host": "ep-rough-hat-b1wrcrg3-pooler.c-5.eu-central-1.aws.neon.tech",
       "port": 5432,
       "database": "neondb",
       "authUsername": "neondb_owner",

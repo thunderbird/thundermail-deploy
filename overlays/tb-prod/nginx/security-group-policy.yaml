@@ -1,0 +1,11 @@
+# Apply the nginx pod security group to the nginx pods
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-nginx
+  namespace: thundermail
+spec:
+  securityGroups:
+    groupIds:
+      - "sg-0a7941cd6c23b0004" # stalwart-nginx-thundermail

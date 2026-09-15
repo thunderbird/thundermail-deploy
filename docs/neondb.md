@@ -1,8 +1,11 @@
 # NeonDB
 
+> [!CAUTION]
+> This document contains information that is mostly true, but which pertains to manually maintained resources. Exercise caution and make sure you know what you're doing before you make changes like this in production environments. This documentation will be updated as we bring these resources under source control.
+
 We use a [Neon database](https://neon.com/) behind an [AWS PrivateLink setup](https://docs.aws.amazon.com/vpc/latest/privatelink/what-is-privatelink.html). Setting this up is a multi-step and entirely manual process [described in full here](https://neon.com/docs/guides/neon-private-networking). Very briefly, this amounts to:
 
-- Create a NeonDB Project for your installation or create a branch from an existing project. If the project is new, create a new database in it called `stalwart`.
+- Create a NeonDB Project for your installation or create a branch from an existing project.
 - Create a new security group to define network access through the private link you're about to create. You will eventually need to add rules to this that restrict access only from the correct application. Those groups may not exist until you have deployed the application (see [Installation](#installation)), so you may have to come back later and add them.
 - Create a VPC endpoint for each one of Neon's service endpoints in your region (see step 4 under ["Create an AWS VPC endpoint"](https://neon.com/docs/guides/neon-private-networking#create-an-aws-vpc-endpoint)), bound to the EKS VPC and the private subnets in it. Specify the security group created in the previous step. **DO NOT enable private DNS at this time.**
 - Associate these VPC Endpoint IDs with your Neon organization using the neon CLI tool.

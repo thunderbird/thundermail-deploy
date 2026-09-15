@@ -1,0 +1,40 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+
+  # SETUP: If you **DO NOT** run behind SMP, then you need to annotate your load balancer so that it is properly
+  # exposed to users. Uncomment and customize the following section.
+
+  # annotations:
+  #   # EKS-specific annotations are documented in "Use Service Annotations to configure Network Load Balancers":
+  #   # https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html
+  #   # A full list of annotations supported by the AWS Load Balancer controller can be found here:
+  #   # https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/
+  #
+  #   service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+  #   service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+  #   service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
+  #
+  #   # SETUP: Specify a unique name for the load balancer. AWS requires that this be no longer than 32 characters.
+  #   service.beta.kubernetes.io/aws-load-balancer-name: ""
+  #
+  #   # SETUP: Uncomment the set of subnets corresponding to your deployment environment
+  #
+  #   # tb-dev: mzla-tb-dev-private-eu-central-1a, mzla-tb-dev-private-eu-central-1b
+  #   # service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
+  #  
+  #   # tb-prod: mzla-tb-prod-private-eu-central-1a, mzla-tb-prod-private-eu-central-1b
+  #   # service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-085a71891b27bd24c, subnet-0b863a1876ec121cb"
+  #     
+  #   # SETUP: Update the following tags for your deployment
+  #   service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=not_set,project=not_set"
+  #   # SETUP: Set to the nginx load balancer security group ID
+  #   service.beta.kubernetes.io/aws-load-balancer-security-groups: "" # stalwart-nginx-lb
+
+
+# SETUP: If you run behind SMP, then this service needs to be private, accessible only to the SMP.
+# Uncomment the following lines to accomplish this.
+# spec:
+#   type: ClusterIP
