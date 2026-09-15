@@ -8,6 +8,5 @@ metadata:
 spec:
   securityGroups:
     groupIds:
-      # SETUP: Specify the ID of the security group used by the Stalwart pods
       - "sg-01b12ebc580769646" # stalwart-server-thundermail
 

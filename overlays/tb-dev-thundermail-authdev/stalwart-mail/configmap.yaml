@@ -15,7 +15,6 @@ data:
   # - "DataStore" in Stalwart docs:
   #   https://stalw.art/docs/ref/object/data-store/#type-postgresql
   
-  # SETUP: Populate the database host, database, and authUsername fields below.
   config.json: |
     {
       "@type": "PostgreSql",
