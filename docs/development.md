@@ -29,14 +29,27 @@ If you want to test builds for all overlays, from the root of this repo, run:
     
     Total build failures: 0
 
-This script will run builds for any overlays it finds and alert you if any produce errors. It will output those errors if they occur. However, for successful builds, the script disposes of the actual output. Remember that a successful build does not necessarily mean you have affected the desired change. Review the manifests before deploying them.
+This script will run builds for any overlays it finds and alert you if any produce errors. It will output those errors if they occur. However, for successful builds, the script disposes of the actual output. To preserve that, add a directory to the command where the output can be saved.
+
+```bash
+mkdir kustomize-builds/
+./util/kustomize-build-all.sh kustomize-builds/
+```
+
+Remember that a successful build does not necessarily mean you have affected your desired change. Review the manifests before deploying them. You can check what's going to change by saving the output from the above command and running something like the following:
+
+```bash
+kubectl diff -f kustomize-builds/tb-dev.yaml
+```
+
+The output will show you the diff between the live manifest and the manifest on disk.
 
 This script runs automatically when a PR is opened against this repo, and it must run successfully for the PR to be merged.
 
 
-## ACK and AWS Load Balancer Resources
+## AWS Load Balancer Resources
 
-ACK and AWS load balancer resources both depend on the normal execution of Kubernetes operators which can reconcile the differences between the declared resources' state in these manifests and their real state in the cloud. This extra component means there are two places you may have to check for debugging information when something goes wrong.
+AWS load balancer resources depend on the normal execution of Kubernetes operators which can reconcile the differences between the declared resources' state in these manifests and their real state in the cloud. This extra component means there are two places you may have to check for debugging information when something goes wrong.
 
 **First,** check the controller logs. You can do this with the ArgoCD web console (locate the "app-of-apps" for your cluster and you'll find the controller pods there). Alternately, with kubectl, first get the pod's full name:
 
@@ -50,64 +63,23 @@ These logs reveal problems related to the controller's ability to work within AW
 
 **Second,** you can look at events on the custom resources themselves, which reveal things like bad configurations and the results of `400 Bad Request` responses from the AWS API. For example, to investigate a security group, you might run:
 
-    kubectl -n thundermail describe securitygroup stalwart-elasticache-redis
-
-
-## Service Linked Roles for AWS Controllers
-
-[Service Linked Roles for ACK documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAM.ServiceLinkedRoles.html) says this about the RDS controller's dependency upon its service linked role:
-
-> You don't need to manually create a service-linked role. When you create a DB instance, Amazon RDS creates the service-linked role for you.
->
-> ...
->
-> If you delete this service-linked role, and then need to create it again, you can use the same process to recreate the role in your account. When you create a DB instance, Amazon RDS creates the service-linked role for you again.
-
-Though one might expect this role to pop into existence when ACK tries to create a database, it does not.
-
-This project does not rely on RDS, but importantly, it can also happen with Elasticache, which we do rely upon.
-
-There are three sure signs of this problem, demonstrated below.
-
-**The IAM role for your service does not exist.**
-
-Run:
-
-    aws iam get-role --role-name AWSServiceRoleForElastiCache
-
-If you get `aws: [ERROR]: An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name AWSServiceRoleForElastiCache cannot be found.`, then this is your problem.
-
-**The ElastiCache ACK Controller logs show `400`s.**
-
-Check the logs for the ACK Controller for the problem service to see if it reports `400` responses from the AWS API, with the `Missing necessary credentials` reason.
-
-**The custom resource status shows permission errors.**
-
-Run:
-
-    kubectl -n thundermail describe ReplicationGroup stalwart-redis
-
-You have this problem if you see the following message in the status:
-
-    ServiceLinkedRoleNotFoundFault: This action cannot be completed due to insufficient permissions.
-
-**Resolution**
-
-To resolve this, you can create any cache instance at all in Elasticache and then delete it. The role should automatically be created when you create the resource.
+    kubectl -n thundermail describe service stalwart-admin
 
 
 ## Debugging Per-Pod Security Group Issues
 
-In this project, pods are assigned security groups through `SecurityGroupPolicy` resources which match pods with the `app=stalwart` label to the ID for the `stalwart-server` security group. To find out if something related to a security group is causing a problem, you can launch a debugging container with that label:
+In this project, pods are assigned security groups through `SecurityGroupPolicy` resources. These match pods with certain labels up with security groups you want to attach to them. To find out if something related to a security group is causing a problem, you can launch a debugging container with that label:
 
+```bash
     kubectl -n thundermail run \
-        -i \
-        --tty \
-        --rm debug \
+        -i --tty --rm debug \
         --image=alpine:latest \
         --restart=Never \
         --labels 'app=stalwart' \
         -- sh
+```
+
+You can also use `--labels 'app=stalwart-nginx'` to impersonate an nginx proxy container.
 
 The VPC CNI will assign the appropriate security groups. You can confirm this by looking at the events for your debug pod:
 
