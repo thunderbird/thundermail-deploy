@@ -5,21 +5,37 @@ kind: Kustomization
 resources:
   - ../../bases
 
-namespace: thundermail
+namespace: "" # SETUP: Set your deployment's namespace here
 
 images:
   - name: stalwartlabs/stalwart
-    newTag: v0.16.13
+    newTag: v0.16.21
 
 patches:
   - path: nginx/configmap.yaml
+  - path: nginx/deployment.yaml
   - path: nginx/hpas.yaml
+  - path: nginx/security-group-policy.yaml
   - path: stalwart-mail/configmap.yaml
   - path: stalwart-mail/hpas.yaml
   - path: stalwart-mail/secrets.yaml
+  - path: stalwart-mail/security-group-policy.yaml
   - path: stalwart-mail/service.yaml
   - path: stalwart-mail/serviceaccount.yaml
+  
+  # SETUP: If your installation runs behind Stalwart Migration Proxy, uncomment the next path to
+  # create a private ClusterIP service instead of a public entry point on nginx.
+  # - path: nginx/service.yaml
 
+  # SETUP: If your installation runs behind Stalwart Migration Proxy, uncomment the following patch
+  # to ensure no security group for a public load balancer gets created.
+  # - target:
+  #     kind: SecurityGroup
+  #     name: stalwart-nginx-lb
+  #   patch: |
+  #     - op: delete
+
+  # SETUP: Set the value below to a full URL where Stalwart is served from, e.g. "https://mail.my.tld"
   - target:
       kind: Deployment
       name: stalwart
@@ -28,4 +44,18 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_PUBLIC_URL
-          value: "https://mail.tb.email"
+          value: ""
+
+  # SETUP: Stalwart pods use the nodeSelector field to force deployment onto a special set of nodes.
+  # These nodes live on special subnets where outbound traffic is routed through a special NAT
+  # Gateway. That gateway has certain IP addresses attached to it, so that our outbound mail tends
+  # to have a better reputation. If your deployment does not hinge on IP reputation, you can
+  # uncomment the following patch to deploy on the general nodes instead. If you do this, be sure
+  # to specify the *general* subnets when building Stalwart's load balancer.
+  # - target:
+  #     kind: Deployment
+  #     name: stalwart
+  #   patch: |
+  #     - op: replace
+  #       path: /spec/template/spec/nodeSelector/role
+  #       value: general

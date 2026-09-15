@@ -14,12 +14,13 @@ data:
   #   https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
   # - "DataStore" in Stalwart docs:
   #   https://stalw.art/docs/ref/object/data-store/#type-postgresql
+  
   config.json: |
     {
       "@type": "PostgreSql",
       "host": "ep-twilight-union-a2exle3e-pooler.eu-central-1.aws.neon.tech",
       "port": 5432,
-      "database": "stalwart",
+      "database": "neondb",
       "authUsername": "neondb_owner",
       "authSecret": {
         "@type": "EnvironmentVariable",
