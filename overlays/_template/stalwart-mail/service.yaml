@@ -35,6 +35,9 @@
 #     
 #     # SETUP: Set this to the ID of the stalwart-mail-private-lb security group
 #     service.beta.kubernetes.io/aws-load-balancer-security-groups: ""
+#
+#     # SETUP: Supply a unique name for the load balancer
+#     service.beta.kubernetes.io/aws-load-balancer-name: "stalwart-admin-thundermail"
 
 # SETUP: If you **DO NOT** intend on relaying email from a legacy environment, then uncomment this
 # patch to prevent the buildout of a private load balancer:

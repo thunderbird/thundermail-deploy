@@ -11,6 +11,7 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-044e18f3022fb9ee1, subnet-01084662e5e16dce9"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
     service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0026d193f76ee1177" # stalwart-admin-lb-thundermail
+    service.beta.kubernetes.io/aws-load-balancer-name: "stalwart-admin-thundermail"
 
 ---
 $patch: delete

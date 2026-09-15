@@ -17,5 +17,4 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
     service.beta.kubernetes.io/aws-load-balancer-name: "stalwart-authdev-public"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
-    # SETUP: Set to the nginx load balancer security group ID
-    service.beta.kubernetes.io/aws-load-balancer-security-groups: "" # stalwart-nginx-lb
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0c5d25a040c0a338f" # stalwart-nginx-lb-authdev
