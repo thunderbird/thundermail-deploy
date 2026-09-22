@@ -70,9 +70,9 @@ A pattern used here (and elsewhere) is to begin with handmade secret resources u
 This credential is used to access the admin panel through our Tailscale mesh network. This can be any password you generate securely following best practices. You will also need to come up with a username. Combine these into basic auth format: `$USERNAME:$PASSWORD` to form the `$SECRET` in the following command:
 
 ```bash
-aws --profile $PROFILE secretsmanager create-secret \
+aws --profile $AWS_PROFILE secretsmanager create-secret \
   --name "mzla/$ENVIRONMENT/$NAMESPACE/stalwart-recovery-admin" \
-  --secret-string '{"recovery_admin": "$SECRET}'
+  --secret-string "{\"recovery_admin\": \"$SECRET\"}"
 ```
 
 
@@ -81,34 +81,42 @@ aws --profile $PROFILE secretsmanager create-secret \
 In the [NeonDB Console](https://console.neon.tech) (or however you prefer), either create a new database or a branch from one you want to point this Stalwart deployment at. Acquire the connection details. You'll need the host and username later, but you need the password now to create this secret:
 
 ```bash
-aws --profile $PROFILE secretsmanager create-secret \
+aws --profile $AWS_PROFILE secretsmanager create-secret \
   --name "mzla/$ENVIRONMENT/$NAMESPACE/stalwart-postgresql-admin-credential" \
-  --secret-string '{"password": "$NEONDB_PASSWORD}'
+  --secret-string "{\"password\": \"$NEONDB_PASSWORD\"}"
 ```
 
 If you have created a new database, or if the one you have branched is not configured in this way, be sure to restrict access to the database only from the right set of VPC endpoints. These IDs can be found with this command:
 
 ```bash
-aws --profile $PROFILE ec2 describe-vpc-endpoints \
+aws --profile $AWS_PROFILE ec2 describe-vpc-endpoints \
     --filter 'Name=tag:Name,Values=*-neondb-privatelink-*' \
     --query 'VpcEndpoints[*].VpcEndpointId' \
     --output text
 ```
 
-If you pull your new Neon project's ID from its settings (this will something like `adjective-verb-abc123`), you can do the restriction by chaining that into a `neon` command:
+If you pull your new Neon project's ID from its settings (this will something like `adjective-verb-abc123`), you can do the restriction by chaining that into a [NeonDB CLI](https://neon.com/docs/cli) command:
 
 ```bash
 for vpce_id in $(
-    aws --profile mzla-tb-dev ec2 describe-vpc-endpoints \
+    aws --profile $AWS_PROFILE ec2 describe-vpc-endpoints \
         --filter 'Name=tag:Name,Values=*-neondb-privatelink-*' \
         --query 'VpcEndpoints[*].VpcEndpointId' \
         --output text
 ); do
     echo $vpce_id # Sometimes Neon's API errors without detail; you'll need to see which ones fail to retry them.
     neon vpc project restrict $vpce_id \
-        --project-id quiet-forest-23207157
+        --project-id $NEON_PROJECT_ID
 done
 ```
+
+You should generally also disable public access to your Neon project:
+
+```bash
+neon projects update $NEON_PROJECT_ID --block-public-connections
+```
+
+You will also need to make sure that the Stalwart pods have access to the PrivateLink security group for your environment. For example, in tb-dev, this SG is called `stalwart-neondb-privatelink`. Manually add both an inbound and an outbound rule permitting your Stalwart pod's SG to communicate over port 5432.
 
 
 ## Copy the Kustomize template
@@ -118,6 +126,21 @@ There's a Kustomize template ready for you to clone and fill out, so copy it int
 ```bash
 cp -r overlays/{_template,$DEPLOYMENT_NAME}
 ```
+
+
+## Update the Kustomize template
+
+The template has several fields you will have to fill out. The previous Pulumi steps will have built out a series of resources whose IDs you will need to populate throughout your overlays. To ensure you fill everything out, the template you copied has the term `SETUP:` next to every field to populate or decision to make. All of these decisions are documented alongside the `SETUP:` term with instructions on how to adapt the overlay to your needs.
+
+Run through all of these, (`grep -rn 'SETUP:' overlays/$DEPLOYMENT_NAME/` if you like) setting the right values where necessary, deleting the `SETUP:` term as you make each change.
+
+Double-check that you have produced valid manifests by building your project:
+
+```bash
+kustomize build overlays/$DEPLOYMENT_NAME
+```
+
+Push your changes up. If you are not on a working branch, you'll need to go through with a merge to `main`. Allow ArgoCD to build the resources you've requested. Any problems you encounter at this point are beyond the scope of this documentation; you'll have to debug them as they arise.
 
 
 ## Create an ArgoCD application
@@ -136,21 +159,6 @@ Pull the latest commits in the [platform-infrastructure repo](https://github.com
 Create a PR with these changes. Get it reviewed and merged. You can either wait out the auto-sync period (<1 hour), or you can do the relevant refreshes (`argocd-projects` if you made changes to the project file, and the app-of-apps project for your deployment target). Since your overlay hasn't been updated and pushed, this should create your application, but that application should have deployment errors. We expect that right now.
 
 
-## Update the Kustomize template
-
-The template has several fields you will have to fill out. Most of those are simply IDs of security groups, IAM roles. Others involve the "major decisions" mentioned before. All of these decisions are clearly documented with the term `SETUP:` and instructions on how to adapt the overlay to your needs.
-
-Run through all of these, (`grep -rn 'SETUP:' overlays/$DEPLOYMENT_NAME/` if you like) setting the right values where necessary.
-
-Double-check that you have produced valid manifests by building your project:
-
-```bash
-kustomize build overlays/$DEPLOYMENT_NAME
-```
-
-Push your changes up. If you are not on a working branch, you'll need to go through with a merge to `main`. Allow ArgoCD to build the resources you've requested. Any problems you encounter at this point are beyond the scope of this documentation; you'll have to debug them as they arise.
-
-
 ## Exposing the admin panel to the Tailscale meshnet
 
 In platform-infrastructure, you'll find a set of Ingress configurations for Tailscale:
@@ -164,9 +172,11 @@ To expose your Stalwart web console, you'll need to make a new entry there. You 
 - ...`metadata.namespace` to the namespace your deployment lives in, and
 - ...`spec.tls.hosts.0` to same thing you set `metadata.name` to (or whatever you want the display name for this machine to be in the Tailscale console).
 
-Once you've deployed this change, you may want to get their Tailscale DNS addresses from the machine details page and make a CNAME record for your domain to make this easier to remember. This is optional, though.
+Once you've deployed this change, you can grab the Tailscale DNS address from the [machine details page](https://console.tailscale.com/admin/machines).
 
 
 ## Now what?
 
 Now you will want to configure this installation to suit your needs. You can figure this out on your own, or you can refer to our [configuration docs](./configuration.md) to get started.
+
+If you need to add this deployment as a destination behind a Stalwart Migration Proxy, see the [stalwart-migration-proxy-deploy readme](https://github.com/thunderbird/stalwart-migration-proxy-deploy/blob/main/README.md#adding-a-new-destination).
