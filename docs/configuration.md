@@ -13,6 +13,9 @@ Once you have a working Stalwart installation, you'll need to fix up a few thing
 - [Making Changes Take Effect](#making-changes-take-effect)
 
 
+> [!NOTE]
+> Most of the command examples below are copy-pastable provided that you have exported the appropriate variables. You will need to `export AWS_PROFILE=your-profile-name` for all of the AWS-CLI commands.
+
 ## Connect to the Stalwart Admin Console
 
 Stalwart's web admin console is intentionally made generally unavailable. The nginx proxy accomplishes this by intercepting HTTP traffic and returning a 404 for a handful of paths we do not wish to expose. The admin panel is only accessible through Tailscale. General documentation on our Tailscale implementation can be [found here](https://github.com/thunderbird/platform-infrastructure/blob/main/docs/tailscale.md).
@@ -30,16 +33,25 @@ This should land you on the Stalwart admin panel login page. Log in with credent
 
 Determine your domain. For this example, we'll use `mail.example.com`.
 
-Using AWS Certificate Manager, request a certificate for your domain:
+Using AWS Certificate Manager, request a certificate for your domain. Start by setting a variable indicating the root of your domain:
+
+    export DOMAIN_NAME='your.tld'
+
+Then request the certificate:
 
     aws --profile $AWS_PROFILE acm request-certificate \
-        --domain-name '*.example.com' \
+        --domain-name "$DOMAIN_NAME" \
+        --subject-alternative-names "*.$DOMAIN_NAME" \
         --validation-method DNS \
         --options Export=ENABLED \
-        --tags Key=project,Value=thundermail Key=environment,Value=your-env \
+        --tags Key=project,Value=thundermail Key=environment,Value=tb-dev-tbirdemail \
         --query CertificateArn
 
-That outputs the ARN of the certificate you requested. Now get the information for the DNS record you need to create to validate the domain:
+That outputs the ARN of the certificate you requested. Copy that ARN and export it as a variable:
+
+    export CERTIFICATE_ARN="arn:aws:acm:<region>:<account_id>:certificate/<certificate_uuid>"
+
+Now get the information for the DNS record you need to create to validate the domain:
 
     aws --profile $AWS_PROFILE acm describe-certificate \
         --certificate-arn $CERTIFICATE_ARN \
@@ -81,13 +93,24 @@ You'll be prompted for the passphrase, which is `password` (or whatever else you
 
 AWS Secrets Manager doesn't allow for multiline secrets. It converts newline characters into spaces. PEM certificates require newline characters throughout. This means we can't use Secrets Manager to deliver a certificate to Nginx via an ExternalSecret resource like we do for other secret values.
 
-In order to use this cert in the nginx config, we have to manually create a TLS secret in the `thundermail` namespace. For the sake of this documentation, we will call this `ssl-certificate`, but you should actually name this after the domain you're using, like `ssl-stage-thundermail.com`. Assuming your cert and key can be found at `/tmp/tls.crt` and `/tmp/tls.key`, you should run this command:
+In order to use this cert in the nginx config, we have to manually create a TLS secret in the namespace you will be deploying your Stalwart installation into. For the sake of this documentation, we will call this `ssl-certificate`, but you should actually name this after the domain you're using, like `ssl-stage-thundermail.com`. Assuming your cert and key can be found at `/tmp/tls.crt` and `/tmp/tls.key`, you should first create the namespace if you haven't already. Ensuring first that your `kubectl` config is set to communicate with the right cluster, run:
 
-    kubectl -n thundermail create secret tls ssl-certificate \
-        --cert /tmp/tls.crt \
-        --key /tmp/tls.key
+    export NAMESPACE='your-deployment-namespace'
+    kubectl create namespace $NAMESPACE
 
-Nginx is configured to use the secret and keys this command generates.
+Then run this to create your certificate:
+
+    export SECRET_NAME='ssl-certificate'
+    export CERT_FILE='/tmp/tls.crt' # Path to your exported certificate
+    export KEY_FILE='/tmp/tls.key' # Path to your exported key with passphrase removed
+    kubectl -n $NAMESPACE create secret tls $SECRET_NAME \
+        --cert $CERT_FILE \
+        --key $KEY_FILE
+
+> [!NOTE]
+> In a completely default installation, nginx is configured to use the secret called `ssl-certificate`. If you have to support multiple mail domains (or even if you don't, it's still a good idea), you should give these secrets more explicit names. This means you will have to modify the nginx deployment overlay for your deployment to mount the right secrets into the nginx container's config directory.
+>
+> Custom domains are handled by Stalwart internally, and they are not of concern to the nginx proxy. Therefore, you do not have to install a cert and key for every custom user domain supported by the mail server. nginx uses these TLS configs when it proxies HTTP traffic for the management API, web console, and JMAP features of Stalwart, so you only need to set up certs for the domains which you will accept that traffic on.
 
 
 ### Using the certificate in Stalwart

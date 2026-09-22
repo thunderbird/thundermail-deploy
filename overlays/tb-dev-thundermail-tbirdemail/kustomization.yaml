@@ -1,0 +1,49 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../bases
+
+namespace: "thundermail-tbirdemail"
+
+images:
+  - name: stalwartlabs/stalwart
+    newTag: v0.16
+
+patches:
+  - path: nginx/configmap.yaml
+  - path: nginx/deployment.yaml
+  - path: nginx/hpas.yaml
+  - path: nginx/security-group-policy.yaml
+  - path: nginx/service.yaml
+  - path: stalwart-mail/configmap.yaml
+  - path: stalwart-mail/hpas.yaml
+  - path: stalwart-mail/secrets.yaml
+  - path: stalwart-mail/security-group-policy.yaml
+  - path: stalwart-mail/service.yaml
+  - path: stalwart-mail/serviceaccount.yaml
+
+  - target:
+      kind: SecurityGroup
+      name: stalwart-nginx-lb
+    patch: |
+      - op: delete
+
+  - target:
+      kind: Deployment
+      name: stalwart
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: STALWART_PUBLIC_URL
+          value: "https://mail.tbird.email"
+
+  - target:
+      kind: Deployment
+      name: stalwart
+    patch: |
+      - op: replace
+        path: /spec/template/spec/nodeSelector/role
+        value: general
