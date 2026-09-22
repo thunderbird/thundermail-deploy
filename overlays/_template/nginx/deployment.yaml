@@ -59,6 +59,9 @@ spec:
                   items:
                     - key: nginx.conf
                       path: nginx.conf
+              # SETUP: If you support more than one mail domain, you will need to update the `secret` settings below
+              #        to make sure your TLS secrets get correctly mounted into the container. Coordinate these settings
+              #        with your ConfigMap settings to get the right certs attached to the right domain configs.
               - secret:
                   name: ssl-certificate
                   items:

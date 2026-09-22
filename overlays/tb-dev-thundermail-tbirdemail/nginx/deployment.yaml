@@ -59,9 +59,9 @@ spec:
                     - key: nginx.conf
                       path: nginx.conf
               - secret:
-                  name: ssl-certificate
+                  name: ssl-tbird.email
                   items:
                     - key: tls.crt
-                      path: ssl-certificate.crt
+                      path: ssl-tbird.email.crt
                     - key: tls.key
-                      path: ssl-certificate.key
+                      path: ssl-tbird.email.key
