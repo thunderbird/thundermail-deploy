@@ -1,0 +1,171 @@
+[
+    {
+        "__comment": "Create the tbird.email domain",
+        "@type": "upsert",
+        "object": "Domain",
+        "matchOn": [
+            "name"
+        ],
+        "value": {
+            "dom-tbird-email": {
+                "name": "tbird.email",
+                "description": "tbird.email domain",
+                "isEnabled": true,
+                "certificateManagement": "Manual",
+                "subAddressing": "Enabled",
+                "allowRelaying": false
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "Certificate",
+        "matchOn": [
+            "certificate",
+            "privateKey"
+        ],
+        "value": {
+            "crt-tbird-email": {
+                "certificate": {
+                    "EnvironmentVariable": {
+                        "variableName": "PRIMARY_DOMAIN_CERTIFICATE"
+                    }
+                },
+                "privateKey": {
+                    "EnvironmentVariable": {
+                        "variableName": "PRIMARY_DOMAIN_PRIVATE_KEY"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "SystemSettings",
+        "value": {
+            "system-settings": {
+                "defaultHostname": "mail.tbird.email",
+                "defaultDomainId": "#dom-tbird-email",
+                "defaultCertificateId": "#crt-tbird-email",
+                "services": {
+                    "caldav": {
+                        "cleartext": false
+                    },
+                    "carddav": {
+                        "cleartext": false
+                    },
+                    "imap": {
+                        "cleartext": false
+                    },
+                    "jmap": {
+                        "cleartext": false
+                    },
+                    "managesieve": {
+                        "cleartext": false
+                    },
+                    "pop2": {
+                        "cleartext": false
+                    },
+                    "smtp": {
+                        "cleartext": false
+                    },
+                    "webdav": {
+                        "cleartext": false
+                    }
+                },
+                "proxyTrustedNetworks": [
+                    "10.120.0.0/16"
+                ],
+                "providerInfo": {
+                    "providerName": "TBird Email",
+                    "providerShortname": "rbe"
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "value": {
+            "listen-http": {
+                "name": "http",
+                "bind": "[::]:8080",
+                "protocol": "http",
+                "useTls": true,
+                "tlsImplicit": false
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "value": {
+            "listen-https": {
+                "name": "https",
+                "bind": "[::]:443",
+                "protocol": "http",
+                "useTls": true,
+                "tlsImplicit": true
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "value": {
+            "listen-sieve": {
+                "name": "sieve",
+                "bind": "[::]:4190",
+                "protocol": "managesieve",
+                "useTls": true,
+                "tlsImplicit": false
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "value": {
+            "listen-imaps": {
+                "name": "imaps",
+                "bind": "[::]:993",
+                "protocol": "imap",
+                "useTls": true,
+                "tlsImplicit": true
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "value": {
+            "listen-submissions": {
+                "name": "smtp",
+                "bind": "[::]:465",
+                "protocol": "http",
+                "useTls": true,
+                "tlsImplicit": true
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "value": {
+            "listen-smtp": {
+                "name": "smtp",
+                "bind": "[::]:25",
+                "protocol": "smtp",
+                "useTls": true,
+                "tlsImplicit": false
+            }
+        }
+    },
+    {
+        "@type": "destroy",
+        "object": "NetworkListener",
+        "value": {
+            "name": "pop3s"
+        }
+    }
+]
