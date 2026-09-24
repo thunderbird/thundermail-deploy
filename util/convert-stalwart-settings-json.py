@@ -24,20 +24,28 @@ import json
 import os
 from pathlib import Path
 
+# Since our users are intelligent and are sure to have read the usage text above, they will
+# certainly be running this script from the root of this repo. We can determine where our Stalwart
+# configs live based on that. Make sure to only look at *.json files, ignoring the readme and the
+# output of this code.
 settings_dir = Path(os.getcwd()) / 'stalwart-settings'
 json_files = list(settings_dir.glob('**.json'))
 
+# Iterate over the JSON files we found
 for json_file in json_files:
+    # Determine what the output file will be called (just swap out the extension)
     ndjson_file = '.'.join([str(json_file).split('.')[0], 'ndjson'])
     output_lines = []
     with open(json_file, 'r') as source_file:
+        # Read in the array of Stalwart API commands from that file
         source_content = json.loads(source_file.read())
         for command in source_content:
+            # Allow for commentary at the root of each object
             if '__comment' in command:
                 del(command['__comment'])
+            # Reassemble the modified commands, minify them, adding newlines to them
             output_lines.append(f"{json.dumps(command)}\n")
 
-    print(output_lines)
-
+    # Write out the text to the NDJSON file to be run against Stalwart
     with open(ndjson_file, 'w') as output_file:
         output_file.writelines(output_lines)
