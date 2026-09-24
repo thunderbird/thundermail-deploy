@@ -42,9 +42,9 @@ for json_file in json_files:
         for command in source_content:
             # Allow for commentary at the root of each object
             if '__comment' in command:
-                del(command['__comment'])
+                del command['__comment']
             # Reassemble the modified commands, minify them, adding newlines to them
-            output_lines.append(f"{json.dumps(command)}\n")
+            output_lines.append(f'{json.dumps(command)}\n')
 
     # Write out the text to the NDJSON file to be run against Stalwart
     with open(ndjson_file, 'w') as output_file:
