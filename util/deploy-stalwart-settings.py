@@ -26,6 +26,7 @@ Notes:
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -331,6 +332,7 @@ def main():
 
     if not args.keep:
         # Clean up the pod and config map
+        print(f'Cleaning up Pod {pod_name} and ConfigMap {cm_name}')
         for kind, name in (('pod', pod_name), ('configmap', cm_name)):
             try:
                 run_kubectl(args.namespace, 'delete', kind, name, '--ignore-not-found')
@@ -338,7 +340,14 @@ def main():
                 pass
 
         # Clean up the working files
-        work_dir.rmdir()
+        print(f'Cleaning up working directory {work_dir}')
+        shutil.rmtree(str(work_dir))
+    else:
+        print('The --keep option was provided. To clean up from this execution, run:')
+        print(f'kubectl -n {args.namespace} delete cm {cm_name}')
+        print(f'kubectl -n {args.namespace} delete pod {pod_name}')
+        print(f'rm -rf {work_dir}')
+       
 
     sys.exit(0 if ok else 1)
 
