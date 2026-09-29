@@ -39,6 +39,22 @@ patches:
         value:
           name: STALWART_PUBLIC_URL
           value: "https://mail.tbird.email"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SSL_TBIRD_EMAIL_CERTIFICATE
+          valueFrom:
+            secretKeyRef:
+              name: ssl-tbird.email
+              value: tls.crt
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SSL_TBIRD_EMAIL_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ssl-tbird.email
+              value: tls.key
 
   - target:
       kind: Deployment

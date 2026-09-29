@@ -22,6 +22,7 @@
         }
     },
     {
+        "__comment": "The variables below must be deployed **SERVER-SIDE**, not in the stalwart-cli execution environment.",
         "@type": "upsert",
         "object": "Certificate",
         "matchOn": [
@@ -31,12 +32,12 @@
         "value": {
             "crt-tbird-email": {
                 "certificate": {
-                    "@type": "File",
-                    "filePath": "/tmp/tbird.email.crt"
+                    "@type": "EnvironmentVariable",
+                    "variableName": "SSL_TBIRD_EMAIL_CERTIFICATE"
                 },
                 "privateKey": {
-                    "@type": "File",
-                    "filePath": "/tmp/tbird.email.key"
+                    "@type": "EnvironmentVariable",
+                    "variableName": "SSL_TBIRD_EMAIL_PRIVATE_KEY"
                 }
             }
         }
@@ -46,44 +47,35 @@
         "@type": "update",
         "object": "SystemSettings",
         "value": {
-            "system-settings": {
-                "defaultHostname": "mail.tbird.email",
-                "defaultDomainId": "#dom-tbird-email",
-                "defaultCertificateId": "#crt-tbird-email",
-                "services": {
-                    "caldav": {
-                        "cleartext": false
-                    },
-                    "carddav": {
-                        "cleartext": false
-                    },
-                    "imap": {
-                        "cleartext": false
-                    },
-                    "jmap": {
-                        "cleartext": false
-                    },
-                    "managesieve": {
-                        "cleartext": false
-                    },
-                    "pop2": {
-                        "cleartext": false
-                    },
-                    "smtp": {
-                        "cleartext": false
-                    },
-                    "webdav": {
-                        "cleartext": false
-                    }
+            "defaultDomainId": "#dom-tbird-email",
+            "defaultHostname": "mail.tbird.email",
+            "services": {
+                "caldav": {
+                    "cleartext": false
                 },
-                "proxyTrustedNetworks": [
-                    "10.120.0.0/16"
-                ],
-                "providerInfo": {
-                    "providerName": "TBird Email",
-                    "providerShortname": "rbe"
+                "carddav": {
+                    "cleartext": false
+                },
+                "imap": {
+                    "cleartext": false
+                },
+                "jmap": {
+                    "cleartext": false
+                },
+                "managesieve": {
+                    "cleartext": false
+                },
+                "smtp": {
+                    "cleartext": false
+                },
+                "webdav": {
+                    "cleartext": false
                 }
-            }
+            },
+            "proxyTrustedNetworks": {
+                "10.120.0.0/16": true
+            },
+            "providerInfo": {}
         }
     },
     {
@@ -92,7 +84,9 @@
         "value": {
             "listen-http": {
                 "name": "http",
-                "bind": "[::]:8080",
+                "bind": {
+                    "[::]:8080": true
+                },
                 "protocol": "http",
                 "useTls": true,
                 "tlsImplicit": false
@@ -105,7 +99,9 @@
         "value": {
             "listen-https": {
                 "name": "https",
-                "bind": "[::]:443",
+                "bind": {
+                    "[::]:443": true
+                },
                 "protocol": "http",
                 "useTls": true,
                 "tlsImplicit": true
@@ -118,8 +114,10 @@
         "value": {
             "listen-sieve": {
                 "name": "sieve",
-                "bind": "[::]:4190",
-                "protocol": "managesieve",
+                "bind": {
+                    "[::]:4190": true
+                },
+                "protocol": "manageSieve",
                 "useTls": true,
                 "tlsImplicit": false
             }
@@ -131,7 +129,9 @@
         "value": {
             "listen-imaps": {
                 "name": "imaps",
-                "bind": "[::]:993",
+                "bind": {
+                    "[::]:993": true
+                },
                 "protocol": "imap",
                 "useTls": true,
                 "tlsImplicit": true
@@ -144,7 +144,9 @@
         "value": {
             "listen-submissions": {
                 "name": "smtp",
-                "bind": "[::]:465",
+                "bind": {
+                    "[::]:465": true
+                },
                 "protocol": "http",
                 "useTls": true,
                 "tlsImplicit": true
@@ -157,7 +159,9 @@
         "value": {
             "listen-smtp": {
                 "name": "smtp",
-                "bind": "[::]:25",
+                "bind": {
+                    "[::]:25": true
+                },
                 "protocol": "smtp",
                 "useTls": true,
                 "tlsImplicit": false
