@@ -11,8 +11,12 @@
                 "name": "tbird.email",
                 "description": "tbird.email domain",
                 "isEnabled": true,
-                "certificateManagement": "Manual",
-                "subAddressing": "Enabled",
+                "certificateManagement": {
+                    "@type": "Manual"
+                },
+                "subAddressing": {
+                    "@type": "Enabled"
+                },
                 "allowRelaying": false
             }
         }
@@ -27,20 +31,19 @@
         "value": {
             "crt-tbird-email": {
                 "certificate": {
-                    "EnvironmentVariable": {
-                        "variableName": "PRIMARY_DOMAIN_CERTIFICATE"
-                    }
+                    "@type": "File",
+                    "filePath": "/tmp/tbird.email.crt"
                 },
                 "privateKey": {
-                    "EnvironmentVariable": {
-                        "variableName": "PRIMARY_DOMAIN_PRIVATE_KEY"
-                    }
+                    "@type": "File",
+                    "filePath": "/tmp/tbird.email.key"
                 }
             }
         }
     },
     {
-        "@type": "upsert",
+        "__comment": "SystemSettings is a singleton, so it cannot be upserted, only updated.",
+        "@type": "update",
         "object": "SystemSettings",
         "value": {
             "system-settings": {
