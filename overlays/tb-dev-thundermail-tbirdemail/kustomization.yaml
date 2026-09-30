@@ -46,7 +46,7 @@ patches:
           valueFrom:
             secretKeyRef:
               name: ssl-tbird.email
-              value: tls.crt
+              key: tls.crt
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
@@ -54,7 +54,7 @@ patches:
           valueFrom:
             secretKeyRef:
               name: ssl-tbird.email
-              value: tls.key
+              key: tls.key
 
   - target:
       kind: Deployment
