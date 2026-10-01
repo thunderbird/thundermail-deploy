@@ -146,3 +146,13 @@ metadata:
 spec:
   type: ExternalName
   externalName: "" # Populate with Kustomize
+
+---
+# Stalwart depends on a database backend. This is an ExternalName used for convenience.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-postgres
+spec:
+  type: ExternalName
+  externalName: "" # Populate with Kustomize

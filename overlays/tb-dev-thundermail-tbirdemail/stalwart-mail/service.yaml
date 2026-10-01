@@ -29,3 +29,11 @@ metadata:
   name: stalwart-redis
 spec:
   externalName: "master.stalwart-redis-tbirdemail.psueny.euc1.cache.amazonaws.com"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-postgres
+spec:
+  externalName: "ep-patient-recipe-b2wpe3hs-pooler.c-6.eu-central-1.aws.neon.tech"

@@ -26,3 +26,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: stalwart-redis
+
+---
+$patch: delete
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-postgres

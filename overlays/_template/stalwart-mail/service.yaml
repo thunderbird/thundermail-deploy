@@ -82,3 +82,22 @@ metadata:
 # kind: Service
 # metadata:
 #   name: stalwart-redis
+
+# SETUP: Stalwart requires a postgres backend. Uncomment the next section and update the externalName field if you would
+#        like to have a convenience DNS record internally for K8s services to use.
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: stalwart-postgres
+# spec:
+#   externalName: ""
+
+# SETUP: If you do not wish to use the externalName service for Postgres, uncomment the following patch to prevent it
+#        from being built.
+# ---
+# $patch: delete
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: stalwart-postgres
