@@ -17,7 +17,7 @@ kubectl -n stalwart-migration-proxy run -it \
 You will want to install some package dependencies:
 
 ```bash
-apk add curl jq py3-virtualenv redis vim
+apk add curl jq postgresql py3-virtualenv redis vim
 ```
 
 Install Vandelay:
