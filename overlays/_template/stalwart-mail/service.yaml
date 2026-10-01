@@ -63,3 +63,22 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-security-groups: ""
     # SETUP: Supply a unique name for the load balancer. AWS imposes a 32-character limit on this value.
     service.beta.kubernetes.io/aws-load-balancer-name: ""
+
+# SETUP: If you are running with a Redis host behind Stalwart, uncomment the next section and update the externalName
+#        field to match the Redis host's endpoint.
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: stalwart-redis
+# spec:
+#   externalName: ""
+
+# SETUP: If you are not using an external Redis host, or simply do not want to have an ExternalName service set up for
+#        it, uncomment the following patch to prevent it from being built.
+# ---
+# $patch: delete
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: stalwart-redis

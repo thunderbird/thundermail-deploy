@@ -133,3 +133,16 @@ spec:
     - name: mgmt
       port: 8080
       targetPort: mgmt
+
+
+---
+# We typically deploy Stalwart so that it relies on a Redis server common to all containers as a
+# memory cache. This service makes an easy to remember internal DNS entry pointing to the
+# ElastiCache Redis host we usually use.
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-redis
+spec:
+  type: ExternalName
+  externalName: "" # Populate with Kustomize

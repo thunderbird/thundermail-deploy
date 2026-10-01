@@ -19,3 +19,10 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0ae96180c6944e64e, subnet-0a6b51fec89209aea"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
     service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-065a5054cc9c6ac6e" # stalwart-admin-lb-authdev
+
+---
+$patch: delete
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-redis

@@ -20,3 +20,10 @@ kind: Service
 metadata:
   name: stalwart-mail-private
   namespace: thundermail
+
+---
+$patch: delete
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-redis
