@@ -80,6 +80,11 @@
         "__comment": "NetworkListener for the management interface",
         "@type": "upsert",
         "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
         "value": {
             "listen-http": {
                 "name": "http",
@@ -95,6 +100,11 @@
     {
         "@type": "upsert",
         "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
         "value": {
             "listen-https": {
                 "name": "https",
@@ -113,6 +123,11 @@
     {
         "@type": "upsert",
         "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
         "value": {
             "listen-sieve": {
                 "name": "sieve",
@@ -131,6 +146,11 @@
     {
         "@type": "upsert",
         "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
         "value": {
             "listen-imaps": {
                 "name": "imaps",
@@ -149,13 +169,18 @@
     {
         "@type": "upsert",
         "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
         "value": {
             "listen-submissions": {
                 "name": "smtp",
                 "bind": {
                     "[::]:465": true
                 },
-                "protocol": "http",
+                "protocol": "smtp",
                 "useTls": true,
                 "tlsImplicit": true,
                 "overrideProxyTrustedNetworks": {
@@ -167,6 +192,11 @@
     {
         "@type": "upsert",
         "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
         "value": {
             "listen-smtp": {
                 "name": "smtp",
@@ -219,7 +249,28 @@
         "object": "InMemoryStore",
         "value": {
             "@type": "Redis",
-            "url": "rediss://stalwart-redis"
+            "url": "rediss://master.stalwart-redis-tbirdemail.psueny.euc1.cache.amazonaws.com"
+        }
+    },
+    {
+        "__comment": "Create a log in stdout",
+        "@type": "upsert",
+        "object": "Tracer",
+        "matchOn": [
+            "@type"
+        ],
+        "value": {
+            "tracer-stdout": {
+                "buffered": true,
+                "ansi": false,
+                "multiline": false,
+                "enable": true,
+                "level": "debug",
+                "lossy": false,
+                "events": {},
+                "eventsPolicy": "exclude",
+                "@type": "Stdout"
+            }
         }
     }
 ]
