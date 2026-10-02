@@ -1,5 +1,26 @@
 [
     {
+        "__comment": "Set up a Cloudflare DNS provider for auto-managing tbird.email records",
+        "@type": "upsert",
+        "object": "DnsServer",
+        "matchOn": [
+            "@type",
+            "secret"
+        ],
+        "value": {
+            "dns-cloudflare-tbirdemail": {
+                "@type": "Cloudflare",
+                "secret": {
+                    "@type": "EnvironmentVariable",
+                    "variableName": "CLOUDFLARE_API_TOKEN"
+                },
+                "description": "Cloudflare DNS provider for tbird.email zone",
+                "ttl": 60000,
+                "pollingInterval": 15000
+            }
+        }
+    },
+    {
         "__comment": "Create the tbird.email domain",
         "@type": "upsert",
         "object": "Domain",
@@ -10,10 +31,32 @@
             "dom-tbird-email": {
                 "name": "tbird.email",
                 "description": "tbird.email domain",
-                "isEnabled": true,
                 "certificateManagement": {
                     "@type": "Manual"
                 },
+                "dkimManagement": {
+                    "@type": "Automatic"
+                },
+                "dnsManagement": {
+                    "@type": "Automatic",
+                    "dnsServerId": "#dns-cloudflare-tbirdemail",
+                    "origin": "tbird.email",
+                    "publishRecords": {
+                        "dkim": true,
+                        "tlsa": true,
+                        "spf": true,
+                        "mx": true,
+                        "dmarc": true,
+                        "srv": true,
+                        "mtaSts": true,
+                        "tlsRpt": true,
+                        "caa": true,
+                        "autoConfig": true,
+                        "autoConfigLegacy": true,
+                        "autoDiscover": true
+                    }
+                },
+                "isEnabled": true,
                 "subAddressing": {
                     "@type": "Enabled"
                 },
@@ -176,7 +219,7 @@
         ],
         "value": {
             "listen-submissions": {
-                "name": "smtp",
+                "name": "smtp-ssl",
                 "bind": {
                     "[::]:465": true
                 },
@@ -198,13 +241,36 @@
             "tlsImplicit"
         ],
         "value": {
+            "listen-smtp-starttls": {
+                "name": "smtp-starttls",
+                "bind": {
+                    "[::]:587": true
+                },
+                "protocol": "smtp",
+                "useTls": true,
+                "tlsImplicit": false,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
             "listen-smtp": {
-                "name": "smtp",
+                "name": "smtp-plain",
                 "bind": {
                     "[::]:25": true
                 },
                 "protocol": "smtp",
-                "useTls": true,
+                "useTls": false,
                 "tlsImplicit": false,
                 "overrideProxyTrustedNetworks": {
                     "10.120.0.0/16": true
