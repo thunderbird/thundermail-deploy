@@ -21,19 +21,3 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-name: "stalwart-admin-tbirdemail"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
     service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-07b46b142dc65b305" # stalwart-admin-lb-tbirdemail
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-redis
-spec:
-  externalName: "master.stalwart-redis-tbirdemail.psueny.euc1.cache.amazonaws.com"
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-postgres
-spec:
-  externalName: "ep-patient-recipe-b2wpe3hs-pooler.c-6.eu-central-1.aws.neon.tech"
