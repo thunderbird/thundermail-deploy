@@ -1,0 +1,342 @@
+[
+    {
+        "__comment": "Set up a Cloudflare DNS provider for auto-managing tbird.email records",
+        "@type": "upsert",
+        "object": "DnsServer",
+        "matchOn": [
+            "@type",
+            "secret"
+        ],
+        "value": {
+            "dns-cloudflare-tbirdemail": {
+                "@type": "Cloudflare",
+                "secret": {
+                    "@type": "EnvironmentVariable",
+                    "variableName": "CLOUDFLARE_API_TOKEN"
+                },
+                "description": "Cloudflare DNS provider for tbird.email zone",
+                "ttl": 60000,
+                "pollingInterval": 15000
+            }
+        }
+    },
+    {
+        "__comment": "Create the tbird.email domain",
+        "@type": "upsert",
+        "object": "Domain",
+        "matchOn": [
+            "name"
+        ],
+        "value": {
+            "dom-tbird-email": {
+                "name": "tbird.email",
+                "description": "tbird.email domain",
+                "certificateManagement": {
+                    "@type": "Manual"
+                },
+                "dkimManagement": {
+                    "@type": "Automatic"
+                },
+                "dnsManagement": {
+                    "@type": "Automatic",
+                    "dnsServerId": "#dns-cloudflare-tbirdemail",
+                    "origin": "tbird.email",
+                    "publishRecords": {
+                        "dkim": true,
+                        "tlsa": true,
+                        "spf": true,
+                        "mx": true,
+                        "dmarc": true,
+                        "srv": true,
+                        "mtaSts": true,
+                        "tlsRpt": true,
+                        "caa": true,
+                        "autoConfig": true,
+                        "autoConfigLegacy": true,
+                        "autoDiscover": true
+                    }
+                },
+                "isEnabled": true,
+                "subAddressing": {
+                    "@type": "Enabled"
+                },
+                "allowRelaying": false
+            }
+        }
+    },
+    {
+        "__comment": "The variables below must be deployed **SERVER-SIDE**, not in the stalwart-cli execution environment.",
+        "@type": "upsert",
+        "object": "Certificate",
+        "matchOn": [
+            "certificate",
+            "privateKey"
+        ],
+        "value": {
+            "crt-tbird-email": {
+                "certificate": {
+                    "@type": "EnvironmentVariable",
+                    "variableName": "SSL_TBIRD_EMAIL_CERTIFICATE"
+                },
+                "privateKey": {
+                    "@type": "EnvironmentVariable",
+                    "variableName": "SSL_TBIRD_EMAIL_PRIVATE_KEY"
+                }
+            }
+        }
+    },
+    {
+        "__comment": "SystemSettings is a singleton, so it cannot be upserted, only updated.",
+        "@type": "update",
+        "object": "SystemSettings",
+        "value": {
+            "defaultCertificateId": "#crt-tbird-email",
+            "defaultDomainId": "#dom-tbird-email",
+            "defaultHostname": "mail.tbird.email",
+            "services": {
+                "caldav": {
+                    "cleartext": false
+                },
+                "carddav": {
+                    "cleartext": false
+                },
+                "imap": {
+                    "cleartext": false
+                },
+                "jmap": {
+                    "cleartext": false
+                },
+                "managesieve": {
+                    "cleartext": false
+                },
+                "smtp": {
+                    "cleartext": false
+                },
+                "webdav": {
+                    "cleartext": false
+                }
+            },
+            "providerInfo": {}
+        }
+    },
+    {
+        "__comment": "NetworkListener for the management interface",
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-http": {
+                "name": "http",
+                "bind": {
+                    "[::]:8080": true
+                },
+                "protocol": "http",
+                "useTls": true,
+                "tlsImplicit": false
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-https": {
+                "name": "https",
+                "bind": {
+                    "[::]:443": true
+                },
+                "protocol": "http",
+                "useTls": true,
+                "tlsImplicit": true,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-sieve": {
+                "name": "sieve",
+                "bind": {
+                    "[::]:4190": true
+                },
+                "protocol": "manageSieve",
+                "useTls": true,
+                "tlsImplicit": false,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-imaps": {
+                "name": "imaps",
+                "bind": {
+                    "[::]:993": true
+                },
+                "protocol": "imap",
+                "useTls": true,
+                "tlsImplicit": true,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-submissions": {
+                "name": "smtp-ssl",
+                "bind": {
+                    "[::]:465": true
+                },
+                "protocol": "smtp",
+                "useTls": true,
+                "tlsImplicit": true,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-smtp-starttls": {
+                "name": "smtp-starttls",
+                "bind": {
+                    "[::]:587": true
+                },
+                "protocol": "smtp",
+                "useTls": true,
+                "tlsImplicit": false,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "upsert",
+        "object": "NetworkListener",
+        "matchOn": [
+            "protocol",
+            "useTls",
+            "tlsImplicit"
+        ],
+        "value": {
+            "listen-smtp": {
+                "name": "smtp-plain",
+                "bind": {
+                    "[::]:25": true
+                },
+                "protocol": "smtp",
+                "useTls": false,
+                "tlsImplicit": false,
+                "overrideProxyTrustedNetworks": {
+                    "10.120.0.0/16": true
+                }
+            }
+        }
+    },
+    {
+        "@type": "destroy",
+        "object": "NetworkListener",
+        "value": {
+            "name": "pop3s"
+        }
+    },
+    {
+        "__comment": "Send binary blobs to S3",
+        "@type": "update",
+        "object": "BlobStore",
+        "value": {
+            "@type": "S3",
+            "region": {
+                "@type": "EuCentral1"
+            },
+            "bucket": "mzla-tb-dev-tbirdemail-stalwart-blob-store",
+            "accessKey": {
+                "@type": "None"
+            },
+            "secretKey": {
+                "@type": "None"
+            },
+            "securityToken": {
+                "@type": "None"
+            },
+            "sessionToken": {
+                "@type": "None"
+            }
+        }
+    },
+    {
+        "__comment": "Use Redis as a memory cache",
+        "@type": "update",
+        "object": "InMemoryStore",
+        "value": {
+            "@type": "Redis",
+            "url": "rediss://master.stalwart-redis-tbirdemail.psueny.euc1.cache.amazonaws.com"
+        }
+    },
+    {
+        "__comment": "Create a log in stdout",
+        "@type": "upsert",
+        "object": "Tracer",
+        "matchOn": [
+            "@type"
+        ],
+        "value": {
+            "tracer-stdout": {
+                "buffered": true,
+                "ansi": false,
+                "multiline": false,
+                "enable": true,
+                "level": "debug",
+                "lossy": false,
+                "events": {},
+                "eventsPolicy": "exclude",
+                "@type": "Stdout"
+            }
+        }
+    }
+]
