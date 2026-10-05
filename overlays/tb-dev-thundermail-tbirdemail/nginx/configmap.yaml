@@ -158,7 +158,7 @@ data:
       # Small HTTP server to serve health checks for the nginx service itself.
       server {
         listen 80;
-        access_log /dev/null;
+        access_log off;
         # Return 200s for calls to exactly `/` (no subpaths)
         location = / {
           return 200;
