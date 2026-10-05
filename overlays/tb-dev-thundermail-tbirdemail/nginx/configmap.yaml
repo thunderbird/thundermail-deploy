@@ -51,6 +51,8 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtp;
+        access_log /var/log/nginx/access.log json;
+        error_log /var/log/nginx/error.log;
       }
 
       server {
@@ -58,6 +60,8 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtps;
+        access_log /var/log/nginx/access.log json;
+        error_log /var/log/nginx/error.log;
       }
 
       server {
@@ -65,6 +69,8 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-starttls;
+        access_log /var/log/nginx/access.log json;
+        error_log /var/log/nginx/error.log;
       }
 
       server {
@@ -81,6 +87,8 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-managesieve;
+        access_log /var/log/nginx/access.log json;
+        error_log /var/log/nginx/error.log;
       }
     }
 
@@ -97,6 +105,11 @@ data:
     events {}
 
     http {
+      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "protocol": "$protocol", '
+        '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
+        '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
+        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
+
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
         # internal sources.
@@ -108,6 +121,8 @@ data:
         listen 443 ssl;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
+        access_log /var/log/nginx/access.log json;
+        error_log /var/log/nginx/error.log;
 
         # --- SSL Configuration ---
         # These files are populated as volumes mounted to the pods from secrets drawn from an
@@ -145,6 +160,8 @@ data:
       # Small HTTP server to serve health checks for the nginx service itself.
       server {
         listen 80;
+        # Dispose of these calls, as the health checks just get in the way
+        access_log /dev/null;
         # Return 200s for calls to exactly `/` (no subpaths)
         location = / {
           return 200;
