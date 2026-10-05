@@ -21,7 +21,7 @@ data:
     pid /run/nginx.pid;
 
     stream {
-      log_format basic '$time_iso8601 $remote_addr $protocol $status $bytes_sent $bytes_received '
+      log_format combined '$time_iso8601 $remote_addr $protocol $status $bytes_sent $bytes_received '
                        '$session_time $upstream_addr "$upstream_bytes_sent" "$upstream_bytes_received"'
                        '"$upstream_connect_time"';
 
@@ -72,6 +72,10 @@ data:
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
         access_log /var/log/nginx/access.log;
+        error_log /var/log/nginx/error.log
+        log_format combined '$time_iso8601 $remote_addr $protocol $status $bytes_sent $bytes_received '
+          '$session_time $upstream_addr "$upstream_bytes_sent" "$upstream_bytes_received"'
+          '"$upstream_connect_time"';
       }
 
       server {
