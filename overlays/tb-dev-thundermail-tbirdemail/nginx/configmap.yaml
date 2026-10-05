@@ -21,10 +21,13 @@ data:
     pid /run/nginx.pid;
 
     stream {
-      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "protocol": "$protocol", '
-        '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
+      log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
+        "hostname": "$hostname", "proxy_protocol": {"addr": "$proxy_protocol_addr", "port": "$proxy_protocol_port", '
+        "server_addr": "$proxy_protocol_server_addr", "server_port": "$proxy_protocol_server_port"}, '
+        '"server_addr": "$server_addr", "server_port": "$server_port", "$session_time": "$session_time", '
+        '"protocol": "$protocol", "status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
         '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
-        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
+        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"}';
 
       upstream stalwart-smtp {
         server stalwart-mail:25;
