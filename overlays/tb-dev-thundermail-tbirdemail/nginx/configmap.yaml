@@ -21,7 +21,7 @@ data:
     pid /run/nginx.pid;
 
     stream {
-      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", '
+      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "protocol": "$protocol", '
         '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
         '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
         '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
@@ -105,10 +105,8 @@ data:
     events {}
 
     http {
-      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", '
-        '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
-        '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
-        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
+      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "status": "$status", '
+        '"bytes_sent": "$bytes_sent", "request_length": "$request_length", "request_time": "$request_time"}';
 
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
@@ -160,7 +158,6 @@ data:
       # Small HTTP server to serve health checks for the nginx service itself.
       server {
         listen 80;
-        # Dispose of these calls, as the health checks just get in the way
         access_log /dev/null;
         # Return 200s for calls to exactly `/` (no subpaths)
         location = / {
