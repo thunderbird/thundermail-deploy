@@ -54,6 +54,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtp;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
         error_log /var/log/nginx/error.log;
       }
@@ -63,6 +64,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtps;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
         error_log /var/log/nginx/error.log;
       }
@@ -72,6 +74,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-starttls;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
         error_log /var/log/nginx/error.log;
       }
@@ -81,6 +84,7 @@ data:
         proxy_connect_timeout 3s;
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
         error_log /var/log/nginx/error.log;
       }
@@ -90,6 +94,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-managesieve;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
         error_log /var/log/nginx/error.log;
       }
@@ -108,6 +113,8 @@ data:
     events {}
 
     http {
+      proxy_set_header X-Real-IP $proxy_protocol_addr;
+      proxy_set_header X-Forwarded-For $proxy_protocol_addr;
       log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "status": "$status", '
         '"bytes_sent": "$bytes_sent", "request_length": "$request_length", "request_time": "$request_time"}';
 
@@ -119,7 +126,7 @@ data:
 
       server {
         server_name *.tbird.email;
-        listen 443 ssl;
+        listen 443 ssl proxy_protocol;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
         access_log /var/log/nginx/access.log json;
