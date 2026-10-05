@@ -7,9 +7,10 @@ resources:
 
 namespace: thundermail
 
-images:
-  - name: stalwartlabs/stalwart
-    newTag: v0.16.23
+# Enforce a specific image by specifying it below
+# images:
+#   - name: stalwartlabs/stalwart
+#     newTag: v0.16
 
 patches:
   - path: nginx/configmap.yaml
