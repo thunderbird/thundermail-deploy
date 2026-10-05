@@ -24,7 +24,7 @@ data:
       log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "protocol": "$protocol", '
         '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
         '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
-        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": '"$upstream_connect_time"'';
+        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
 
       upstream stalwart-smtp {
         server stalwart-mail:25;
