@@ -331,7 +331,7 @@
                 "ansi": false,
                 "multiline": false,
                 "enable": true,
-                "level": "debug",
+                "level": "info",
                 "lossy": false,
                 "events": {},
                 "eventsPolicy": "exclude",
