@@ -338,5 +338,19 @@
                 "@type": "Stdout"
             }
         }
+    },
+    {
+        "__comment": "Don't ever block our internal IPs",
+        "@type": "upsert",
+        "object": "AllowedIp",
+        "matchOn": [
+            "address"
+        ],
+        "value": {
+            "ipallow-internal-cluster": {
+                "address": "10.120.0.0/16",
+                "reason": "Don't block our own internal IPs"
+            }
+        }
     }
 ]
