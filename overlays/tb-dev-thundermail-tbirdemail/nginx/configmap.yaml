@@ -71,7 +71,7 @@ data:
         proxy_connect_timeout 3s;
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
-        access_log /var/log/nginx/access.log
+        access_log /var/log/nginx/access.log;
       }
 
       server {
