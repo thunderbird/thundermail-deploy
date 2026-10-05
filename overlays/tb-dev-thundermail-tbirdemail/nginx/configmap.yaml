@@ -21,7 +21,7 @@ data:
     pid /run/nginx.pid;
 
     stream {
-      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "protocol": "$protocol", '
+      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", '
         '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
         '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
         '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
@@ -105,7 +105,7 @@ data:
     events {}
 
     http {
-      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", "protocol": "$protocol", '
+      log_format json '{"timestamp": "$time_iso8601", "remote_addr": "$remote_addr", '
         '"status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
         '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
         '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"';
