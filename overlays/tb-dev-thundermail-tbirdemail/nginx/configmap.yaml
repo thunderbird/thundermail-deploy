@@ -24,10 +24,10 @@ data:
       log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
         '"hostname": "$hostname", "proxy_protocol": {"addr": "$proxy_protocol_addr", "port": "$proxy_protocol_port", '
         '"server_addr": "$proxy_protocol_server_addr", "server_port": "$proxy_protocol_server_port"}, '
-        '"server_addr": "$server_addr", "server_port": "$server_port", "$session_time": "$session_time", '
+        '"server_addr": "$server_addr", "server_port": "$server_port", "session_time": "$session_time", '
         '"protocol": "$protocol", "status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
-        '"session_time": "$session_time", "upstream_bytes_sent": "$upstream_bytes_sent", '
-        '"upstream_byte_received": "$upstream_bytes_received", "upstream_connect_time": "$upstream_connect_time"}';
+        '"upstream_bytes_sent": "$upstream_bytes_sent", "upstream_byte_received": "$upstream_bytes_received", '
+        '"upstream_connect_time": "$upstream_connect_time"}';
 
       upstream stalwart-smtp {
         server stalwart-mail:25;
@@ -52,7 +52,7 @@ data:
       server {
         listen 25 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 30m;
         proxy_pass stalwart-smtp;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -62,7 +62,7 @@ data:
       server {
         listen 465 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 30m;
         proxy_pass stalwart-smtps;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -72,7 +72,7 @@ data:
       server {
         listen 587 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 30m;
         proxy_pass stalwart-starttls;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -82,7 +82,7 @@ data:
       server {
         listen 993 proxy_protocol;
         proxy_connect_timeout 3s;
-        proxy_timeout 3s;
+        proxy_timeout 30m;
         proxy_pass stalwart-imaps;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -92,7 +92,7 @@ data:
       server {
         listen 4190 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 30m;
         proxy_pass stalwart-managesieve;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
