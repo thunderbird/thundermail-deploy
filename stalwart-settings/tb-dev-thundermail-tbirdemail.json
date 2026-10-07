@@ -156,10 +156,7 @@
                 },
                 "protocol": "http",
                 "useTls": true,
-                "tlsImplicit": true,
-                "overrideProxyTrustedNetworks": {
-                    "10.120.0.0/16": true
-                }
+                "tlsImplicit": true
             }
         }
     },
