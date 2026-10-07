@@ -128,7 +128,6 @@ data:
         server_name *.tbird.email;
         listen 443 ssl proxy_protocol;
         keepalive_timeout 60s;
-        proxy_protocol on;
         proxy_connect_timeout 1s;
         access_log /var/log/nginx/access.log json;
         error_log /var/log/nginx/error.log;
