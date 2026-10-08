@@ -64,11 +64,3 @@ patches:
             secretKeyRef:
               name: stalwart-cloudflare-api-token
               key: STALWART_CLOUDFLARE_API_TOKEN
-
-  - target:
-      kind: Deployment
-      name: stalwart
-    patch: |
-      - op: replace
-        path: /spec/template/spec/nodeSelector/role
-        value: general
