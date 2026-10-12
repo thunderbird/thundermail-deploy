@@ -349,5 +349,124 @@
                 "reason": "Don't block our own internal IPs"
             }
         }
+    },
+    {
+        "__comment": "The old version of Stalwart did strange things with cache settings; not sure if v16 does, too.",
+        "@type": "update",
+        "object": "Cache",
+        "value": {
+            "accessTokens": 10485760,
+            "contacts": 26214400,
+            "dnsIpv4": 5242880,
+            "dnsIpv6": 5242880,
+            "dnsMtaSts": 1048576,
+            "dnsMx": 5242880,
+            "dnsPtr": 1048576,
+            "dnsRbl": 5242880,
+            "dnsTlsa": 1048576,
+            "dnsTxt": 5242880,
+            "events": 26214400,
+            "scheduling": 1048576,
+            "files": 26214400,
+            "httpAuth": 1048576,
+            "messages": 1073741824,
+            "domains": 5242880,
+            "domainNames": 10485760,
+            "domainNamesNegative": 1048576,
+            "emailAddresses": 10485760,
+            "emailAddressesNegative": 2097152,
+            "accounts": 20971520,
+            "roles": 5242880,
+            "tenants": 5242880,
+            "mailingLists": 2097152,
+            "dkimSignatures": 10485760,
+            "negativeTtl": 3600000
+        }
+    }, {
+        "__comment": "Custom messaging on the SMTP wire",
+        "@type": "update",
+        "object": "MtaStageConnect",
+        "value": {
+            "smtpGreeting": {
+              "match": {},
+              "else": "'Thundermail ESMTP at your service'"
+            },
+            "hostname": {
+              "match": {},
+              "else": "system('hostname')"
+            },
+            "script": {
+              "match": {},
+              "else": "false"
+            }
+        }
+    },
+    {
+        "__comment": "500/day rate limit applied to SMTP; the format has changed since v.0.15, so I'm not certain this has the desired effect",
+        "object": "MtaInboundThrottle",
+        "@type": "upsert",
+        "value": {
+            "acct-daily": {
+                "enable": true,
+                "description": "acct-daily",
+                "key": {
+                    "authenticatedAs": true
+                },
+                "match": {
+                    "match": {
+                        "0": {
+                            "if": "listener = 'submission' || listener = 'submissions'",
+                            "then": "true"
+                        }
+                    },
+                  "else": "false"
+                },
+                "rate": {
+                  "count": 500,
+                  "period": 86400000
+                }
+            }
+        }
+    },
+    {
+        "__comment": "Security settings for Stalwart, adapted from legacy-prod",
+        "@type": "update",
+        "object": "Security",
+        "value": {
+            "abuseBanRate": {
+              "count": 35,
+              "period": 86400000
+            },
+            "abuseBanPeriod": null,
+            "authBanRate": {
+              "count": 500,
+              "period": 86400000
+            },
+            "authBanPeriod": null,
+            "loiterBanRate": {
+              "count": 150,
+              "period": 86400000
+            },
+            "loiterBanPeriod": null,
+            "scanBanPaths": {
+              "*.php*": true,
+              "*.cgi*": true,
+              "*.asp*": true,
+              "*/wp-*": true,
+              "*/php*": true,
+              "*/cgi-bin*": true,
+              "*xmlrpc*": true,
+              "*../*": true,
+              "*/..*": true,
+              "*joomla*": true,
+              "*wordpress*": true,
+              "*drupal*": true
+            },
+            "scanBanRate": {
+              "count": 1000,
+              "period": 86400000
+            },
+            "scanBanPeriod": null
+        }
     }
 ]
