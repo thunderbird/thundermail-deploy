@@ -1,0 +1,146 @@
+name: Stalwart configuration preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - overlays/**/stalwart-configs/**
+      - bases/stalwart-configs/**
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: stalwart-config-preview
+  cancel-in-progress: true
+
+jobs:
+  select-targets:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Select affected deployment targets
+        id: targets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const targets = [
+              {
+                id: 'thundermail-authdev-tb-dev01',
+                overlayPath: 'overlays/tb-dev-thundermail-authdev/stalwart-configs',
+                previewBranch: 'env/tb-dev-stalwart-configs-preview'
+              }
+            ];
+            const sharedPrefixes = [
+              'bases/stalwart-configs/'
+            ];
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100
+              }
+            );
+            const changedPaths = files.map(file => file.filename);
+            const sharedChange = changedPaths.some(path =>
+              sharedPrefixes.some(prefix => path.startsWith(prefix))
+            );
+            const affectedTargets = sharedChange
+              ? targets
+              : targets.filter(target =>
+                  changedPaths.some(path =>
+                    path.startsWith(`${target.overlayPath}/`)
+                  )
+                );
+
+            if (affectedTargets.length === 0) {
+              core.setFailed(
+                'No configured Stalwart target matches the changed paths.'
+              );
+              return;
+            }
+
+            core.setOutput('targets', JSON.stringify(affectedTargets));
+
+  sync-preview-branches:
+    needs: select-targets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.select-targets.outputs.targets) }}
+    steps:
+      - name: Check out PR merge revision
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          ref: >-
+            refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 1
+
+      - name: Check out merged revision
+        if: >-
+          github.event.action == 'closed' &&
+          github.event.pull_request.merged == true
+        uses: actions/checkout@v4
+        with:
+          ref: >-
+            ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 1
+
+      - name: Check out base revision after an unmerged PR closes
+        if: >-
+          github.event.action == 'closed' &&
+          github.event.pull_request.merged != true
+        uses: actions/checkout@v4
+        with:
+          ref: >-
+            ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+
+      - name: Update target preview branch
+        env:
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          OVERLAY_PATH: ${{ matrix.target.overlayPath }}
+          PREVIEW_BRANCH: ${{ matrix.target.previewBranch }}
+        run: |
+          source_revision="$(git rev-parse HEAD)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git fetch origin \
+            "refs/heads/${PREVIEW_BRANCH}:refs/remotes/origin/${PREVIEW_BRANCH}"
+          then
+            git switch --detach "refs/remotes/origin/${PREVIEW_BRANCH}"
+          else
+            git fetch origin \
+              "refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+            git switch --detach "refs/remotes/origin/${BASE_BRANCH}"
+          fi
+
+          for path in \
+            "${OVERLAY_PATH}" \
+            bases/stalwart-configs
+          do
+            git rm -r --ignore-unmatch -- "${path}"
+            if git cat-file -e "${source_revision}:${path}"
+            then
+              git checkout "${source_revision}" -- "${path}"
+            fi
+          done
+
+          if git diff --cached --quiet
+          then
+            echo "Preview branch already contains the selected configuration."
+            exit 0
+          fi
+
+          git commit -m \
+            "chore(stalwart-config): preview ${source_revision}"
+          git push origin "HEAD:refs/heads/${PREVIEW_BRANCH}"
