@@ -107,7 +107,6 @@ spec:
             - name: rendered
               mountPath: /work
               readOnly: true
-      containers:
         - name: apply
           image: ghcr.io/stalwartlabs/cli:1.0.13 # Default, override with Kustomization as needed
           args:
@@ -132,6 +131,45 @@ spec:
             - name: rendered
               mountPath: /work
               readOnly: true
+        - name: reload-tls-certificates
+          image: ghcr.io/stalwartlabs/cli:1.0.13 # Default, override with Kustomization as needed
+          args:
+            - --insecure
+            - create
+            - action/ReloadTlsCertificates
+          env:
+            - name: STALWART_URL
+              value: https://stalwart-admin:443
+            - name: STALWART_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery-admin
+                  key: STALWART_USER
+            - name: STALWART_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery-admin
+                  key: STALWART_PASSWORD
+      containers:
+        - name: reload-settings
+          image: ghcr.io/stalwartlabs/cli:1.0.13 # Default, override with Kustomization as needed
+          args:
+            - --insecure
+            - create
+            - action/ReloadSettings
+          env:
+            - name: STALWART_URL
+              value: https://stalwart-admin:443
+            - name: STALWART_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery-admin
+                  key: STALWART_USER
+            - name: STALWART_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery-admin
+                  key: STALWART_PASSWORD
       volumes:
         - name: stalwart-config-template
           configMap:
