@@ -12,6 +12,15 @@ configMapGenerator:
     files:
       - values.yaml=config/values.yaml
 
+patches:
+  - target:
+      kind: ConfigMap
+      name: stalwart-config-values
+    patch: |-
+      - op: add
+        path: /immutable
+        value: true
+
 # To use a deployment-specific Stalwart CLI version, uncomment and set one of
 # these image overrides. The image name must match the image in job.yaml.
 #
