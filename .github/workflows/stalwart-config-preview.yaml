@@ -68,6 +68,8 @@ jobs:
             core.setOutput('targets', JSON.stringify(affectedTargets));
 
   sync-preview-branches:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
     needs: select-targets
     runs-on: ubuntu-latest
     strategy:
@@ -144,3 +146,13 @@ jobs:
           git commit -m \
             "chore(stalwart-config): preview ${source_revision}"
           git push origin "HEAD:refs/heads/${PREVIEW_BRANCH}"
+
+  report-fork-preview:
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository
+    needs: select-targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report unavailable fork preview
+        run: |
+          echo "::notice title=Stalwart preview not published::Fork pull requests use a read-only GitHub token, so this workflow does not update the Kargo preview branch."

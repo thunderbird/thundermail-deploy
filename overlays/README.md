@@ -63,6 +63,13 @@ The Job renders the values ConfigMap and injects private runtime material:
 
 The resulting NDJSON plan exists only in the Job's `emptyDir` volume.
 
+The CLI currently connects directly to the `stalwart-admin` Kubernetes Service
+with `--insecure`. TLS still encrypts the connection, but the CLI does not
+verify the server identity because the public certificate does not match the
+Service DNS name. Before removing `--insecure`, provision a trusted internal
+hostname covered by the certificate (or an internal CA path supported by the
+CLI) and update `STALWART_URL` to that verified endpoint.
+
 Do not add `bases/stalwart-configs` to the shared `bases/kustomization.yaml` or
 the parent deployment overlay. Either change would bypass the manual Kargo
 gate by putting the apply Job in the main mail Application.
