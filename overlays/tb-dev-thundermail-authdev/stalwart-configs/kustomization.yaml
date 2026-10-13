@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../bases/stalwart-configs
+  - security-group-policy.yaml
+
+namespace: thundermail-authdev
+
+configMapGenerator:
+  - name: stalwart-config-values
+    files:
+      - values.yaml=config/values.yaml
+
+# To use a deployment-specific Stalwart CLI version, uncomment and set one of
+# these image overrides. The image name must match the image in job.yaml.
+#
+# images:
+#   - name: ghcr.io/stalwartlabs/cli
+#     newTag: 1.0.13
+#
+# For stronger reproducibility, pin an immutable digest instead:
+#
+# images:
+#   - name: ghcr.io/stalwartlabs/cli
+#     digest: sha256:<immutable-digest>

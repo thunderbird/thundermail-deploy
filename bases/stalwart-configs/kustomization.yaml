@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: PLACEHOLDER
+
+generatorOptions:
+  disableNameSuffixHash: false
+
+configMapGenerator:
+  - name: stalwart-config-base-tpl
+    files:
+      - stalwart-config-base.yaml=config/stalwart-config-base-tpl.yaml
+
+resources:
+  - job.yaml
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: stalwart-config-base-tpl
+    patch: |-
+      - op: add
+        path: /immutable
+        value: true
+
