@@ -468,5 +468,14 @@
             },
             "scanBanPeriod": null
         }
+    },
+    {
+        "__comment": "Many address book apps do not have great suppport for vCard 4, so we force v3 instead.",
+        "@type": "update",
+        "object": "AddressBook",
+        "value": {
+            "defaultDisplayName": "Thundermail Contacts",
+            "vCardVersion": "v3"
+        }
     }
 ]
