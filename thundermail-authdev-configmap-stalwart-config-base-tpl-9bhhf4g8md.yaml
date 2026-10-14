@@ -1,0 +1,363 @@
+apiVersion: v1
+data:
+  stalwart-config-base.yaml: |
+    ---
+    '@type': upsert
+    object: DnsServer
+    matchOn:
+      - '@type'
+      - secret
+    value:
+      'dns-cloudflare-__DOMAIN_SLUG__':
+        '@type': Cloudflare
+        secret:
+          '@type': Text
+          value: __CLOUDFLARE_API_TOKEN__
+        description: 'Cloudflare DNS provider for __DOMAIN_FQDN__ zone'
+        ttl: 60000 # 1 minute
+        pollingInterval: 15000 # 15 seconds
+    ---
+    '@type': upsert
+    object: Domain
+    matchOn:
+      - name
+    value:
+      'domain-__DOMAIN_SLUG__':
+        name: '__DOMAIN_FQDN__'
+        description: '__DOMAIN_FQDN__ Configuration'
+        certificateManagement:
+          '@type': Manual
+        dkimManagement:
+          '@type': Automatic
+        dnsManagement:
+          '@type': Automatic
+          dnsServerId: '#dns-cloudflare-__DOMAIN_SLUG__'
+          origin: '__DOMAIN_FQDN__'
+          publishRecords:
+            dkim: true
+            tlsa: true
+            spf: true
+            mx: true
+            dmarc: true
+            srv: true
+            mtaSts: true
+            tlsRpt: true
+            caa: true
+            autoConfig: true
+            autoConfigLegacy: true
+            autoDiscover: true
+        isEnabled: true
+        subAddressing:
+          '@type': Enabled
+        allowRelaying: false
+    ---
+    '@type': upsert
+    object: Certificate
+    matchOn:
+      - certificate
+      - privateKey
+    value:
+      'cert-bundle-__DOMAIN_SLUG__':
+        certificate:
+          '@type': Text
+          value: |-
+            __TLS_CERTIFICATE__
+        privateKey:
+          '@type': Text
+          value: |-
+            __TLS_PRIVATE_KEY__
+    ---
+    '@type': update
+    object: SystemSettings
+    value:
+      defaultCertificateId: '#cert-bundle-__DOMAIN_SLUG__'
+      defaultDomainId: '#domain-__DOMAIN_SLUG__'
+      defaultHostname: 'mail.__DOMAIN_FQDN__'
+      services:
+        caldav:
+          cleartext: false
+        carddav:
+          cleartext: false
+        imap:
+          cleartext: false
+        jmap:
+          cleartext: false
+        managesieve:
+          cleartext: false
+        smtp:
+          cleartext: false
+        webdav:
+          cleartext: false
+      providerInfo: {}
+    ---
+    '@type': update
+    object: AddressBook
+    value:
+      defaultDisplayName: 'Thundermail Contacts'
+      vCardVersion: v3
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-http:
+        name: http
+        bind:
+          '[::]:8080': true
+        protocol: http
+        useTls: true
+        tlsImplicit: false
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-https:
+        name: https
+        bind:
+          '[::]:443': true
+        protocol: http
+        useTls: true
+        tlsImplicit: true
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-sieve:
+        name: sieve
+        bind:
+          '[::]:4190': true
+        protocol: manageSieve
+        useTls: true
+        tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__TRUSTED_PROXY_CIDR__': true
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-imaps:
+        name: imaps
+        bind:
+          '[::]:993': true
+        protocol: imap
+        useTls: true
+        tlsImplicit: true
+        overrideProxyTrustedNetworks:
+          '__TRUSTED_PROXY_CIDR__': true
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-submissions:
+        name: smtp-ssl
+        bind:
+          '[::]:465': true
+        protocol: smtp
+        useTls: true
+        tlsImplicit: true
+        overrideProxyTrustedNetworks:
+          '__TRUSTED_PROXY_CIDR__': true
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-smtp-starttls:
+        name: smtp-starttls
+        bind:
+          '[::]:587': true
+        protocol: smtp
+        useTls: true
+        tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__TRUSTED_PROXY_CIDR__': true
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - useTls
+      - tlsImplicit
+    value:
+      listen-smtp:
+        name: smtp-plain
+        bind:
+          '[::]:25': true
+        protocol: smtp
+        useTls: false
+        tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__TRUSTED_PROXY_CIDR__': true
+    ---
+    '@type': destroy
+    object: NetworkListener
+    value:
+      name: pop3s
+    ---
+    '@type': update
+    object: BlobStore
+    value:
+      '@type': S3
+      region:
+        '@type': '__BLOB_STORE_REGION__'
+      bucket: '__BLOB_STORE_BUCKET__'
+      accessKey:
+        '@type': None
+      secretKey:
+        '@type': None
+      securityToken:
+        '@type': None
+      sessionToken:
+        '@type': None
+    ---
+    '@type': update
+    object: InMemoryStore
+    value:
+      '@type': Redis
+      url: '__IN_MEMORY_STORE_URL__'
+    ---
+    '@type': upsert
+    object: Tracer
+    matchOn:
+      - '@type'
+    value:
+      'tracer-__TRACER_SLUG__':
+        buffered: true
+        ansi: false
+        multiline: false
+        enable: true
+        level: info
+        lossy: false
+        events: {}
+        eventsPolicy: exclude
+        '@type': Stdout
+    ---
+    '@type': upsert
+    object: AllowedIp
+    matchOn:
+      - address
+    value:
+      ipallow-internal-cluster:
+        address: '__INTERNAL_IP_CIDR__'
+        reason: Don't block our own internal IPs
+    ---
+    '@type': update
+    object: Cache
+    value:
+      accessTokens: 10485760 # 10 MiB
+      contacts: 26214400 # 25 MiB
+      dnsIpv4: 5242880 # 5 MiB
+      dnsIpv6: 5242880 # 5 MiB
+      dnsMtaSts: 1048576 # 1 MiB
+      dnsMx: 5242880 # 5 MiB
+      dnsPtr: 1048576 # 1 MiB
+      dnsRbl: 5242880 # 5 MiB
+      dnsTlsa: 1048576 # 1 MiB
+      dnsTxt: 5242880 # 5 MiB
+      events: 26214400 # 25 MiB
+      scheduling: 1048576 # 1 MiB
+      files: 26214400 # 25 MiB
+      httpAuth: 1048576 # 1 MiB
+      messages: 1073741824 # 1 GiB
+      domains: 5242880 # 5 MiB
+      domainNames: 10485760 # 10 MiB
+      domainNamesNegative: 1048576 # 1 MiB
+      emailAddresses: 10485760 # 10 MiB
+      emailAddressesNegative: 2097152 # 2 MiB
+      accounts: 20971520 # 20 MiB
+      roles: 5242880 # 5 MiB
+      tenants: 5242880 # 5 MiB
+      mailingLists: 2097152 # 2 MiB
+      dkimSignatures: 10485760 # 10 MiB
+      negativeTtl: 3600000 # 1 hour
+    ---
+    '@type': update
+    object: MtaStageConnect
+    value:
+      smtpGreeting:
+        match: {}
+        else: "'Thundermail ESMTP at your service'"
+      hostname:
+        match: {}
+        else: "system('hostname')"
+      script:
+        match: {}
+        else: 'false'
+    ---
+    '@type': upsert
+    object: MtaInboundThrottle
+    value:
+      acct-daily:
+        enable: true
+        description: acct-daily
+        key:
+          authenticatedAs: true
+        match:
+          match:
+            '0':
+              if: "listener = 'submission' || listener = 'submissions'"
+              then: 'true'
+          else: 'false'
+        rate:
+          count: 500
+          period: 86400000 # 24 hours
+    ---
+    '@type': update
+    object: Security
+    value:
+      abuseBanRate:
+        count: 35
+        period: 86400000 # 24 hours
+      abuseBanPeriod: null
+      authBanRate:
+        count: 500
+        period: 86400000 # 24 hours
+      authBanPeriod: null
+      loiterBanRate:
+        count: 150
+        period: 86400000 # 24 hours
+      loiterBanPeriod: null
+      scanBanPaths:
+        '*.php*': true
+        '*.cgi*': true
+        '*.asp*': true
+        '*/wp-*': true
+        '*/php*': true
+        '*/cgi-bin*': true
+        '*xmlrpc*': true
+        '*../*': true
+        '*/..*': true
+        '*joomla*': true
+        '*wordpress*': true
+        '*drupal*': true
+      scanBanRate:
+        count: 1000
+        period: 86400000 # 24 hours
+      scanBanPeriod: null
+immutable: true
+kind: ConfigMap
+metadata:
+  name: stalwart-config-base-tpl-9bhhf4g8md
+  namespace: thundermail-authdev
