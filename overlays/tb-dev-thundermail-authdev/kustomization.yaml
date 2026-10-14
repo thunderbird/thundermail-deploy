@@ -4,6 +4,7 @@ kind: Kustomization
 
 resources:
   - ../../bases
+  - stalwart-mail/cloudflare-secret.yaml
 
 namespace: thundermail-authdev
 
