@@ -69,7 +69,7 @@ object: SystemSettings
 value:
   defaultCertificateId: '#cert-bundle-__DOMAIN_SLUG__'
   defaultDomainId: '#domain-__DOMAIN_SLUG__'
-  defaultHostname: '__DOMAIN_FQDN__'
+  defaultHostname: 'mail.__DOMAIN_FQDN__'
   services:
     caldav:
       cleartext: false
@@ -86,6 +86,12 @@ value:
     webdav:
       cleartext: false
   providerInfo: {}
+---
+'@type': update
+object: AddressBook
+value:
+  defaultDisplayName: 'Thundermail Contacts'
+  vCardVersion: v3
 ---
 '@type': upsert
 object: NetworkListener
@@ -116,8 +122,6 @@ value:
     protocol: http
     useTls: true
     tlsImplicit: true
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
