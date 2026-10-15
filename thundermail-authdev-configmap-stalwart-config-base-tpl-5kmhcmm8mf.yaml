@@ -63,7 +63,7 @@ data:
             __TLS_CERTIFICATE__
         privateKey:
           '@type': Text
-          value: |-
+          secret: |-
             __TLS_PRIVATE_KEY__
     ---
     '@type': update
@@ -358,5 +358,5 @@ data:
 immutable: true
 kind: ConfigMap
 metadata:
-  name: stalwart-config-base-tpl-2tm4fc9b7f
+  name: stalwart-config-base-tpl-5kmhcmm8mf
   namespace: thundermail-authdev
