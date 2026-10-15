@@ -2,14 +2,13 @@
 '@type': upsert
 object: DnsServer
 matchOn:
-  - '@type'
-  - secret
+  - description
 value:
   'dns-cloudflare-__DOMAIN_SLUG__':
     '@type': Cloudflare
     secret:
-      '@type': Text
-      value: __CLOUDFLARE_API_TOKEN__
+      '@type': Value
+      secret: __CLOUDFLARE_API_TOKEN__
     description: 'Cloudflare DNS provider for __DOMAIN_FQDN__ zone'
     ttl: 60000 # 1 minute
     pollingInterval: 15000 # 15 seconds
@@ -69,7 +68,7 @@ object: SystemSettings
 value:
   defaultCertificateId: '#cert-bundle-__DOMAIN_SLUG__'
   defaultDomainId: '#domain-__DOMAIN_SLUG__'
-  defaultHostname: '__DOMAIN_FQDN__'
+  defaultHostname: 'mail.__DOMAIN_FQDN__'
   services:
     caldav:
       cleartext: false
@@ -86,6 +85,12 @@ value:
     webdav:
       cleartext: false
   providerInfo: {}
+---
+'@type': update
+object: AddressBook
+value:
+  defaultDisplayName: 'Thundermail Contacts'
+  vCardVersion: v3
 ---
 '@type': upsert
 object: NetworkListener
@@ -116,8 +121,6 @@ value:
     protocol: http
     useTls: true
     tlsImplicit: true
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
