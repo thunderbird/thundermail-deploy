@@ -103,6 +103,9 @@ source venv/bin/activate
 pip install requests urllib3
 ```
 
+
+### Perform the Migration
+
 Disconnect public access to the v0.15 system so that users cannot connect and continue to induce changes in the state. (**How? We can route DNS to a dead end or something. Should do a quick spike or chat about this detail.**) Downtime begins now.
 
 Export all content from the source system. Adjust the command below for the appropriate environment:
