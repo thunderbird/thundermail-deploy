@@ -31,7 +31,7 @@ At this point, we can be confident in a baseline configuration. We may need to m
 
 - [Deploy a thundermail-deploy instance](https://github.com/thunderbird/platform-infrastructure/issues/1170) to the tb-stage cluster under the `thundermail-stage` namespace using the `stage-thundermail.com` domain.
 - Bring the tb-stage deployment's blob storage bucket into data parity with legacy-stage's with [cross-account S3 bucket replication](https://github.com/thunderbird/platform-infrastructure/issues/1171) and [a batch replication operation](https://github.com/thunderbird/platform-infrastructure/issues/1172).
-- Configure the tb-stage/thundermail deployment to receive a failover from legacy-stage by [nuking the DB](https://github.com/thunderbird/platform-infrastructure/issues/1173) and [applying our prefered settings](https://github.com/thunderbird/platform-infrastructure/issues/1174).
+- Configure the tb-stage/thundermail deployment to receive a failover from legacy-stage by [nuking the DB](https://github.com/thunderbird/platform-infrastructure/issues/1173) and [applying our preferred settings](https://github.com/thunderbird/platform-infrastructure/issues/1174).
 - Establish VPC peering between legacy-stage and tb-stage (**No issue for this yet.**) This can be done entirely with Pulumi. See [these peering requests in tb-dev](https://github.com/thunderbird/platform-infrastructure/blob/main/pulumi/environments/mzla-tb-dev/config.prod.yaml#L36-L64) and [these accepting requests and special routes](https://github.com/thunderbird/mailstrom/blob/main/pulumi/config.stage.yaml#L43-L56) in legacy-stage as working examples.
 - Ensure that the Stalwart Migration Proxy pod in tb-stage is able to communicate with both the legacy-stage admin API and the tb-stage deployment's management API. (**No issue for this yet.**) The peering above is one part, but the SMP pod's security group must also be permitted access to the legacy API.
 
@@ -44,7 +44,7 @@ At this point, we can be confident in a baseline configuration. We may need to m
 - There are a few data validation errors that come up when we run the migration steps. Those have been [documented here](https://github.com/thunderbird/platform-infrastructure/issues/1165). We should investigate how we get to the point where this invalid data is permitted in our system, determine the correct fix to place in the current v15 system so that the validation errors no longer occur. We should probably also address any bugs in Accounts (or wherever else) that might be resulting in these invalid configurations, thereby preventing any new issues from arising post-migration.
 - [Deploy a thundermail-deploy instance](https://github.com/thunderbird/platform-infrastructure/issues/1178) to the tb-prod cluster under the `thundermail-prod` namespace using the `-thundermail.com` domain.
 - Bring the tb-prod deployment's blob storage bucket into data parity with legacy-prod's with [cross-account S3 bucket replication](https://github.com/thunderbird/platform-infrastructure/issues/1179) and [a batch replication operation](https://github.com/thunderbird/platform-infrastructure/issues/1180).
-- Configure the tb-prod/thundermail deployment to receive a failover from legacy-prod by [nuking the DB](https://github.com/thunderbird/platform-infrastructure/issues/1181) and [applying our prefered settings](https://github.com/thunderbird/platform-infrastructure/issues/1182).
+- Configure the tb-prod/thundermail deployment to receive a failover from legacy-prod by [nuking the DB](https://github.com/thunderbird/platform-infrastructure/issues/1181) and [applying our preferred settings](https://github.com/thunderbird/platform-infrastructure/issues/1182).
 - Ensure that the Stalwart Migration Proxy pod in tb-prod is able to communicate with both the legacy-prod admin API and the tb-prod deployment's management API. (**No issue for this yet.**) The peering above is one part, but the SMP pod's security group must also be permitted access to the legacy API.
 - Work with Support to schedule a maintenance period for the migration event and communicate this to our users.
 
@@ -104,6 +104,13 @@ pip install requests urllib3
 ```
 
 
+### Backup in Case of Rollback
+
+Prior to performing the migration, log into Cloudflare and export the zone file for the domain in question (easily done with the "Export" button in the Cloudflare DNS console). One set of configurations in the new version enables automatic management of the DNS records in the domain. Those will look entirely different after migration, so back them up now in case we need to revert.
+
+In NeonDB, snapshot the source system's database. In truth, there should not be a way for this to get overwritten because our process involves moving to an entirely new database instance. But just in case something goes awry, take a one-time snapshot of this DB.
+
+
 ### Perform the Migration
 
 Disconnect public access to the v0.15 system so that users cannot connect and continue to induce changes in the state. (**How? We can route DNS to a dead end or something. Should do a quick spike or chat about this detail.**) Downtime begins now.
@@ -137,7 +144,7 @@ It also produces the `export.json` file, which is the NDJSON file containing all
 stalwart-cli apply -f export.json
 ```
 
-For good measure, we now re-apply our own prefered settings.
+For good measure, we now re-apply our own preferred settings.
 
 > [!NOTE]
 > I have been using a script to deploy settings from NDJSON files manually. There is now a new way to do this where the settings are packaged as YAML and part of the K8s manifests. I am not sure what the process is for manually applying these settings under this model. Should write that out here.
@@ -147,6 +154,18 @@ And finally issue a restart of the Stalwart containers to ensure they start up c
 ```bash
 kubectl -n thundermail rollout restart stalwart
 ```
+
+
+### DNS Cutover
+
+Stalwart will manage all of its own DNS records except, it seems, the MX record. The final step is to set this record ourselves.
+
+In prod, change the CNAME record for `mail.thundermail.com` to the address for the Stalwart Migration Proxy's public load balancer.
+
+In stage, change the CNAME record for `mail.stage-thundermail.com` to the address for its SMP public load balancer.
+
+
+### Post-Migration Confirmation
 
 At this point, the server should come online, and we can do a spot-check of all the things that matter most:
 
@@ -158,3 +177,12 @@ At this point, the server should come online, and we can do a spot-check of all 
 If access to the servers was cut off before, we can now restore access to the service for further testing. For good measure, we can run E2E tests to confirm things are working.
 
 The migration is now complete.
+
+
+## Rollback
+
+If the migration should have to be rolled back, the primary thing to restore is the DNS records. We are using entirely new data stores (Postgres, Redis, S3) on the target end of the migration. The target system does not have credentials to access the legacy database, nor network access to Redis, nor IAM permission to S3, and so we can pretty safely assume we won't have to roll back changes made to these stores. If a database snapshot does need to be recovered from, it can be done from the "Backup & Restore" page of the Neon console.
+
+If we need to roll back and revert all traffic to the legacy system, this can be done by importing the previously exported zone file in the Cloudflare DNS console. Waiting out the TTLs should then send all traffic back to the original.
+
+Because the data stores are all separate, and because object replication will be set up between the source and target, rolling back should result in the normal operation of the mail server with all ongoing user data changes being automatically replicated into the target bucket. If we decide to make another attempt after a rollback, these prep steps will not have to be re-run. We would only have to worry about the Stalwart export/convert/apply steps and the DNS cutover again.
