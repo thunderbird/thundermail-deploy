@@ -5,14 +5,13 @@ data:
     '@type': upsert
     object: DnsServer
     matchOn:
-      - '@type'
-      - secret
+      - description
     value:
       'dns-cloudflare-__DOMAIN_SLUG__':
         '@type': Cloudflare
         secret:
-          '@type': Text
-          value: __CLOUDFLARE_API_TOKEN__
+          '@type': Value
+          secret: __CLOUDFLARE_API_TOKEN__
         description: 'Cloudflare DNS provider for __DOMAIN_FQDN__ zone'
         ttl: 60000 # 1 minute
         pollingInterval: 15000 # 15 seconds
@@ -359,5 +358,5 @@ data:
 immutable: true
 kind: ConfigMap
 metadata:
-  name: stalwart-config-base-tpl-9bhhf4g8md
+  name: stalwart-config-base-tpl-2tm4fc9b7f
   namespace: thundermail-authdev

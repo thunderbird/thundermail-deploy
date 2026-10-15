@@ -171,7 +171,7 @@ spec:
       restartPolicy: Never
       volumes:
       - configMap:
-          name: stalwart-config-base-tpl-9bhhf4g8md
+          name: stalwart-config-base-tpl-2tm4fc9b7f
         name: stalwart-config-template
       - configMap:
           name: stalwart-config-values-m4784kd46b
