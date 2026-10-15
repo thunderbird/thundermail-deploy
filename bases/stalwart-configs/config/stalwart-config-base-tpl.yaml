@@ -60,7 +60,7 @@ value:
         __TLS_CERTIFICATE__
     privateKey:
       '@type': Text
-      value: |-
+      secret: |-
         __TLS_PRIVATE_KEY__
 ---
 '@type': update
