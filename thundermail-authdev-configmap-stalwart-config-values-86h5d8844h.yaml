@@ -12,11 +12,12 @@ data:
     inMemoryStoreURL: rediss://master.stalwart-redis-authdev.psueny.euc1.cache.amazonaws.com
     tracerSlug: stdout
     internalIPCIDR: 10.120.0.0/16
+    oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
     stalwartPgHost: ep-rough-hat-b1wrcrg3-pooler.c-5.eu-central-1.aws.neon.tech
     stalwartPgDatabase: neondb
     stalwartPgAdminUsername: neondb_owner
 immutable: true
 kind: ConfigMap
 metadata:
-  name: stalwart-config-values-m4784kd46b
+  name: stalwart-config-values-86h5d8844h
   namespace: thundermail-authdev

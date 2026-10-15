@@ -55,6 +55,7 @@ spec:
               | .key |= sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
               | .key |= sub("__TRACER_SLUG__"; $values.tracerSlug)
               | .key |= sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+              | .key |= sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
             )
             | (
               .. | select(tag == "!!str")
@@ -67,6 +68,7 @@ spec:
               | sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
               | sub("__TRACER_SLUG__"; $values.tracerSlug)
               | sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+              | sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
             )
             | (
               .. | select(. == "__TLS_CERTIFICATE__")
@@ -171,10 +173,10 @@ spec:
       restartPolicy: Never
       volumes:
       - configMap:
-          name: stalwart-config-base-tpl-5kmhcmm8mf
+          name: stalwart-config-base-tpl-b5cmc462ct
         name: stalwart-config-template
       - configMap:
-          name: stalwart-config-values-m4784kd46b
+          name: stalwart-config-values-86h5d8844h
         name: stalwart-values
       - name: ssl-certificate
         secret:
