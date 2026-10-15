@@ -2,14 +2,13 @@
 '@type': upsert
 object: DnsServer
 matchOn:
-  - '@type'
-  - secret
+  - description
 value:
   'dns-cloudflare-__DOMAIN_SLUG__':
     '@type': Cloudflare
     secret:
-      '@type': Text
-      value: __CLOUDFLARE_API_TOKEN__
+      '@type': Value
+      secret: __CLOUDFLARE_API_TOKEN__
     description: 'Cloudflare DNS provider for __DOMAIN_FQDN__ zone'
     ttl: 60000 # 1 minute
     pollingInterval: 15000 # 15 seconds
