@@ -39,6 +39,7 @@ spec:
                   | .key |= sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
                   | .key |= sub("__TRACER_SLUG__"; $values.tracerSlug)
                   | .key |= sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+                  | .key |= sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
                 )
                 | (
                   .. | select(tag == "!!str")
@@ -51,6 +52,7 @@ spec:
                   | sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
                   | sub("__TRACER_SLUG__"; $values.tracerSlug)
                   | sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+                  | sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
                 )
                 | (
                   .. | select(. == "__TLS_CERTIFICATE__")

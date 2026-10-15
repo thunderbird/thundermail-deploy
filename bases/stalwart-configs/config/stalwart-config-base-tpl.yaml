@@ -48,6 +48,23 @@ value:
     allowRelaying: false
 ---
 '@type': upsert
+object: Directory
+matchOn:
+  - description
+value:
+  'directory-accounts-oidc':
+    '@type': Oidc
+    description: 'Accounts Keycloak OIDC directory'
+    issuerUrl: '__OIDC_ISSUER_URL__'
+    claimUsername: username
+    claimName: name
+---
+'@type': update
+object: Authentication
+value:
+  directoryId: '#directory-accounts-oidc'
+---
+'@type': upsert
 object: Certificate
 matchOn:
   - certificate
