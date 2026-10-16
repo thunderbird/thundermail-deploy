@@ -17,7 +17,7 @@ kubectl -n stalwart-migration-proxy run -it \
 You will want to install some package dependencies:
 
 ```bash
-apk add curl jq py3-virtualenv redis vim
+apk add curl jq postgresql py3-virtualenv redis vim
 ```
 
 Install Vandelay:
@@ -82,6 +82,25 @@ vandelay export \
     --auth-password $STALWART_PASSWORD \
     --account-name 'someuser@thundermail.com' # User whose data is being migrated
     username.sqlite # File on disk storing the data
+```
+
+
+## stalwart-cli
+
+You can read the full documentation on [stalwart-cli here](https://stalw.art/docs/management/cli/). You can use this tool to browse and manipulate the resources the Stalwart API exposes without knowing how to operate that API directly and without having to figure out Stalwart's database schema. The full [object reference is here](https://stalw.art/docs/ref/).
+
+Once you've exported the various `STALWART_*` settings (see the sample dotenv file above) into your environment, you should be able to use the tool. To get a list of listeners, for example, run:
+
+```
+~ # stalwart-cli query NetworkListener
+Id            Name         Protocol     Bind addresses  Implicit TLS
+jf13jcw2ahqb  http         HTTP         [::]:8080       No          
+jf13jcvoahab  https        HTTP         [::]:443        Yes         
+jf13jcuaagqb  sieve        ManageSieve  [::]:4190       No          
+jf13jcsoagab  pop3s        POP3         [::]:995        Yes         
+jf13jcq1afqb  imaps        IMAP4        [::]:993        Yes         
+jf13jcpoafab  submissions  SMTP         [::]:465        Yes         
+jf13jcocaeqb  smtp         SMTP         [::]:25         No
 ```
 
 

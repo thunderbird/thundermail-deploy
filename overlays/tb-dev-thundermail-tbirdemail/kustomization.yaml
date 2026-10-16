@@ -40,11 +40,27 @@ patches:
         value:
           name: STALWART_PUBLIC_URL
           value: "https://mail.tbird.email"
-
-  - target:
-      kind: Deployment
-      name: stalwart
-    patch: |
-      - op: replace
-        path: /spec/template/spec/nodeSelector/role
-        value: general
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SSL_TBIRD_EMAIL_CERTIFICATE
+          valueFrom:
+            secretKeyRef:
+              name: ssl-tbird.email
+              key: tls.crt
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SSL_TBIRD_EMAIL_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ssl-tbird.email
+              key: tls.key
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: CLOUDFLARE_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: stalwart-cloudflare-api-token
+              key: STALWART_CLOUDFLARE_API_TOKEN
