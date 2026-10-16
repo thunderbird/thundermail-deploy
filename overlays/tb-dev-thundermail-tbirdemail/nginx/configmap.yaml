@@ -49,7 +49,7 @@ data:
         server stalwart-mail:4190;
       }
 
-      # All servers accept PROXY protocol from the SMP and server PROXY protocol to upstreams.
+      # All servers accept PROXY protocol from the SMP and serve PROXY protocol to upstreams.
       server {
         listen 25 proxy_protocol;
         proxy_connect_timeout 1s;
