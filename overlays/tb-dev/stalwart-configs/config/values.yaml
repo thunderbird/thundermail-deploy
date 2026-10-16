@@ -1,0 +1,15 @@
+# Non-secret values for the thundermail-authdev Stalwart configuration.
+# Keep credentials, API tokens, certificates, and private keys in Kubernetes
+# Secrets; the applier injects those at render time.
+domainSlug: tb-dev-thunderbird-dev
+domainFQDN: tb-dev.thunderbird.dev
+trustedProxyCIDR: 10.120.0.0/16
+blobStoreRegion: EuCentral1
+blobStoreBucket: mzla-tb-dev-thundermail-stalwart-blob-store
+inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.psueny.euc1.cache.amazonaws.com
+tracerSlug: stdout
+internalIPCIDR: 10.120.0.0/16
+oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
+stalwartPgHost: ep-lingering-rice-b282u2zh-pooler.c-6.eu-central-1.aws.neon.tech
+stalwartPgDatabase: neondb
+stalwartPgAdminUsername: neondb_owner
