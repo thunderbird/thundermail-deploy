@@ -1,0 +1,11 @@
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: stalwart-config-applier
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: stalwart-config-applier
+  securityGroups:
+    groupIds:
+      - "sg-01b12ebc580769646" # stalwart-server-thundermail
