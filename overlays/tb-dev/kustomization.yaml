@@ -17,15 +17,13 @@ patches:
   - path: nginx/deployment.yaml
   - path: nginx/hpas.yaml
   - path: nginx/security-group-policy.yaml
+  - path: nginx/service.yaml
   - path: stalwart-mail/configmap.yaml
   - path: stalwart-mail/hpas.yaml
   - path: stalwart-mail/secrets.yaml
   - path: stalwart-mail/security-group-policy.yaml
   - path: stalwart-mail/service.yaml
   - path: stalwart-mail/serviceaccount.yaml
-  
-  # Patch nginx service to be private ClusterIP
-  - path: nginx/service.yaml
 
   # Set the public domain for this installation
   - target:
@@ -36,4 +34,4 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_PUBLIC_URL
-          value: "https://mail.stage-thundermail.com"
+          value: "https://mail.tb-dev.thunderbird.dev"
