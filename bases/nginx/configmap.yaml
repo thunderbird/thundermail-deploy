@@ -65,6 +65,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtps;
+        access_log /var/log/nginx/access.log json;
       }
 
       server {
@@ -72,6 +73,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-starttls;
+        access_log /var/log/nginx/access.log json;
       }
 
       server {
@@ -79,6 +81,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
+        access_log /var/log/nginx/access.log json;
       }
 
       server {
@@ -86,6 +89,7 @@ data:
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-managesieve;
+        access_log /var/log/nginx/access.log json;
       }
     }
 
