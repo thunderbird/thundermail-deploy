@@ -28,6 +28,11 @@ jobs:
           script: |
             const targets = [
               {
+                id: 'thundermail-tb-stage-thundermail',
+                overlayPath: 'overlays/tb-stage-thundermail/stalwart-configs',
+                previewBranch: 'env/tb-stage-thundermail-stalwart-configs-preview'
+              },
+              {
                 id: 'thundermail-authdev-tb-dev01',
                 overlayPath: 'overlays/tb-dev-thundermail-authdev/stalwart-configs',
                 previewBranch: 'env/tb-dev-stalwart-configs-preview'
