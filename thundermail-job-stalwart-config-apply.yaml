@@ -1,0 +1,196 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "2"
+  name: stalwart-config-apply
+  namespace: thundermail
+spec:
+  activeDeadlineSeconds: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stalwart-config-applier
+    spec:
+      containers:
+      - args:
+        - --insecure
+        - create
+        - action/ReloadSettings
+        env:
+        - name: STALWART_URL
+          value: https://stalwart-admin:443
+        - name: STALWART_USER
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_USER
+              name: stalwart-recovery-admin
+        - name: STALWART_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_PASSWORD
+              name: stalwart-recovery-admin
+        image: ghcr.io/stalwartlabs/cli:1.0.13
+        name: reload-settings
+      initContainers:
+      - command:
+        - /bin/sh
+        - -ec
+        - |
+          yq eval-all \
+            --output-format=json \
+            --indent=0 \
+            'load("/etc/stalwart-values/values.yaml") as $values
+            | (
+              .. | select(tag == "!!map")
+            ) |= with_entries(
+              .key |= sub("__DOMAIN_SLUG__"; $values.domainSlug)
+              | .key |= sub("__DOMAIN_FQDN__"; $values.domainFQDN)
+              | .key |= sub("__TRUSTED_PROXY_CIDR__"; $values.trustedProxyCIDR)
+              | .key |= sub("__BLOB_STORE_REGION__"; $values.blobStoreRegion)
+              | .key |= sub("__BLOB_STORE_BUCKET__"; $values.blobStoreBucket)
+              | .key |= sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
+              | .key |= sub("__TRACER_SLUG__"; $values.tracerSlug)
+              | .key |= sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+              | .key |= sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
+            )
+            | (
+              .. | select(tag == "!!str")
+            ) |= (
+              sub("__DOMAIN_SLUG__"; $values.domainSlug)
+              | sub("__DOMAIN_FQDN__"; $values.domainFQDN)
+              | sub("__TRUSTED_PROXY_CIDR__"; $values.trustedProxyCIDR)
+              | sub("__BLOB_STORE_REGION__"; $values.blobStoreRegion)
+              | sub("__BLOB_STORE_BUCKET__"; $values.blobStoreBucket)
+              | sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
+              | sub("__TRACER_SLUG__"; $values.tracerSlug)
+              | sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+              | sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
+            )
+            | (
+              .. | select(. == "__TLS_CERTIFICATE__")
+            ) = load_str("/etc/tls/tls.crt")
+            |
+            (
+              .. | select(. == "__TLS_PRIVATE_KEY__")
+            ) = load_str("/etc/tls/tls.key")
+            |
+            (
+              .. | select(. == "__CLOUDFLARE_API_TOKEN__")
+            ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
+            |
+            .' \
+            /etc/stalwart-config-template/stalwart-config-base.yaml \
+            > /work/stalwart-config.ndjson
+        image: mikefarah/yq:4.45.1
+        name: render-config
+        volumeMounts:
+        - mountPath: /etc/stalwart-config-template
+          name: stalwart-config-template
+          readOnly: true
+        - mountPath: /etc/stalwart-values
+          name: stalwart-values
+          readOnly: true
+        - mountPath: /work
+          name: rendered
+        - mountPath: /etc/tls
+          name: ssl-certificate
+          readOnly: true
+        - mountPath: /etc/cloudflare
+          name: cloudflare-api-token
+          readOnly: true
+      - args:
+        - --insecure
+        - apply
+        - --dry-run
+        - --file
+        - /work/stalwart-config.ndjson
+        env:
+        - name: STALWART_URL
+          value: https://stalwart-admin:443
+        - name: STALWART_USER
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_USER
+              name: stalwart-recovery-admin
+        - name: STALWART_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_PASSWORD
+              name: stalwart-recovery-admin
+        image: ghcr.io/stalwartlabs/cli:1.0.13
+        name: validate
+        volumeMounts:
+        - mountPath: /work
+          name: rendered
+          readOnly: true
+      - args:
+        - --insecure
+        - apply
+        - --file
+        - /work/stalwart-config.ndjson
+        env:
+        - name: STALWART_URL
+          value: https://stalwart-admin:443
+        - name: STALWART_USER
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_USER
+              name: stalwart-recovery-admin
+        - name: STALWART_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_PASSWORD
+              name: stalwart-recovery-admin
+        image: ghcr.io/stalwartlabs/cli:1.0.13
+        name: apply
+        volumeMounts:
+        - mountPath: /work
+          name: rendered
+          readOnly: true
+      - args:
+        - --insecure
+        - create
+        - action/ReloadTlsCertificates
+        env:
+        - name: STALWART_URL
+          value: https://stalwart-admin:443
+        - name: STALWART_USER
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_USER
+              name: stalwart-recovery-admin
+        - name: STALWART_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: STALWART_PASSWORD
+              name: stalwart-recovery-admin
+        image: ghcr.io/stalwartlabs/cli:1.0.13
+        name: reload-tls-certificates
+      restartPolicy: Never
+      volumes:
+      - configMap:
+          name: stalwart-config-base-tpl-b5cmc462ct
+        name: stalwart-config-template
+      - configMap:
+          name: stalwart-config-values-9dt8795bmc
+        name: stalwart-values
+      - name: ssl-certificate
+        secret:
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          secretName: ssl-certificate
+      - name: cloudflare-api-token
+        secret:
+          items:
+          - key: STALWART_CLOUDFLARE_API_TOKEN
+            path: STALWART_CLOUDFLARE_API_TOKEN
+          secretName: stalwart-cloudflare-api-token
+      - emptyDir: {}
+        name: rendered
