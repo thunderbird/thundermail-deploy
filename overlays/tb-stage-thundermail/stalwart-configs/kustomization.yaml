@@ -21,6 +21,18 @@ patches:
         path: /immutable
         value: true
 
+  # Use the correct secret name for our TLS cert
+  - target:
+      kind: Job
+      name: stalwart-config-apply
+    patch: |
+      - op: replace
+        path: /spec/template/spec/initContainers/0/volumeMounts/3/name
+        value: ssl-stage-thundermail.com
+      - op: replace
+        path: /spec/template/spec/volumes/2/secret/secretName
+        value: ssl-stage-thundermail.com
+
 # To use a deployment-specific Stalwart CLI version, uncomment and set one of
 # these image overrides. The image name must match the image in job.yaml.
 #
