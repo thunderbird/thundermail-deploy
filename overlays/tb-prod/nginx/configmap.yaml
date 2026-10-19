@@ -13,17 +13,21 @@ data:
     # for us internally now, and we should allow it to do so. Therefore, we use a standard TCP
     # reverse proxy configuration for our purposes.
     #    https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-udp-load-balancer/
-  
+
     user nginx;
     worker_processes auto;
-  
-    error_log stderr;
+
+    error_log /var/log/nginx/error.log warn;
     pid /run/nginx.pid;
-  
+
     stream {
-      log_format basic '$time_iso8601 $remote_addr $protocol $status $bytes_sent $bytes_received '
-                       '$session_time $upstream_addr "$upstream_bytes_sent" "$upstream_bytes_received"'
-                       '"$upstream_connect_time"';
+      log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
+          '"hostname": "$hostname", "proxy_protocol": {"addr": "$proxy_protocol_addr", "port": "$proxy_protocol_port", '
+          '"server_addr": "$proxy_protocol_server_addr", "server_port": "$proxy_protocol_server_port"}, '
+          '"server_addr": "$server_addr", "server_port": "$server_port", "session_time": "$session_time", '
+          '"protocol": "$protocol", "status": "$status", "bytes_sent": "$bytes_sent", "bytes_received": "$bytes_received", '
+          '"upstream_bytes_sent": "$upstream_bytes_sent", "upstream_byte_received": "$upstream_bytes_received", '
+          '"upstream_connect_time": "$upstream_connect_time"}';
 
       upstream stalwart-smtp {
         server stalwart-mail:25;
@@ -36,51 +40,57 @@ data:
       upstream stalwart-starttls {
         server stalwart-mail:587;
       }
-  
+
       upstream stalwart-imaps {
         server stalwart-mail:993;
       }
-  
+
       upstream stalwart-managesieve {
         server stalwart-mail:4190;
       }
-  
+
       server {
         listen 25;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtp;
+        access_log /var/log/nginx/access.log json;
       }
-  
+
       server {
         listen 465;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtps;
+        access_log /var/log/nginx/access.log json;
+
       }
-  
+
       server {
         listen 587;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-starttls;
+        access_log /var/log/nginx/access.log json;
       }
-  
+
       server {
         listen 993;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
+        access_log /var/log/nginx/access.log json;
       }
-  
+
       server {
         listen 4190;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-managesieve;
+        access_log /var/log/nginx/access.log json;
       }
     }
-  
+
     # HTTP traffic to Stalwart is always encrypted. We need to decrypt it here so we can determine
     # if the traffic, based on the HTTP path, is permissible. While most of Stalwart's API functions
     # are acceptable or required for users to access, we wish to deny access to any administrative
@@ -90,16 +100,16 @@ data:
     #
     # Documentation for HTTP server configuration can be found here:
     # https://nginx.org/en/docs/http/configuring_https_servers.html
-  
+
     events {}
-  
+
     http {
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
         # internal sources.
         server stalwart-https:443;
       }
-  
+
       server {
         server_name *.thundermail.com;
         listen 443 ssl;
@@ -117,20 +127,20 @@ data:
         # Enable gzip compression
         gzip on;
         gzip_types application/json;
-  
+
         # Specifically block access to these routes
         location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
           return 404;
         }
-  
+
         location ^~ /admin {  # Stalwart's web admin console, only accessible by private route
           return 404;
         }
-  
+
         location ^~ /api {  # Stalwart's underlying API system, only accessible by private route
           return 404;
         }
-  
+
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
           proxy_pass https://stalwart-https;
@@ -138,7 +148,7 @@ data:
           proxy_ssl_name mail.thundermail.com;
         }
       }
-  
+
       # Small HTTP server to serve health checks for the nginx service itself.
       server {
         listen 80;
@@ -152,4 +162,3 @@ data:
         }
       }
     }
-
