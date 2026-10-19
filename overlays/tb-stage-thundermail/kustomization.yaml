@@ -37,4 +37,15 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_PUBLIC_URL
-          value: "mail.stage-thundermail.com"
+          value: "https://mail.stage-thundermail.com"
+
+  - target:
+      kind: Job
+      name: stalwart-config-apply
+    patch: |
+      - op: replace
+        path: /spec/template/spec/initContainers/0/volumeMounts/3/name
+        value: ssl-stage-thundermail.com
+      - op: replace
+        path: /spec/template/spec/volumes/2/secret/secretName
+        value: ssl-stage-thundermail.com

@@ -2,7 +2,7 @@
 # Keep credentials, API tokens, certificates, and private keys in Kubernetes
 # Secrets; the applier injects those at render time.
 domainSlug: stage-thundermail
-domainFQDN: mail.stage-thundermail.com
+domainFQDN: stage-thundermail.com
 trustedProxyCIDR: 10.140.0.0/16
 blobStoreRegion: EuCentral1
 blobStoreBucket: mzla-tb-stage-thundermail-stalwart-blob-store
