@@ -99,6 +99,41 @@ data:
         # internal sources.
         server stalwart-https:443;
       }
+
+      server {
+        # --- Direct tb-dev domain server ---
+        server_name mail.tb-dev.thunderbird.dev;
+        listen 443 ssl;
+        keepalive_timeout 60s;
+        proxy_connect_timeout 1s;
+
+        ssl_certificate /etc/nginx/mail-tb-dev-thunderbird.crt;
+        ssl_certificate_key /etc/nginx/mail-tb-dev-thunderbird.key;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        gzip on;
+        gzip_types application/json;
+
+        location ^~ /account {
+          return 404;
+        }
+
+        location ^~ /admin {
+          return 404;
+        }
+
+        location ^~ /api {
+          return 404;
+        }
+
+        location ^~ / {
+          proxy_pass https://stalwart-https;
+          proxy_set_header Host mail.tb-dev.thunderbird.dev;
+          proxy_ssl_server_name on;
+          proxy_ssl_name mail.tb-dev.thunderbird.dev;
+        }
+      }
   
       server {
         # --- Dev domain server ---

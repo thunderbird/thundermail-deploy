@@ -72,3 +72,10 @@ spec:
                       path: stage-thundermail.crt
                     - key: tls.key
                       path: stage-thundermail.key
+              - secret:
+                  name: ssl-certificate
+                  items:
+                    - key: tls.crt
+                      path: mail-tb-dev-thunderbird.crt
+                    - key: tls.key
+                      path: mail-tb-dev-thunderbird.key
