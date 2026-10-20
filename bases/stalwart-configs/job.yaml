@@ -33,7 +33,6 @@ spec:
                 ) |= with_entries(
                   .key |= sub("__DOMAIN_SLUG__"; $values.domainSlug)
                   | .key |= sub("__DOMAIN_FQDN__"; $values.domainFQDN)
-                  | .key |= sub("__TRUSTED_PROXY_CIDR__"; $values.trustedProxyCIDR)
                   | .key |= sub("__BLOB_STORE_REGION__"; $values.blobStoreRegion)
                   | .key |= sub("__BLOB_STORE_BUCKET__"; $values.blobStoreBucket)
                   | .key |= sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
@@ -46,7 +45,6 @@ spec:
                 ) |= (
                   sub("__DOMAIN_SLUG__"; $values.domainSlug)
                   | sub("__DOMAIN_FQDN__"; $values.domainFQDN)
-                  | sub("__TRUSTED_PROXY_CIDR__"; $values.trustedProxyCIDR)
                   | sub("__BLOB_STORE_REGION__"; $values.blobStoreRegion)
                   | sub("__BLOB_STORE_BUCKET__"; $values.blobStoreBucket)
                   | sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
