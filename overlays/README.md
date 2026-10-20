@@ -23,7 +23,7 @@ Set the namespace explicitly. The Stalwart base intentionally uses
 `namespace: PLACEHOLDER`, so building the base by itself is not deployable:
 
 ```yaml
-namespace: thundermail-authdev
+namespace: thundermail
 ```
 
 Edit `config/values.yaml` for the deployment's non-secret Stalwart settings:
@@ -36,7 +36,7 @@ configMapGenerator:
 ```
 
 The complete setup is in
-`overlays/tb-dev-thundermail-authdev/stalwart-configs/kustomization.yaml`.
+`overlays/tb-dev/stalwart-configs/kustomization.yaml`.
 
 ## What the values control
 
@@ -79,13 +79,13 @@ gate by putting the apply Job in the main mail Application.
 From the repository root:
 
 ```bash
-kustomize build overlays/tb-dev-thundermail-authdev/stalwart-configs
+kustomize build overlays/tb-dev/stalwart-configs
 ```
 
 To inspect only the Stalwart resources:
 
 ```bash
-kustomize build overlays/tb-dev-thundermail-authdev/stalwart-configs |
+kustomize build overlays/tb-dev/stalwart-configs |
   yq eval '
     select(
       (.kind == "Job" and .metadata.name == "stalwart-config-apply") or
@@ -105,14 +105,14 @@ kustomize build overlays/tb-dev-thundermail-authdev/stalwart-configs |
 The dedicated Stalwart config overlay used by the Kargo promotion pipeline is:
 
 ```text
-overlays/tb-dev-thundermail-authdev/stalwart-configs
+overlays/tb-dev/stalwart-configs
 ```
 
 After manual promotion, Kargo renders this overlay with `kustomize-build` and
 replaces the contents of:
 
 ```text
-env/tb-dev-stalwart-configs
+env/tb-dev-thundermail-stalwart-configs
 ```
 
 The Argo CD Application tracks that stable branch at path `.`. The branch
