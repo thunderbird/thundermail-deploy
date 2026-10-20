@@ -156,8 +156,6 @@ data:
         protocol: manageSieve
         useTls: true
         tlsImplicit: false
-        overrideProxyTrustedNetworks:
-          '__TRUSTED_PROXY_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -173,8 +171,6 @@ data:
         protocol: imap
         useTls: true
         tlsImplicit: true
-        overrideProxyTrustedNetworks:
-          '__TRUSTED_PROXY_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -190,8 +186,6 @@ data:
         protocol: smtp
         useTls: true
         tlsImplicit: true
-        overrideProxyTrustedNetworks:
-          '__TRUSTED_PROXY_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -207,8 +201,6 @@ data:
         protocol: smtp
         useTls: true
         tlsImplicit: false
-        overrideProxyTrustedNetworks:
-          '__TRUSTED_PROXY_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -224,8 +216,6 @@ data:
         protocol: smtp
         useTls: false
         tlsImplicit: false
-        overrideProxyTrustedNetworks:
-          '__TRUSTED_PROXY_CIDR__': true
     ---
     '@type': destroy
     object: NetworkListener
@@ -375,5 +365,5 @@ data:
 immutable: true
 kind: ConfigMap
 metadata:
-  name: stalwart-config-base-tpl-b5cmc462ct
+  name: stalwart-config-base-tpl-btc97c4858
   namespace: thundermail
