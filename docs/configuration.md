@@ -44,7 +44,7 @@ Then request the certificate:
         --subject-alternative-names "*.$DOMAIN_NAME" \
         --validation-method DNS \
         --options Export=ENABLED \
-        --tags Key=project,Value=thundermail Key=environment,Value=tb-dev-tbirdemail \
+        --tags Key=project,Value=thundermail Key=environment,Value=tb-dev \
         --query CertificateArn
 
 That outputs the ARN of the certificate you requested. Copy that ARN and export it as a variable:

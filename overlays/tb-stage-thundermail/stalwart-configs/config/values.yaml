@@ -1,4 +1,4 @@
-# Non-secret values for the thundermail-authdev Stalwart configuration.
+# Non-secret values for the tb-stage-thundermail Stalwart configuration.
 # Keep credentials, API tokens, certificates, and private keys in Kubernetes
 # Secrets; the applier injects those at render time.
 domainSlug: stage-thundermail

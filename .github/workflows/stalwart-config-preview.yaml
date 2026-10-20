@@ -33,11 +33,6 @@ jobs:
                 previewBranch: 'env/tb-stage-thundermail-stalwart-configs-preview'
               },
               {
-                id: 'thundermail-authdev-tb-dev01',
-                overlayPath: 'overlays/tb-dev-thundermail-authdev/stalwart-configs',
-                previewBranch: 'env/tb-dev-stalwart-configs-preview'
-              },
-              {
                 id: 'thundermail-tb-dev01',
                 overlayPath: 'overlays/tb-dev/stalwart-configs',
                 previewBranch: 'env/tb-dev-thundermail-stalwart-configs-preview'
