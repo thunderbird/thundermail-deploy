@@ -1,7 +1,7 @@
 apiVersion: v1
 data:
   values.yaml: |
-    # Non-secret values for the thundermail-authdev Stalwart configuration.
+    # Non-secret values for the tb-stage-thundermail Stalwart configuration.
     # Keep credentials, API tokens, certificates, and private keys in Kubernetes
     # Secrets; the applier injects those at render time.
     domainSlug: stage-thundermail
@@ -18,5 +18,5 @@ data:
 immutable: true
 kind: ConfigMap
 metadata:
-  name: stalwart-config-values-d7fmmbmkmg
+  name: stalwart-config-values-t74gt6ktbb
   namespace: thundermail
