@@ -3,7 +3,6 @@
 # Secrets; the applier injects those at render time.
 domainSlug: tb-dev-thunderbird-dev
 domainFQDN: tb-dev.thunderbird.dev
-trustedProxyCIDR: 10.120.0.0/16
 blobStoreRegion: EuCentral1
 blobStoreBucket: mzla-tb-dev-thundermail-stalwart-blob-store
 inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.psueny.euc1.cache.amazonaws.com

@@ -3,7 +3,6 @@
 # Secrets; the applier injects those at render time.
 domainSlug: tbird-email
 domainFQDN: tbird.email
-trustedProxyCIDR: 10.120.0.0/16
 blobStoreRegion: EuCentral1
 blobStoreBucket: mzla-tb-dev-authdev-stalwart-blob-store
 inMemoryStoreURL: rediss://master.stalwart-redis-authdev.psueny.euc1.cache.amazonaws.com
