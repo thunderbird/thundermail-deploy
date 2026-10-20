@@ -153,8 +153,6 @@ value:
     protocol: manageSieve
     useTls: true
     tlsImplicit: false
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -170,8 +168,6 @@ value:
     protocol: imap
     useTls: true
     tlsImplicit: true
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -187,8 +183,6 @@ value:
     protocol: smtp
     useTls: true
     tlsImplicit: true
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -204,8 +198,6 @@ value:
     protocol: smtp
     useTls: true
     tlsImplicit: false
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -221,8 +213,6 @@ value:
     protocol: smtp
     useTls: false
     tlsImplicit: false
-    overrideProxyTrustedNetworks:
-      '__TRUSTED_PROXY_CIDR__': true
 ---
 '@type': destroy
 object: NetworkListener
