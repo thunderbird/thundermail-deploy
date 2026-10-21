@@ -5,6 +5,8 @@ namespace: PLACEHOLDER
 
 generatorOptions:
   disableNameSuffixHash: false
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
 
 configMapGenerator:
   - name: stalwart-config-base-tpl
