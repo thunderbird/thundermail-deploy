@@ -1,14 +1,15 @@
 # Non-secret values for the tb-stage-thundermail Stalwart configuration.
 # Keep credentials, API tokens, certificates, and private keys in Kubernetes
 # Secrets; the applier injects those at render time.
-domainSlug: stage-thundermail
-domainFQDN: stage-thundermail.com
+domainSlug: tb-stage-thunderbird-dev
+domainFQDN: tb-stage.thunderbird.dev
 blobStoreRegion: EuCentral1
 blobStoreBucket: mzla-tb-stage-thundermail-stalwart-blob-store
 inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.dxtglz.euc1.cache.amazonaws.com
 tracerSlug: stdout
 internalIPCIDR: 10.140.0.0/16
-oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
+oidcIssuerURL: https://auth.tb-stage.thunderbird.dev/realms/tbpro
 stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
 stalwartPgDatabase: neondb
 stalwartPgAdminUsername: neondb_owner
+route53HostedZoneID: REPLACE_ME_TB_STAGE_ROUTE53_ZONE_ID

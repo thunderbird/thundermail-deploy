@@ -1,0 +1,18 @@
+---
+'@type': upsert
+object: DnsServer
+matchOn:
+  - description
+value:
+  'dns-route53-__DOMAIN_SLUG__':
+    '@type': Route53
+    accessKeyId: __ROUTE53_ACCESS_KEY_ID__
+    secretAccessKey:
+      '@type': Value
+      secret: __ROUTE53_SECRET_ACCESS_KEY__
+    region: us-east-1
+    hostedZoneId: __ROUTE53_HOSTED_ZONE_ID__
+    privateZoneOnly: false
+    description: 'Route53 DNS provider for __DOMAIN_FQDN__ zone'
+    ttl: 60000 # 1 minute
+    pollingInterval: 15000 # 15 seconds
