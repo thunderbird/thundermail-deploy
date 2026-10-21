@@ -7,6 +7,10 @@ resources:
 
 namespace: thundermail
 
+generatorOptions:
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+
 configMapGenerator:
   - name: stalwart-config-values
     files:
