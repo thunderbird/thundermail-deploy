@@ -1,0 +1,37 @@
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: ssl-tb-stage.thunderbird.dev
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: ssl-tb-stage.thunderbird.dev
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/tls
+      engineVersion: v2
+      data:
+        tls.crt: '{{ .tls_crt }}'
+        tls.key: '{{ .tls_key }}'
+  data:
+    - secretKey: tls_crt
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
+        key: "mzla/tb-stage/thundermail/ssl-tb-stage.thunderbird.dev"
+        property: tls_crt
+    - secretKey: tls_key
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
+        key: "mzla/tb-stage/thundermail/ssl-tb-stage.thunderbird.dev"
+        property: tls_key

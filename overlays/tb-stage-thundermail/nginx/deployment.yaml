@@ -59,9 +59,9 @@ spec:
                     - key: nginx.conf
                       path: nginx.conf
               - secret:
-                  name: ssl-stage-thundermail.com
+                  name: ssl-tb-stage.thunderbird.dev
                   items:
                     - key: tls.crt
-                      path: ssl-stage-thundermail.crt
+                      path: ssl-tb-stage-thunderbird.crt
                     - key: tls.key
-                      path: ssl-stage-thundermail.key
+                      path: ssl-tb-stage-thunderbird.key

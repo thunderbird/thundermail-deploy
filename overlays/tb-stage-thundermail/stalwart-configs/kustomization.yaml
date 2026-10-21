@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - ../../../bases/stalwart-configs
   - security-group-policy.yaml
+  - route53-credentials.yaml
 
 namespace: thundermail
 
@@ -15,24 +16,21 @@ configMapGenerator:
   - name: stalwart-config-values
     files:
       - values.yaml=config/values.yaml
+  - name: stalwart-config-base-tpl
+    behavior: merge
+    files:
+      - stalwart-config-dns-route53.yaml=config/dns-route53-tpl.yaml
 
 patches:
   - target:
       kind: ConfigMap
-      name: stalwart-config-values
+      name: stalwart-config-(values|base-tpl)
     patch: |-
       - op: add
         path: /immutable
         value: true
 
-  # Use the correct secret name for our TLS cert
-  - target:
-      kind: Job
-      name: stalwart-config-apply
-    patch: |
-      - op: replace
-        path: /spec/template/spec/volumes/2/secret/secretName
-        value: ssl-stage-thundermail.com
+  - path: job.yaml
 
 # To use a deployment-specific Stalwart CLI version, uncomment and set one of
 # these image overrides. The image name must match the image in job.yaml.

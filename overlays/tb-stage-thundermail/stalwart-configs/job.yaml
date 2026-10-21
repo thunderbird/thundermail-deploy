@@ -1,0 +1,86 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stalwart-config-apply
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: render-config
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              yq eval-all \
+                --output-format=json \
+                --indent=0 \
+                'load("/etc/stalwart-values/values.yaml") as $values
+                | select(.value | has("dns-cloudflare-__DOMAIN_SLUG__") | not)
+                | (
+                  select(.object == "Domain") | .value[].dnsManagement.dnsServerId
+                ) = "#dns-route53-__DOMAIN_SLUG__"
+                | (
+                  .. | select(tag == "!!map")
+                ) |= with_entries(
+                  .key |= sub("__DOMAIN_SLUG__"; $values.domainSlug)
+                  | .key |= sub("__DOMAIN_FQDN__"; $values.domainFQDN)
+                  | .key |= sub("__BLOB_STORE_REGION__"; $values.blobStoreRegion)
+                  | .key |= sub("__BLOB_STORE_BUCKET__"; $values.blobStoreBucket)
+                  | .key |= sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
+                  | .key |= sub("__TRACER_SLUG__"; $values.tracerSlug)
+                  | .key |= sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+                  | .key |= sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
+                )
+                | (
+                  .. | select(tag == "!!str")
+                ) |= (
+                  sub("__DOMAIN_SLUG__"; $values.domainSlug)
+                  | sub("__DOMAIN_FQDN__"; $values.domainFQDN)
+                  | sub("__BLOB_STORE_REGION__"; $values.blobStoreRegion)
+                  | sub("__BLOB_STORE_BUCKET__"; $values.blobStoreBucket)
+                  | sub("__IN_MEMORY_STORE_URL__"; $values.inMemoryStoreURL)
+                  | sub("__TRACER_SLUG__"; $values.tracerSlug)
+                  | sub("__INTERNAL_IP_CIDR__"; $values.internalIPCIDR)
+                  | sub("__OIDC_ISSUER_URL__"; $values.oidcIssuerURL)
+                  | sub("__ROUTE53_HOSTED_ZONE_ID__"; $values.route53HostedZoneID)
+                )
+                | (
+                  .. | select(. == "__TLS_CERTIFICATE__")
+                ) = load_str("/etc/tls/tls.crt")
+                |
+                (
+                  .. | select(. == "__TLS_PRIVATE_KEY__")
+                ) = load_str("/etc/tls/tls.key")
+                |
+                (
+                  .. | select(. == "__ROUTE53_ACCESS_KEY_ID__")
+                ) = load_str("/etc/route53/ROUTE53_ACCESS_KEY_ID")
+                |
+                (
+                  .. | select(. == "__ROUTE53_SECRET_ACCESS_KEY__")
+                ) = load_str("/etc/route53/ROUTE53_SECRET_ACCESS_KEY")
+                |
+                .' \
+                /etc/stalwart-config-template/stalwart-config-dns-route53.yaml \
+                /etc/stalwart-config-template/stalwart-config-base.yaml \
+                > /work/stalwart-config.ndjson
+          volumeMounts:
+            - mountPath: /etc/cloudflare
+              $patch: delete
+            - name: route53-credentials
+              mountPath: /etc/route53
+              readOnly: true
+      volumes:
+        - name: ssl-certificate
+          secret:
+            secretName: ssl-tb-stage.thunderbird.dev
+        - name: cloudflare-api-token
+          $patch: delete
+        - name: route53-credentials
+          secret:
+            secretName: stalwart-route53-credentials
+            items:
+              - key: ROUTE53_ACCESS_KEY_ID
+                path: ROUTE53_ACCESS_KEY_ID
+              - key: ROUTE53_SECRET_ACCESS_KEY
+                path: ROUTE53_SECRET_ACCESS_KEY
