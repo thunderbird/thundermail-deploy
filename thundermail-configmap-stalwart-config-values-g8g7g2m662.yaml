@@ -18,5 +18,7 @@ data:
 immutable: true
 kind: ConfigMap
 metadata:
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
   name: stalwart-config-values-g8g7g2m662
   namespace: thundermail
