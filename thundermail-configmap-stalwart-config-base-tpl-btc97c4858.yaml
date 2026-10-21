@@ -365,5 +365,7 @@ data:
 immutable: true
 kind: ConfigMap
 metadata:
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
   name: stalwart-config-base-tpl-btc97c4858
   namespace: thundermail
