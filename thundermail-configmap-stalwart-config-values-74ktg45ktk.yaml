@@ -11,7 +11,7 @@ data:
     inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.psueny.euc1.cache.amazonaws.com
     tracerSlug: stdout
     internalIPCIDR: 10.120.0.0/16
-    oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
+    oidcIssuerURL: https://auth.main.dev-thundermail.com/realms/tbpro
     stalwartPgHost: ep-lingering-rice-b282u2zh-pooler.c-6.eu-central-1.aws.neon.tech
     stalwartPgDatabase: neondb
     stalwartPgAdminUsername: neondb_owner
@@ -20,5 +20,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-6b992bg77b
+  name: stalwart-config-values-74ktg45ktk
   namespace: thundermail

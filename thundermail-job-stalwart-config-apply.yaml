@@ -174,7 +174,7 @@ spec:
           name: stalwart-config-base-tpl-btc97c4858
         name: stalwart-config-template
       - configMap:
-          name: stalwart-config-values-6b992bg77b
+          name: stalwart-config-values-74ktg45ktk
         name: stalwart-values
       - name: ssl-certificate
         secret:
