@@ -4,8 +4,8 @@ data:
     # Non-secret values for the tb-dev-thundermail Stalwart configuration.
     # Keep credentials, API tokens, certificates, and private keys in Kubernetes
     # Secrets; the applier injects those at render time.
-    domainSlug: tb-dev-thunderbird-dev
-    domainFQDN: tb-dev.thunderbird.dev
+    domainSlug: main-dev-thundermail
+    domainFQDN: main.dev-thundermail.com
     blobStoreRegion: EuCentral1
     blobStoreBucket: mzla-tb-dev-thundermail-stalwart-blob-store
     inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.psueny.euc1.cache.amazonaws.com
@@ -20,5 +20,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-g8g7g2m662
+  name: stalwart-config-values-6b992bg77b
   namespace: thundermail
