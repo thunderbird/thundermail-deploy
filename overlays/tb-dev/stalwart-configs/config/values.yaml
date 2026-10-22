@@ -1,8 +1,8 @@
 # Non-secret values for the tb-dev-thundermail Stalwart configuration.
 # Keep credentials, API tokens, certificates, and private keys in Kubernetes
 # Secrets; the applier injects those at render time.
-domainSlug: tb-dev-thunderbird-dev
-domainFQDN: tb-dev.thunderbird.dev
+domainSlug: main-dev-thundermail
+domainFQDN: main.dev-thundermail.com
 blobStoreRegion: EuCentral1
 blobStoreBucket: mzla-tb-dev-thundermail-stalwart-blob-store
 inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.psueny.euc1.cache.amazonaws.com
