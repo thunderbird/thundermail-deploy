@@ -29,9 +29,7 @@ data:
           '"upstream_bytes_sent": "$upstream_bytes_sent", "upstream_byte_received": "$upstream_bytes_received", '
           '"upstream_connect_time": "$upstream_connect_time"}';
 
-      # proxy_timeout is an idle timeout between reads/writes. Mail clients legitimately pause for
-      # more than a few seconds (e.g. client-side lookups before EHLO, IMAP IDLE), so it must not be
-      # short; 10m matches the nginx default.
+      # proxy_timeout is an idle timeout; mail clients (IMAP IDLE, SMTP before EHLO) pause longer than a few seconds
       upstream stalwart-smtp {
         server stalwart-mail:25;
       }
