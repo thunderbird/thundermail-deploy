@@ -4,6 +4,7 @@ kind: Kustomization
 
 resources:
   - ../../bases
+  - stalwart-mail/cloudflare-api-token.yaml
 
 namespace: thundermail
 
@@ -34,4 +35,4 @@ patches:
         path: /spec/template/spec/containers/0/env/-
         value:
           name: STALWART_PUBLIC_URL
-          value: "https://mail.tb-dev.thunderbird.dev"
+          value: "https://mail.main.dev-thundermail.com"

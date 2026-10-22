@@ -62,6 +62,6 @@ spec:
                   name: ssl-certificate
                   items:
                     - key: tls.crt
-                      path: mail-tb-dev-thunderbird.crt
+                      path: ssl-main-dev-thundermail.crt
                     - key: tls.key
-                      path: mail-tb-dev-thunderbird.key
+                      path: ssl-main-dev-thundermail.key
