@@ -17,8 +17,8 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-name: "stalwart-thundermail-public"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-dev"
     service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-02ab1850c560ae91d" # stalwart-nginx-lb-thundermail
-    # PROXY protocol on every target group. Health checks use pod port 80, which is not a Service port.
+    # PROXY protocol on every target group. Health checks use PROXY-aware pod port 8081, which is not a Service port.
     service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: "*"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "80"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8081"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/"

@@ -156,7 +156,7 @@ data:
         }
       }
 
-      # Small HTTP server to serve health checks for the nginx service itself.
+      # Plain HTTP health server for Kubernetes probes, which do not send a PROXY header.
       server {
         listen 80;
         # Return 200s for calls to exactly `/` (no subpaths)
@@ -164,6 +164,17 @@ data:
           return 200;
         }
         # Return 404s for anything else
+        location / {
+          return 404;
+        }
+      }
+
+      # NLB health checks include a PROXY v2 header when it is enabled on the target group.
+      server {
+        listen 8081 proxy_protocol;
+        location = / {
+          return 200;
+        }
         location / {
           return 404;
         }
