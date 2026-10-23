@@ -33,7 +33,7 @@ spec:
               containerPort: 443
             - name: nginx-health
               containerPort: 80
-            - name: nginx-nlb-health
+            - name: nlb-health
               containerPort: 8081
           readinessProbe:
             httpGet:
