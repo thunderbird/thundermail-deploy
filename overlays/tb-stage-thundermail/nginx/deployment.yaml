@@ -33,6 +33,8 @@ spec:
               containerPort: 443
             - name: nginx-health
               containerPort: 80
+            - name: nginx-nlb-health
+              containerPort: 8081
           readinessProbe:
             httpGet:
               path: /
@@ -59,7 +61,7 @@ spec:
                     - key: nginx.conf
                       path: nginx.conf
               - secret:
-                  name: ssl-stage-thundermail.com
+                  name: ssl-certificate
                   items:
                     - key: tls.crt
                       path: ssl-stage-thundermail.crt

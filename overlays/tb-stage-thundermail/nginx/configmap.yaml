@@ -21,6 +21,9 @@ data:
     pid /run/nginx.pid;
 
     stream {
+      # Replace the NLB connection address with the client address from its PROXY header.
+      set_real_ip_from 10.140.0.0/16;
+
       log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
           '"hostname": "$hostname", "proxy_protocol": {"addr": "$proxy_protocol_addr", "port": "$proxy_protocol_port", '
           '"server_addr": "$proxy_protocol_server_addr", "server_port": "$proxy_protocol_server_port"}, '
@@ -50,43 +53,48 @@ data:
       }
 
       server {
-        listen 25;
+        listen 25 proxy_protocol;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtp;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
       }
 
       server {
-        listen 465;
+        listen 465 proxy_protocol;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-smtps;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
       }
 
       server {
-        listen 587;
+        listen 587 proxy_protocol;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-starttls;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
 
       }
 
       server {
-        listen 993;
+        listen 993 proxy_protocol;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-imaps;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
       }
 
       server {
-        listen 4190;
+        listen 4190 proxy_protocol;
         proxy_connect_timeout 1s;
         proxy_timeout 3s;
         proxy_pass stalwart-managesieve;
+        proxy_protocol on;
         access_log /var/log/nginx/access.log json;
       }
     }
@@ -112,7 +120,9 @@ data:
 
       server {
         server_name mail.stage-thundermail.com;
-        listen 443 ssl;
+        listen 443 ssl proxy_protocol;
+        set_real_ip_from 10.140.0.0/16;
+        real_ip_header proxy_protocol;
         keepalive_timeout 60s;
         proxy_connect_timeout 1s;
 
@@ -145,11 +155,12 @@ data:
         location ^~ / {
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.stage-thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
           proxy_ssl_name mail.stage-thundermail.com;
         }
       }
 
-      # Small HTTP server to serve health checks for the nginx service itself.
+      # Plain HTTP health server for Kubernetes probes, which do not send a PROXY header.
       server {
         listen 80;
         # Return 200s for calls to exactly `/` (no subpaths)
@@ -157,6 +168,17 @@ data:
           return 200;
         }
         # Return 404s for anything else
+        location / {
+          return 404;
+        }
+      }
+
+      # NLB health checks include a PROXY v2 header when it is enabled on the target group.
+      server {
+        listen 8081 proxy_protocol;
+        location = / {
+          return 200;
+        }
         location / {
           return 404;
         }
