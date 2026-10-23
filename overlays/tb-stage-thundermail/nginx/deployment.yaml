@@ -59,7 +59,7 @@ spec:
                     - key: nginx.conf
                       path: nginx.conf
               - secret:
-                  name: ssl-stage-thundermail.com
+                  name: ssl-certificate
                   items:
                     - key: tls.crt
                       path: ssl-stage-thundermail.crt

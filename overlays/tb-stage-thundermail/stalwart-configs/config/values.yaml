@@ -8,6 +8,8 @@ blobStoreBucket: mzla-tb-stage-thundermail-stalwart-blob-store
 inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.dxtglz.euc1.cache.amazonaws.com
 tracerSlug: stdout
 internalIPCIDR: 10.140.0.0/16
+tlsCertificateSANs:
+  '*.stage-thundermail.com': true
 oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
 stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
 stalwartPgDatabase: neondb
