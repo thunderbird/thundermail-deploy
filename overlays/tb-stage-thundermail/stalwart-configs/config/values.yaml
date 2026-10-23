@@ -10,7 +10,7 @@ tracerSlug: stdout
 internalIPCIDR: 10.140.0.0/16
 tlsCertificateSANs:
   '*.stage-thundermail.com': true
-oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
+oidcIssuerURL: https://auth.stage-thundermail.com/realms/tbpro
 stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
 stalwartPgDatabase: neondb
 stalwartPgAdminUsername: neondb_owner
