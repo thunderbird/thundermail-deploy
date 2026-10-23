@@ -13,7 +13,7 @@ data:
     internalIPCIDR: 10.140.0.0/16
     tlsCertificateSANs:
       '*.stage-thundermail.com': true
-    oidcIssuerURL: https://auth.tb-dev.thunderbird.dev/realms/tbpro
+    oidcIssuerURL: https://auth.stage-thundermail.com/realms/tbpro
     stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
     stalwartPgDatabase: neondb
     stalwartPgAdminUsername: neondb_owner
@@ -22,5 +22,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-hfmhggc2d2
+  name: stalwart-config-values-h56dc2ft9b
   namespace: thundermail

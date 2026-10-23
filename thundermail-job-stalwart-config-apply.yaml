@@ -178,7 +178,7 @@ spec:
           name: stalwart-config-base-tpl-8mtkdm46ct
         name: stalwart-config-template
       - configMap:
-          name: stalwart-config-values-hfmhggc2d2
+          name: stalwart-config-values-h56dc2ft9b
         name: stalwart-values
       - name: ssl-certificate
         secret:
