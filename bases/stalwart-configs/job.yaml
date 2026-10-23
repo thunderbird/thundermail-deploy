@@ -61,6 +61,10 @@ spec:
                 ) = load_str("/etc/tls/tls.key")
                 |
                 (
+                  .. | select(. == "__TLS_CERTIFICATE_SANS__")
+                ) = $values.tlsCertificateSANs
+                |
+                (
                   .. | select(. == "__CLOUDFLARE_API_TOKEN__")
                 ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
                 |

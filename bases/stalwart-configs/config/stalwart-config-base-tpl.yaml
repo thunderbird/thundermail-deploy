@@ -67,10 +67,10 @@ value:
 '@type': upsert
 object: Certificate
 matchOn:
-  - certificate
-  - privateKey
+  - subjectAlternativeNames
 value:
   'cert-bundle-__DOMAIN_SLUG__':
+    subjectAlternativeNames: '__TLS_CERTIFICATE_SANS__'
     certificate:
       '@type': Text
       value: |-
@@ -153,6 +153,8 @@ value:
     protocol: manageSieve
     useTls: true
     tlsImplicit: false
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -168,6 +170,8 @@ value:
     protocol: imap
     useTls: true
     tlsImplicit: true
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -183,6 +187,8 @@ value:
     protocol: smtp
     useTls: true
     tlsImplicit: true
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -198,6 +204,8 @@ value:
     protocol: smtp
     useTls: true
     tlsImplicit: false
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
 ---
 '@type': upsert
 object: NetworkListener
@@ -213,11 +221,18 @@ value:
     protocol: smtp
     useTls: false
     tlsImplicit: false
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
 ---
 '@type': destroy
 object: NetworkListener
 value:
   name: pop3s
+---
+'@type': update
+object: Http
+value:
+  useXForwarded: true
 ---
 '@type': update
 object: BlobStore
