@@ -329,7 +329,38 @@ data:
     ---
     '@type': upsert
     object: MtaInboundThrottle
+    matchOn:
+      - description
     value:
+      sender-ip:
+        enable: true
+        description: Sender IP throttle
+        key:
+          remoteIp: true
+        match:
+          match:
+            '0':
+              if: "listener = 'smtp'"
+              then: 'true'
+          else: 'false'
+        rate:
+          count: 5
+          period: 1000 # 1 second
+      sender-address-to-recipient:
+        enable: true
+        description: Sender address to recipient throttle
+        key:
+          sender: true
+          rcpt: true
+        match:
+          match:
+            '0':
+              if: "listener = 'smtp'"
+              then: 'true'
+          else: 'false'
+        rate:
+          count: 25
+          period: 3600000 # 1 hour
       acct-daily:
         enable: true
         description: acct-daily
@@ -382,5 +413,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-8mtkdm46ct
+  name: stalwart-config-base-tpl-dfg2h8976b
   namespace: thundermail
