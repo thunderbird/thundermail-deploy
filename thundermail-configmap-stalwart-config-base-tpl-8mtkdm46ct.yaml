@@ -70,10 +70,10 @@ data:
     '@type': upsert
     object: Certificate
     matchOn:
-      - certificate
-      - privateKey
+      - subjectAlternativeNames
     value:
       'cert-bundle-__DOMAIN_SLUG__':
+        subjectAlternativeNames: '__TLS_CERTIFICATE_SANS__'
         certificate:
           '@type': Text
           value: |-
@@ -156,6 +156,8 @@ data:
         protocol: manageSieve
         useTls: true
         tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__INTERNAL_IP_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -171,6 +173,8 @@ data:
         protocol: imap
         useTls: true
         tlsImplicit: true
+        overrideProxyTrustedNetworks:
+          '__INTERNAL_IP_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -186,6 +190,8 @@ data:
         protocol: smtp
         useTls: true
         tlsImplicit: true
+        overrideProxyTrustedNetworks:
+          '__INTERNAL_IP_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -201,6 +207,8 @@ data:
         protocol: smtp
         useTls: true
         tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__INTERNAL_IP_CIDR__': true
     ---
     '@type': upsert
     object: NetworkListener
@@ -216,11 +224,18 @@ data:
         protocol: smtp
         useTls: false
         tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__INTERNAL_IP_CIDR__': true
     ---
     '@type': destroy
     object: NetworkListener
     value:
       name: pop3s
+    ---
+    '@type': update
+    object: Http
+    value:
+      useXForwarded: true
     ---
     '@type': update
     object: BlobStore
@@ -367,5 +382,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-btc97c4858
+  name: stalwart-config-base-tpl-8mtkdm46ct
   namespace: thundermail

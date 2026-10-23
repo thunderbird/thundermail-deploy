@@ -77,6 +77,10 @@ spec:
             ) = load_str("/etc/tls/tls.key")
             |
             (
+              .. | select(. == "__TLS_CERTIFICATE_SANS__")
+            ) = $values.tlsCertificateSANs
+            |
+            (
               .. | select(. == "__CLOUDFLARE_API_TOKEN__")
             ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
             |
@@ -171,10 +175,10 @@ spec:
       restartPolicy: Never
       volumes:
       - configMap:
-          name: stalwart-config-base-tpl-btc97c4858
+          name: stalwart-config-base-tpl-8mtkdm46ct
         name: stalwart-config-template
       - configMap:
-          name: stalwart-config-values-74ktg45ktk
+          name: stalwart-config-values-bhm2ddh69m
         name: stalwart-values
       - name: ssl-certificate
         secret:
