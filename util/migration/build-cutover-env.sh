@@ -157,7 +157,6 @@ build() {
   [ -n "$zid" ] || zid=$(try shared_zone_id stage-thundermail.com)
   put CF_ZONE_ID "$zid" "GET /zones?name=stage-thundermail.com with CF_API_TOKEN_AGENT, else with the shared external-dns token (read-only)"
   put CF_ZONE_ID_TBPRO "$(try cf_zone tb.pro)" "GET /zones?name=tb.pro"
-  put CF_ZONE_ID_DEVTM "$(try cf_zone dev-thundermail.com)" "GET /zones?name=dev-thundermail.com"
   put PADDLE_API_KEY "$(from_file "$HOME/.paddle.env" PADDLE_API_KEY)" "\$HOME/.paddle.env PADDLE_API_KEY"
   put ACCOUNTS_WEBHOOK_URL https://accounts.stage-thundermail.com/api/v1/telemetry/stalwart/webhook/ "tb-stage Accounts telemetry webhook"
   local nlb; nlb=$(try kstage -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
@@ -231,7 +230,7 @@ check() {
     z=$(curl -s -m 20 -K <(bearer "$tok") "$CF_API/zones?name=stage-thundermail.com" | jq -r '.result[0].id // empty')
     [ "$s" = active ] && [ -n "$z" ] && { [ -z "$CF_ZONE_ID" ] || [ "$z" = "$CF_ZONE_ID" ]; } && echo "active, zone visible${CF_ZONE_ID:+ and equal to CF_ZONE_ID}" || { echo "status=$s zone_visible=$([ -n "$z" ] && echo yes || echo no)"; return 1; }
   }
-  agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && [ -n "$CF_ZONE_ID_DEVTM" ] && echo "active, three zone ids set" || { echo "status=$s"; return 1; }; }
+  agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && echo "active, stage and tb.pro zone ids set" || { echo "status=$s"; return 1; }; }
   spf_final() { case "$SPF_FINAL_TXT" in "v=spf1 "*) echo "v=spf1 record, len=${#SPF_FINAL_TXT}" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 (len=${#SPF_FINAL_TXT})"; return 1 ;; esac; }
   pr_pair() {
     local repo=thunderbird/$1 pr=$2 rev=$3 head base

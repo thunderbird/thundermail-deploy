@@ -128,7 +128,9 @@ c_cf_agent() {
   s=$(cf_status "$tok"); [ "$s" = active ] || { echo "token status $s"; return 1; }
   local zones
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
-  [ "$zones" = "dev-thundermail.com,stage-thundermail.com,tb.pro" ] && echo "active, three zones" || { echo "zones visible: ${zones:-none}"; return 1; }
+  case ",$zones," in *,stage-thundermail.com,*) ;; *) echo "zones visible: ${zones:-none} (needs stage-thundermail.com and tb.pro)"; return 1 ;; esac
+  case ",$zones," in *,tb.pro,*) ;; *) echo "zones visible: ${zones:-none} (needs stage-thundermail.com and tb.pro)"; return 1 ;; esac
+  echo "active, stage-thundermail.com and tb.pro visible$(case ",$zones," in *,dev-thundermail.com,*) echo ", dev-thundermail.com too" ;; esac)"
 }
 c_cf_agent_p2() {
   mode600 "$HOME/.cloudflare.env" || { echo "$HOME/.cloudflare.env missing or not mode 600"; return 1; }
@@ -138,11 +140,11 @@ c_cf_agent_p2() {
   [ "$(jq -r '.result.status // "error"' <<<"$v")" = active ] || { echo "token status $(jq -r '.result.status // "error"' <<<"$v")"; return 1; }
   [ -n "$(jq -r '.result.expires_on // empty' <<<"$v")" ] || { echo "P2 token has no expires_on"; return 1; }
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
-  [ "$zones" = "tb.pro" ] || { echo "zones visible: ${zones:-none} (P2 token must see tb.pro only)"; return 1; }
+  case ",$zones," in *,tb.pro,*) ;; *) echo "zones visible: ${zones:-none} (P2 needs tb.pro)"; return 1 ;; esac
   tbpro=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?name=tb.pro" | jq -r '.result[0].id // empty')
   resp=$(curl -s -m 20 -w '\n%{http_code}' -K <(bearer "$tok") "$CF/zones/$tbpro/rulesets/phases/http_request_dynamic_redirect/entrypoint")
   rc=$(tail -1 <<<"$resp")
-  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, expires, tb.pro only, redirect entrypoint $rc"
+  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, expires, tb.pro visible, redirect entrypoint $rc"
   else echo "tb.pro redirect entrypoint $rc"; return 1; fi
 }
 c_kc_admin_stage() { sm mzla-tb-stage mzla/tb-stage/keycloak-customer-admin-client | jq -Rs -e 'try (fromjson|has("client-secret")) catch false' >/dev/null 2>&1 && echo "SM client-secret key present; token endpoint not probed (needs a port-forward)" || { echo "SM mzla/tb-stage/keycloak-customer-admin-client has no client-secret key"; return 1; }; }

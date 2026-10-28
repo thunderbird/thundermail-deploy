@@ -43,6 +43,19 @@ preflight() {
     until_ok 60 runner_up || { echo "runner pod is not Running: re-apply util/migration/runner-pod.yaml"; return 1; }
     echo "runner Running"
   fi
+  if runner_up; then
+    local who h u d err
+    for who in STALWART_LEGACY STALWART_TARGET; do
+      h=${who}_PG_HOST u=${who}_PG_USER d=${who}_PG_DB
+      if err=$("${POD[@]}" psql -h "${!h}" -U "${!u}" -d "${!d}" -Atc 'select 1' 2>&1 >/dev/null); then
+        echo "psql select 1 on $who (${!h}): ok"
+      else
+        echo "psql select 1 on $who (${!h}) failed: $(tail -1 <<<"$err")"
+        [ "$APPLY" = 0 ] || return 1
+        NEEDS=$((NEEDS + 1))
+      fi
+    done
+  fi
   r=$(replicas) || return 1
   echo "deploy/stalwart replicas=$r"
   if [ "$APPLY" = 0 ]; then
