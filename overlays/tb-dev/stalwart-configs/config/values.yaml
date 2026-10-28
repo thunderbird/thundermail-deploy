@@ -17,3 +17,5 @@ stalwartPgAdminUsername: neondb_owner
 dnsManagement: Automatic
 dnsPublishSpf: true
 authBanRateCount: 500
+scanBanRateCount: 1000
+addressBookName: Thundermail Contacts
