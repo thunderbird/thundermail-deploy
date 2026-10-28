@@ -8,7 +8,10 @@ case "$OP" in
   *) die "usage: cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT [TTL]] [--apply]" ;;
 esac
 if [ -z "$ZONE" ] || [ -z "$NAME" ] || [ -z "$TYPE" ]; then die "usage: cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT] [--apply]"; fi
-case "$TTL" in ''|1|[6-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-8][0-9][0-9][0-9][0-9]) ;; *) die "TTL must be 1 (auto) or 60..86400, got $TTL" ;; esac
+if [ -n "$TTL" ]; then
+  case "$TTL" in *[!0-9]*|0*) die "TTL must be 1 (auto) or 60..86400, got $TTL" ;; esac
+  [ "$TTL" = 1 ] || { [ "$TTL" -ge 60 ] && [ "$TTL" -le 86400 ]; } || die "TTL must be 1 (auto) or 60..86400, got $TTL"
+fi
 case "$NAME" in _externaldns.*) die "refusing to touch $NAME (external-dns owner record)" ;; esac
 case "$OP:$NAME" in delete:spf.*) die "refusing to delete $NAME: custom domains include it; upsert it instead" ;; esac
 need CF_API_TOKEN_AGENT
