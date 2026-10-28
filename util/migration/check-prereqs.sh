@@ -154,6 +154,17 @@ c_github() {
   done
   [ -z "$bad" ] && echo "admin on six repos" || { echo "not admin on:$bad"; return 1; }
 }
+c_push() {
+  local bad="" r
+  for r in "$@"; do [ "$(gh api "repos/thunderbird/$r" --jq .permissions.push 2>/dev/null)" = true ] || bad="$bad $r"; done
+  [ -z "$bad" ] && echo "push on $*" || { echo "no push on:$bad"; return 1; }
+}
+c_atlantis_pg() {
+  gh api repos/thunderbird/platform-grafana/contents/atlantis.yaml --jq .name >/dev/null 2>&1 || { echo "no atlantis.yaml on platform-grafana main"; return 1; }
+  local n; n=$(gh api "repos/thunderbird/platform-grafana/issues/comments?since=$(date -u -d '30 days ago' +%FT%TZ)&per_page=100" --jq '[.[] | select(.user.login == "mzla-atlantis[bot]")] | length' 2>/dev/null)
+  [ "${n:-0}" -gt 0 ] && echo "atlantis.yaml present, mzla-atlantis[bot] commented $n time(s) in 30 days" || { echo "no mzla-atlantis[bot] comment on platform-grafana in 30 days"; return 1; }
+}
+c_appt_workflow() { [ "$(gh api repos/thunderbird/appointment/actions/workflows/deploy-staging.yml --jq .state 2>/dev/null)" = active ] && echo "deploy-staging.yml active" || { echo "deploy-staging.yml not active"; return 1; }; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
 c_venv() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import requests, urllib3' 2>/dev/null && echo "$VENV_PY imports ok" || { echo "venv missing: $VENV_PY"; return 1; }; }
@@ -185,10 +196,14 @@ row "T10 T13 W4" stalwart-target-db-owner c_target_db
 row "T7 T8 T10 T11 T13 W4" legacy-db-passwords c_legacy_db
 row "T3 T6 W5" accounts-secret-bundle c_accounts_bundle
 row "T11 W8" accounts-e2e-user c_e2e_user
-row "P1" paddle-sandbox-key c_paddle
+row "P1 T10a" paddle-sandbox-key c_paddle
 row "W7 P3" test-mailbox-external c_test_mailbox
 row "W5 W6 W7 P3" test-user-stage c_test_user
 row "ALL" github-gh c_github
+row "T10m" github-push-pi-pg c_push platform-infrastructure platform-grafana
+row "T10m" atlantis-platform-grafana c_atlantis_pg
+row "T10a" github-push-appointment c_push appointment
+row "T10a" appointment-stage-deploy c_appt_workflow
 row "T14 P3" support-channel c_support
 row "T10 W3" tool-rclone c_tool rclone
 row "T7 T10 W6" tool-podman c_tool podman
