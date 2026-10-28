@@ -224,13 +224,14 @@ apply_export() {
 admin_id() {
   local id host
   printf '  + curl -s -K <(user STALWART_USER:STALWART_PASSWORD) %s/jmap/session | jq -re %s\n' "$STALWART_URL" "'.primaryAccounts[\"urn:stalwart:jmap\"]'"
-  [ "$APPLY" = 1 ] || { setenv STALWART_ADMIN_ACCOUNT_ID '<from the session>'; return 0; }
+  [ "$APPLY" = 1 ] || { run sed -i '/^STALWART_ADMIN_ACCOUNT_ID=/d' "$ENV_FILE"; setenv STALWART_ADMIN_ACCOUNT_ID '<from the session>'; return 0; }
   id=$(curl -s -m 15 -K <(curl_user "$STALWART_USER" "$STALWART_PASSWORD") "$STALWART_URL/jmap/session" | jq -re '.primaryAccounts["urn:stalwart:jmap"]') || { echo "no urn:stalwart:jmap account in the session"; return 1; }
   [ -n "$id" ] && [ "$id" != null ] || return 1
+  run sed -i '/^STALWART_ADMIN_ACCOUNT_ID=/d' "$ENV_FILE" || { echo "could not drop the old STALWART_ADMIN_ACCOUNT_ID from $ENV_FILE"; return 1; }
   setenv STALWART_ADMIN_ACCOUNT_ID "$id" || { echo "could not append STALWART_ADMIN_ACCOUNT_ID to $ENV_FILE"; return 1; }
   host=$(sed -E 's|^[a-z]+://([^@/]*@)?([^:/]+).*|\2|' <<<"$REDIS_URL")
-  grep -qF "$TARGET_BLOB_BUCKET" <<<"$(stalwart-cli query BlobStore)" || { echo "BlobStore read back is not $TARGET_BLOB_BUCKET"; return 1; }
-  grep -qF "$host" <<<"$(stalwart-cli query InMemoryStore)" || { echo "InMemoryStore read back is not the REDIS_URL host"; return 1; }
+  grep -qF "$TARGET_BLOB_BUCKET" <<<"$(stalwart-cli get BlobStore)" || { echo "BlobStore read back is not $TARGET_BLOB_BUCKET"; return 1; }
+  grep -qF "$host" <<<"$(stalwart-cli get InMemoryStore)" || { echo "InMemoryStore read back is not the REDIS_URL host"; return 1; }
   echo "read back: BlobStore=$TARGET_BLOB_BUCKET InMemoryStore host=$host"
 }
 
