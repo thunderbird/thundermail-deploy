@@ -24,6 +24,9 @@ spec:
             - /bin/sh
             - -ec
             - |
+              CLOUDFLARE_API_TOKEN_FILE=/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN
+              [ -f "$CLOUDFLARE_API_TOKEN_FILE" ] || CLOUDFLARE_API_TOKEN_FILE=/dev/null
+              export CLOUDFLARE_API_TOKEN_FILE
               yq eval-all \
                 --output-format=json \
                 --indent=0 \
@@ -66,7 +69,7 @@ spec:
                 |
                 (
                   .. | select(. == "__CLOUDFLARE_API_TOKEN__")
-                ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
+                ) = load_str(strenv(CLOUDFLARE_API_TOKEN_FILE))
                 |
                 .' \
                 /etc/stalwart-config-template/stalwart-config-base.yaml \
