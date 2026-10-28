@@ -58,6 +58,10 @@ the keying for the real hosts.
 - `gate-keycloak-version.sh` compares `migration_model` on the legacy main branch (runner)
   with `KC_IMAGE_VERSION`, or with `kc.sh --version` run by podman on the statefulset image;
   it never execs into a Keycloak pod.
+- `dump-check.sh [principals.json]` compares the legacy server's principal total per type with
+  the dump and exits 1 on any difference (`migrate_v016.py dump` skips failed reads and still
+  exits 0); W4 runs it before `convert`. It and `--check` send the legacy admin password only to
+  a loopback `OLD_STALWART_URL` owned by this user's session-manager-plugin.
 - `restore-target-db.sh` refuses to run unless the target host equals the tb-stage overlay
   host (direct form), differs from the legacy host, and `current_database()` is `neondb`.
 - `migrate_v016.py` is the upstream release copy (stalwartlabs/stalwart v0.16.26,

@@ -65,7 +65,7 @@ build() {
   put STALWART_USER "$(try k8s_secret thundermail stalwart-recovery-admin STALWART_USER)" "kubectl -n thundermail get secret stalwart-recovery-admin key STALWART_USER"
   put STALWART_PASSWORD "$(try k8s_secret thundermail stalwart-recovery-admin STALWART_PASSWORD)" "kubectl -n thundermail get secret stalwart-recovery-admin key STALWART_PASSWORD"
   put STALWART_URL http://localhost:18081 "port-forward to the Stalwart pod, 18081:8080"
-  put OLD_STALWART_URL https://localhost:18080 "SSM port-forward to LEGACY_MGMT_INSTANCE 8080; management listener is implicit TLS"
+  put OLD_STALWART_URL https://127.0.0.1:18080 "SSM port-forward to LEGACY_MGMT_INSTANCE 8080; management listener is implicit TLS"
   put OLD_STALWART_USER admin "legacy fallback admin"
   put OLD_STALWART_PASSWORD "$(try sm_legacy mailstrom/stage/stalwart.postboot.fallback_admin_password)" "aws secretsmanager get-secret-value --profile mzla-legacy mailstrom/stage/stalwart.postboot.fallback_admin_password"
 
@@ -247,6 +247,7 @@ check() {
     chk "pg_isready-${hv%_PG_HOST}" pod pg_isready -h "${!hv}"
     chk "psql-select1-${hv%_PG_HOST}" pod psql -h "${!hv}" -U "${!uv}" -d "${!dv}" -Atc 'select 1'
   done
+  chk legacy-url-loopback legacy_loopback
   chk stalwart-legacy-healthz http200 "$OLD_STALWART_URL/healthz/live"
   chk stalwart-target-healthz http200 "$STALWART_URL/healthz/live"
   chk rclone-lsd-legacy bash -c '[ -n "$LEGACY_BLOB_BUCKET" ] && rclone lsd leg: | awk -v b="$LEGACY_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'

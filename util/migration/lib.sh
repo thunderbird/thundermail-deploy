@@ -29,4 +29,12 @@ pod() { kstage -n thundermail exec -i runner -c postgres -- "$@"; }
 aws_legacy() { aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 aws_stage() { aws --profile "$STAGE_AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 cf_api() { need CF_API_TOKEN_AGENT; curl -sS -m 60 -K <(printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$CF_API_TOKEN_AGENT") "$@"; }
+legacy_loopback() {
+  local hp=${OLD_STALWART_URL#*://} l
+  hp=${hp%%/*}
+  case "${hp%:*}" in 127.0.0.1|localhost|'[::1]') ;; *) echo "OLD_STALWART_URL host ${hp%:*} is not loopback: credentials not sent"; return 1 ;; esac
+  l=$(ss -ltnpH "sport = :${hp##*:}" 2>/dev/null)
+  [ -n "$l" ] && ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
+  echo "OLD_STALWART_URL is loopback through the SSM tunnel of $(id -un)"
+}
 latest() { ls -1t "$1" 2>/dev/null | head -1; }

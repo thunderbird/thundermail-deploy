@@ -4,7 +4,7 @@ DRY=0
 for a in "$@"; do [ "$a" = --dry-run ] && DRY=1; done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need STALWART_URL STALWART_USER STALWART_PASSWORD KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS
-KINDS="BlockedIp AllowedIp Domain Security Http MtaQueueQuota Calendar AddressBook WebHook"
+KINDS="BlockedIp AllowedIp Domain Security Http MtaQueueQuota Calendar AddressBook WebHook BlobStore InMemoryStore"
 mkdir -p "$SECRET_DIR"
 settings=$SECRET_DIR/settings-before-$TS.ndjson
 freight=$EVIDENCE_DIR/freight-before-$TS.txt
