@@ -191,7 +191,7 @@ row "W5 W6 W7 P3" test-user-stage c_test_user
 row "ALL" github-gh c_github
 row "T14 P3" support-channel c_support
 row "T10 W3" tool-rclone c_tool rclone
-row "T10 W6" tool-podman c_tool podman
+row "T7 T10 W6" tool-podman c_tool podman
 row "T10 T11 W2 W4" tool-session-manager-plugin c_tool session-manager-plugin
 row "ALL" tool-jq c_tool jq
 row "ALL" tool-yq c_tool yq
