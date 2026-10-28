@@ -144,6 +144,10 @@ data:
           return 404;
         }
 
+        location ^~ /metrics {  # Stalwart's Prometheus exporter, scraped in-cluster on the mgmt port only
+          return 404;
+        }
+
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
           proxy_pass https://stalwart-https;

@@ -147,6 +147,10 @@ data:
           return 404;
         }
 
+        location ^~ /metrics {  # Stalwart's Prometheus exporter, scraped in-cluster on the mgmt port only
+          return 404;
+        }
+
         location ^~ / {
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.main.dev-thundermail.com;
