@@ -151,7 +151,8 @@ the keying for the real hosts.
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
   4 `mail.` CNAME and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
-  edits `spf.` in place to `SPF_FINAL_TXT` (custom domains include it, so it is never deleted).
+  edits `spf.` in place to `SPF_FINAL_TXT` with TTL 300 in one upsert (custom domains include it,
+  so it is never deleted); the apex and `mail.` SPF TXTs stay as they are (#1535).
 - Every in-window merge goes through `merge_pr` (window/lib.sh): `gh pr ready` on a draft, a stop when
   the branch still needs an approving review (collect approvals before the window), then
   `gh pr merge --merge`; an already merged PR passes.
