@@ -177,7 +177,7 @@ merge_pr() {
   local repo=$1 pr=$2 st state draft decision head admin=()
   printf '  + gh pr ready %s -R %s when draft; require an approval when the branch needs one (ADMIN_MERGE=1: --admin after green checks and Greptile 5/5 on the head); gh pr merge %s -R %s --merge\n' "$pr" "$repo" "$pr" "$repo"
   [ "$APPLY" = 1 ] || case "$pr" in ''|*[!0-9]*) return 0 ;; esac
-  st=$(gh pr view "$pr" -R "$repo" --json state,isDraft,reviewDecision,headRefOid -q '"\(.state) \(.isDraft) \(if (.reviewDecision // "") == "" then "NONE" else .reviewDecision end) \(.headRefOid)"') || { [ "$APPLY" = 0 ] || return 1; echo "  (gh pr view $repo#$pr failed: state not read)"; return 0; }
+  st=$(gh pr view "$pr" -R "$repo" --json state,isDraft,reviewDecision,headRefOid -q '"\(.state) \(.isDraft) \(if (.reviewDecision // "") == "" then "NONE" else .reviewDecision end) \(.headRefOid)"') || { [ "$APPLY" = 0 ] || return 1; echo "NEED  gh pr view $repo#$pr failed: state not read"; NEEDS=$((NEEDS + 1)); return 0; }
   read -r state draft decision head <<<"$st"
   case "$state" in
     MERGED) echo "$repo#$pr is already merged"; return 0 ;;

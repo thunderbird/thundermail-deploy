@@ -174,8 +174,9 @@ the keying for the real hosts.
   and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
   edits `spf.` in place to `SPF_FINAL_TXT` with TTL 300 in one upsert (custom domains include it,
   so it is never deleted); the apex and `mail.` SPF TXTs stay as they are (#1535).
-- W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw
-  (`accounts-merge-yml` row) and checks `disabled_manually` at the end; re-enable it only after the
+- W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw,
+  cancels its unfinished runs (`accounts-merge-yml` row), and at the end checks `disabled_manually`,
+  no unfinished runs and legacy ECS `desiredCount` 0; re-enable it only after the
   thunderbird-accounts PR that sets the four stage `desired_count` to 0 merges.
 - Every in-window merge goes through `merge_pr` (window/lib.sh): `gh pr ready` on a draft, a stop when
   the branch still needs an approving review, then `gh pr merge --merge --match-head-commit`; an already
