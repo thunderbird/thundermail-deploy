@@ -119,6 +119,9 @@ gated() {
 prereqs
 helpers snapshot-zone.sh restore-zone.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
 NEXT=$(next_step)
+if [ "$APPLY" = 1 ]; then
+  for v in SPF_APEX_TXT SPF_FINAL_TXT; do case "${!v}" in "v=spf1 "*) ;; *) stop "$v does not begin with 'v=spf1 ' (#1535 decision)" ;; esac; done
+fi
 [ "$APPLY" = 0 ] || [ "$NEXT" != 6 ] || { echo "W7 steps 1-4 and verification are done for this cut"; finish; exit 0; }
 [ "$APPLY" = 0 ] || [ "$NEXT" != 1 ] || step snap-zone records snap_zone
 [ "$APPLY" = 1 ] || step snap-zone records snap_zone
