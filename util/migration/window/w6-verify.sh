@@ -21,7 +21,7 @@ suite() {
 
 imap_folders() {
   printf 'a LOGIN "%s" "%s"\r\na LIST "" "*"\r\nb LOGOUT\r\n' "$(cq "$TEST_USER")" "$(cq "$TEST_SENDER_APP_PASSWORD")" |
-    timeout 20 openssl s_client -quiet -connect "$1:993" -servername "$MAIL_HOST" 2>/dev/null | grep -c '^\* LIST' || true
+    timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$MAIL_HOST" -connect "$1:993" -servername "$MAIL_HOST" 2>/dev/null | grep -c '^\* LIST' || true
 }
 
 jmap_folders() {

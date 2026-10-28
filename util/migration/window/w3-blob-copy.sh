@@ -47,6 +47,7 @@ copy() {
     BYTES=$(jq -r .bytes "$LEGACY_SIZE")
   fi
   echo "objects=$VALUE (legacy $want) bytes=$BYTES (legacy $(jq -r .bytes "$LEGACY_SIZE"))"
+  if [ "$APPLY" = 0 ] && [ "$(jq -r .count "$TARGET_BEFORE")" != 0 ]; then echo "target not empty: planned copies are not compared with the legacy count"; return 0; fi
   [ "$VALUE" = "$want" ] || { echo "object count differs from the post-cut legacy rclone size"; return 1; }
   [ "$BYTES" = "$(jq -r .bytes "$LEGACY_SIZE")" ] || { echo "bytes differ from the post-cut legacy rclone size"; return 1; }
 }
@@ -56,8 +57,12 @@ check_blobs() {
   out=$(rclone check "$LEG" "$TGT" 2>&1) || rc=$?
   printf '%s\n' "$out" > "$SECRET_DIR/rclone-check-$(mode)-$TS.log"
   grep -aE 'differences found|matching files|files missing|missing on|hashes could not' <<<"$out" | grep -v 'ERROR' | sed 's/^.*NOTICE: */  /' || true
-  VALUE=$(sed -n 's/.* \([0-9][0-9]*\) differences found.*/\1/p' <<<"$out" | tail -1)
-  [ -n "$VALUE" ] || { echo "rclone check printed no difference count (exit $rc)"; return 1; }
+  if [ "$rc" = 0 ]; then
+    VALUE=0
+  else
+    VALUE=$(sed -n 's/.* \([0-9][0-9]*\) differences found.*/\1/p' <<<"$out" | tail -1)
+    [ -n "$VALUE" ] || { echo "rclone check printed no difference count (exit $rc)"; return 1; }
+  fi
   [ "$APPLY" = 0 ] || { [ "$rc" = 0 ] && [ "$VALUE" = 0 ]; }
 }
 

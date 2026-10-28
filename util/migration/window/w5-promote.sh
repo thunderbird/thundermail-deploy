@@ -10,6 +10,7 @@ KH=(kubectl --kubeconfig "$KUBECONFIG_HUB")
 PHASE=1
 [ "$APPLY" = 1 ] && [ -n "$GO" ] && PHASE=2
 PROMOTION=$EVIDENCE_DIR/promotion-configs-$TS.yaml
+PROMOTION_RESTORE=$EVIDENCE_DIR/promotion-configs-restore-$TS.yaml
 UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname mail.stage-thundermail.com
   --skip WebHook --skip AllowedIp --skip MtaSts --skip MtaQueueQuota --skip Security --skip Calendar --skip AddressBook --skip Http)
 
@@ -26,8 +27,13 @@ snap_settings() {
   FREIGHT_BEFORE=$(tail -1 <<<"$out")
   SETTINGS_BEFORE=$(grep 'settings-before-' <<<"$out" | tail -1 || true)
   [ -s "$FREIGHT_BEFORE" ] || { echo "no freight-before file"; return 1; }
+  if [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
+    sed "s/__TS__/$(date -u +%s)r/; s/__FREIGHT__/$(cat "$FREIGHT_BEFORE")/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION_RESTORE" || return 1
+  else
+    printf 'promotion.yaml.tpl missing: render it with __FREIGHT__=%s\n' "$(cat "$FREIGHT_BEFORE")" > "$PROMOTION_RESTORE"
+  fi
   printf '%s\n' \
-    "$(shq "${KH[@]}" create -f "<promotion.yaml.tpl rendered with __FREIGHT__=$(cat "$FREIGHT_BEFORE")>")" \
+    "$(shq "${KH[@]}" create -f "$PROMOTION_RESTORE")" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>} --dry-run" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>}" \
     "stalwart-cli create action/ReloadSettings" > "$RESTORE"

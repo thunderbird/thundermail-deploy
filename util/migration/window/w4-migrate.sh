@@ -20,7 +20,7 @@ replicas() { "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.repli
 runner_up() { [ "$("${KS[@]}" "${NS[@]}" get pod runner -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
 stalwart_up() { [ "$("${KS[@]}" "${NS[@]}" get pod -l app=stalwart -o jsonpath='{.items[0].status.phase}' 2>/dev/null)" = Running ]; }
 schema_ok() { [ "$(bash "$MIG_DIR/schema-version.sh" 2>/dev/null)" = 00000006 ]; }
-blob_ok() { awk -F'\t' '$1 == "blob-check" && $4 == "differences" {v = $5} END {exit !(v == "0")}' "$TIMING_TSV"; }
+blob_ok() { awk -F'\t' '$1 == "cut-ecs" {c = NR} $1 == "snap-blobs" {s = NR; v = ""} $1 == "blob-check" && $4 == "differences" {v = $5; b = NR} END {exit !(c > 0 && s > c && b > s && v == "0")}' "$TIMING_TSV"; }
 
 preflight() {
   local r
@@ -137,9 +137,9 @@ admin_id() {
 
 leave_recovery() {
   if [ "$APPLY" = 0 ]; then
-    if blob_ok; then echo "blob-check differences=0 is in $TIMING_TSV"; else echo "no blob-check differences=0 row in $TIMING_TSV yet (W3 writes it)"; fi
+    if blob_ok; then echo "blob-check differences=0 for the current cut is in $TIMING_TSV"; else echo "no blob-check differences=0 row after the latest cut-ecs and snap-blobs rows in $TIMING_TSV yet (W2 and W3 write them)"; fi
   else
-    until_ok 3600 blob_ok || { echo "no blob-check differences=0 row after 3600s; stay in recovery mode"; return 1; }
+    until_ok 3600 blob_ok || { echo "no blob-check differences=0 row for the current cut after 3600s; stay in recovery mode"; return 1; }
   fi
   run "${KS[@]}" "${NS[@]}" set env deploy/stalwart STALWART_RECOVERY_MODE- || return 1
   run "${KS[@]}" "${NS[@]}" rollout status deploy/stalwart --timeout=600s
