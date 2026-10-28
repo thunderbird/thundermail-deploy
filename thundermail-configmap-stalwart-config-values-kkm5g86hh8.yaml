@@ -17,10 +17,15 @@ data:
     stalwartPgHost: ep-lingering-rice-b282u2zh-pooler.c-6.eu-central-1.aws.neon.tech
     stalwartPgDatabase: neondb
     stalwartPgAdminUsername: neondb_owner
+    dnsManagement: Automatic
+    dnsPublishSpf: true
+    authBanRateCount: 500
+    scanBanRateCount: 1000
+    addressBookName: Thundermail Contacts
 immutable: true
 kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-bhm2ddh69m
+  name: stalwart-config-values-kkm5g86hh8
   namespace: thundermail
