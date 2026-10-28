@@ -16,8 +16,16 @@ call() { jmap "$(jq -cn --arg a "$STALWART_ADMIN_ACCOUNT_ID" --arg m "$1" --argj
 queued() { call x:Task/query "$(jq -cn --arg t "$1" '{filter: {"@type": $t}, limit: 5000}')" | jq -r '.ids | length'; }
 usage() {
   local ids
-  ids=$(call x:Account/query '{"limit": 5000}' | jq -c '.ids')
-  call x:Account/get "$(jq -cn --argjson ids "$ids" '{ids: $ids, properties: ["usedDiskQuota"]}')" | jq -r '"accounts=\(.list | length) with_usage=\([.list[] | select((.usedDiskQuota // 0) > 0)] | length) used_bytes=\([.list[].usedDiskQuota // 0] | add // 0)"'
+  local ids='[]' page list='[]' i
+  while :; do
+    page=$(call x:Account/query "$(jq -cn --argjson p "$(jq 'length' <<<"$ids")" '{position: $p, limit: 1000}')" | jq -c '.ids')
+    [ "$(jq 'length' <<<"$page")" -gt 0 ] || break
+    ids=$(jq -c --argjson p "$page" '. + $p' <<<"$ids")
+  done
+  for ((i = 0; i < $(jq 'length' <<<"$ids"); i += 200)); do
+    list=$(jq -c --argjson l "$(call x:Account/get "$(jq -c --argjson i "$i" '{ids: .[$i:$i + 200], properties: ["usedDiskQuota"]}' <<<"$ids")" | jq -c '.list')" '. + $l' <<<"$list")
+  done
+  jq -r '"accounts=\(length) with_usage=\([.[] | select((.usedDiskQuota // 0) > 0)] | length) used_bytes=\([.[].usedDiskQuota // 0] | add // 0)"' <<<"$list"
 }
 now=$(date -u +%FT%TZ)
 body=$(sed "s/__ACCOUNT_ID__/$STALWART_ADMIN_ACCOUNT_ID/; s/__NOW__/$now/g" "$MIG_DIR/quota-reset.json.tpl")

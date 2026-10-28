@@ -29,18 +29,20 @@ for lid, l in src.items():
         continue
     if f"{a['name']}@{dname.get(a['domainId'])}" != l["name"]:
         names += 1
-    want = set(l["emails"] if isinstance(l["emails"], list) else [l["emails"]])
+    emails = l["emails"] if isinstance(l["emails"], list) else [l["emails"]]
+    want = set(emails)
+    primary = next((e for e in emails if not e.startswith("@")), l["name"])
     for miss in want - addresses(a):
         if miss.startswith("@"):
-            if not catch_all.get(miss[1:]):
-                missing_catchall.append(f"{short(l['name'])} {miss}")
+            if catch_all.get(miss[1:]) != primary:
+                missing_catchall.append(f"{short(l['name'])} {miss} -> {catch_all.get(miss[1:])!r}")
         else:
             addrs += 1
     if (l.get("quota") or 0) != ((a.get("quotas") or {}).get("maxDiskQuota") or 0):
         quotas += 1
 r.check(names == 0, f"account names (local@domain) mismatched: {names}")
 r.check(addrs == 0, f"primary/alias addresses missing: {addrs}")
-r.check(not missing_catchall, f"catch-all addresses missing (set Domain.catchAllAddress): {missing_catchall}")
+r.check(not missing_catchall, f"catch-all addresses missing or owned by another account (set Domain.catchAllAddress): {missing_catchall}")
 r.check(quotas == 0, f"quota limits mismatched: {quotas}")
 
 src_domains = {x["name"] for x in items if x.get("type") == "domain"}

@@ -28,11 +28,13 @@ diff = [k for k in set(src) & set(tgt) if src[k] != tgt[k]]
 r.check(not diff, f"same key, different size: {len(diff)} {diff[:3]}")
 
 path = f"{OUT}/target-message-blobs.json"
+sampled = True
 if not os.path.exists(path):
     r.fail("no target-message-blobs.json: run 03 first, otherwise nothing proves the referenced blobs exist")
 else:
     refs = json.load(open(path))
-    if refs.get("bodies_checked") == "all":
+    sampled = refs.get("bodies_checked") != "all"
+    if not sampled:
         r.ok(f"message blobs referenced by the target: {len(refs['blobs'])}; 03 downloaded every one through Stalwart")
     else:
         r.warn(f"message blobs referenced by the target: {len(refs['blobs'])}; 03 downloaded only a sample, "
@@ -42,7 +44,8 @@ only_src = set(src) - set(tgt)
 dm = delete_markers(need("TARGET_BUCKET"), need("TARGET_AWS_PROFILE"))
 purged = only_src & dm
 new = only_src - dm
-r.check(not new, f"only on source: {len(only_src)} ({len(purged)} purged by the target, recoverable from versions; "
-        f"{len(new)} missing from the target with no delete marker) {sorted(new)[:3]}")
+r.check(not new and not (sampled and purged), f"only on source: {len(only_src)} ({len(purged)} purged by the target, recoverable from versions; "
+        f"{len(new)} missing from the target with no delete marker) {sorted(new)[:3]}"
+        + ("; 03 checked only a sample, so rerun it without VERIFY_SKIP_BODIES to prove the purged blobs are unreferenced" if sampled and purged else ""))
 r.ok(f"only on target: {len(set(tgt) - set(src))} (written by the target since the copy)")
 r.done()
