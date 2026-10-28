@@ -9,10 +9,11 @@ for a in "$@"; do
   esac
 done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
+ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-stage.env}
 VALUES=$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID"
+OPERATOR_VARS="FREEZE_PR T6_PR FLIP_PR APPOINTMENT_PR SPF_APEX_TXT SPF_MAIL_TXT SPF_FINAL_TXT TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER SUPPORT_CHANNEL"
 SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD"
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -41,9 +42,9 @@ neon_lookup() {
 }
 
 build() {
-  KUBECONFIG_STAGE=$(realpath -m "${KUBECONFIG_STAGE:-$REPO_DIR/.work/kc-stage}")
-  KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$REPO_DIR/.work/kc-hub}")
-  KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$REPO_DIR/.work/kc-dev}")
+  KUBECONFIG_STAGE=$(realpath -m "${KUBECONFIG_STAGE:-$HOME/.local/state/talos/kc-stage}")
+  KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
+  KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
   mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
   local count=0 missing=0
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-tb-stage.XXXXXX")
@@ -93,12 +94,12 @@ build() {
   [ -n "$NEON_KEY" ] && NEON_PROJECTS=$(try neon_get "projects?limit=400${org:+&org_id=$org}" | jq -r '.projects[]?.id' | tr '\n' ' ')
   local r
   r=$(neon_lookup "$(jq -r '.host // empty' <<<"${lpg:-{\}}" | direct)")
-  put NEON_PROJECT_STALWART_LEGACY "$(cut -f1 <<<"$r")" "Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
+  put NEON_PROJECT_STALWART_LEGACY "$(op NEON_PROJECT_STALWART_LEGACY)$([ -n "$(op NEON_PROJECT_STALWART_LEGACY)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_LEGACY in the environment, else Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
   put NEON_LEGACY_STALWART_BRANCH "$(cut -f2 <<<"$r")" "Neon API: branch of that endpoint"
   r=$(neon_lookup "$(try sm_legacy accounts/stage/keycloak-database-host | direct)")
-  put NEON_PROJECT_KC "$(cut -f1 <<<"$r")" "Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
+  put NEON_PROJECT_KC "$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
   r=$(neon_lookup "$(try sm_legacy accounts/stage/database-host | direct)")
-  put NEON_PROJECT_ACCOUNTS "$(cut -f1 <<<"$r")" "Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
+  put NEON_PROJECT_ACCOUNTS "$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
 
   put LEGACY_BLOB_BUCKET "$(try aws_legacy s3api list-buckets --query "Buckets[?contains(Name,'stage') && ends_with(Name,'-stalwart-s3-store')].Name | [0]" --output text | grep -v '^None$' || true)" "aws s3api list-buckets --profile mzla-legacy (name *stage*-stalwart-s3-store)"
   put TARGET_BLOB_BUCKET "$(yq -r '.blobStoreBucket // ""' "$VALUES")" "overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml blobStoreBucket"
@@ -136,13 +137,12 @@ build() {
   done
   put FLIP_PR "$(op FLIP_PR)" "operator: TMD dnsManagement Automatic PR number (FLIP_PR in the environment)"
   put APPOINTMENT_PR "$(op APPOINTMENT_PR)" "operator: appointment stage PR number (APPOINTMENT_PR in the environment)"
-  for d in PI_DIR:platform-infrastructure KCD_DIR:keycloak-customer-deploy ACD_DIR:accounts-deploy APPOINTMENT_DIR:appointment; do
+  for d in PI_DIR:platform-infrastructure KCD_DIR:keycloak-customer-deploy ACD_DIR:accounts-deploy APPOINTMENT_DIR:appointment TMD_DIR:thundermail-deploy; do
     local v=${d%%:*} repo=${d##*:} path
     path=${!v:-$HOME/src/tb/$repo}
     [ -d "$path/.git" ] || path=""
     put "$v" "$path" "local checkout of thunderbird/$repo ($v in the environment, default \$HOME/src/tb/$repo)"
   done
-  put TMD_DIR "$REPO_DIR" "this checkout"
 
   put AWS_REGION "$AWS_REGION" "eu-central-1"
   CF_TOKEN=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
@@ -187,6 +187,8 @@ build() {
   chmod 600 "$tmp"
   mv "$tmp" "$ENV_FILE"
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
+  old=$HOME/.local/state/talos/cutover-tb-stage.env
+  [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
   [ "$missing" = 0 ]
 }
 
@@ -201,6 +203,7 @@ check() {
     if out=$("$@" 2>&1); then printf 'PASS  %-32s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-110)"
     else fails=$((fails + 1)); printf 'FAIL  %-32s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-110)"; fi
   }
+  operator_values() { local v bad=""; for v in $OPERATOR_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all operator values set" || { echo "empty:$bad"; return 1; }; }
   nonempty() { local v bad=""; for v in $SECRET_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all set" || { echo "empty:$bad"; return 1; }; }
   dirs() {
     local bad="" d
@@ -240,6 +243,7 @@ check() {
   }
 
   chk secrets-non-empty nonempty
+  chk operator-values operator_values
   chk dirs-and-kubeconfigs dirs
   chk runner-pod runner
   for h in STALWART_LEGACY_PG_HOST:STALWART_LEGACY_PG_USER:STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST:STALWART_TARGET_PG_USER:STALWART_TARGET_PG_DB KC_LEGACY_PG_HOST:KC_LEGACY_PG_USER:KC_LEGACY_PG_DB ACCOUNTS_LEGACY_PG_HOST:ACCOUNTS_LEGACY_PG_USER:ACCOUNTS_LEGACY_PG_NAME; do
@@ -270,7 +274,7 @@ check() {
   chk t8-prs pr_pair accounts-deploy "${T8_PR:-}" "${T8_REVERT_PR:-}"
   chk restore-legacy-sg-dry-run pair legacy-sg legacy-sg
   chk restore-ecs-dry-run pair ecs ecs
-  chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
+  chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-2*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
   chk restore-zone-dry-run pair zone zone "$CF_ZONE_ID"
   chk restore-realm-dry-run pair realm realm "$KC_LEGACY_URL" "$KC_LEGACY_URL"
   chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/snapshot-secret-versions.sh $1 >/dev/null && read -r id v < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && "$0"/restore-secret-version.sh "$id" "$v" --dry-run | tail -1' "$MIG_DIR" "$secret_ids"

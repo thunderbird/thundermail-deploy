@@ -25,9 +25,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-WORK_DIR=${WORK_DIR:-$REPO_DIR/.work}
-ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
+WORK_DIR=${WORK_DIR:-$HOME/.local/state/talos}
+ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-stage.env}
 KC_STAGE=${KUBECONFIG_STAGE:-$WORK_DIR/kc-stage}
 KC_HUB=${KUBECONFIG_HUB:-$WORK_DIR/kc-hub}
 KC_DEV=${KUBECONFIG_DEV:-$WORK_DIR/kc-dev}
@@ -84,8 +83,20 @@ c_kube_dev() { can_all "$KC_DEV" 'create pods thundermail' 'patch deployments th
 c_neon() {
   command -v neonctl >/dev/null || { echo "neonctl missing"; return 1; }
   mode600 "$HOME/.neon-api.env" || { echo "$HOME/.neon-api.env missing or not mode 600"; return 1; }
-  local n; n=$(set -a; . "$HOME/.neon-api.env"; set +a; CI=true neonctl projects list --output json 2>/dev/null | jq '[(if type=="object" then (.projects + (.shared_with_you // [])) else . end)[]] | length' 2>/dev/null)
-  [ "${n:-0}" -ge 3 ] && echo "$n project(s) visible" || { echo "neonctl sees ${n:-0} project(s), want the three stage projects"; return 1; }
+  local p id key ok=0 bad="" n
+  for p in STALWART_LEGACY KC ACCOUNTS; do
+    id=$(from_file "$ENV_FILE" "NEON_PROJECT_$p")
+    [ -n "$id" ] || continue
+    key=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$p")
+    key=${key:-$(from_file "$HOME/.neon-api.env" NEON_API_KEY)}
+    if NEON_API_KEY=$key CI=true neonctl projects get "$id" --output json >/dev/null 2>&1; then ok=$((ok + 1)); else bad="$bad $p"; fi
+  done
+  if [ $((ok)) -gt 0 ] || [ -n "$bad" ]; then
+    [ -z "$bad" ] && [ "$ok" = 3 ] && echo "three NEON_PROJECT_* readable with their keys" || { echo "NEON_PROJECT_* readable: $ok of 3${bad:+, failed:$bad}"; return 1; }
+    return 0
+  fi
+  n=$(set -a; . "$HOME/.neon-api.env"; set +a; CI=true neonctl projects list --output json 2>/dev/null | jq '[(if type=="object" then (.projects + (.shared_with_you // [])) else . end)[]] | length' 2>/dev/null)
+  [ "${n:-0}" -ge 3 ] && echo "$n project(s) visible (NEON_PROJECT_* not in the env file yet)" || { echo "neonctl sees ${n:-0} project(s), want the three stage projects"; return 1; }
 }
 c_cf_shared() {
   local tok s z
@@ -185,6 +196,20 @@ c_pr_pair() {
   base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName' 2>/dev/null)
   [ -n "$head" ] && [ "$base" = "$head" ] && echo "$2=#$pr open, $3=#$rev open on its head" || { echo "$2=#$pr head=${head:-not open}, $3=#$rev base=${base:-not open}"; return 1; }
 }
+c_env_pr() {
+  local n; n=$(from_file "$ENV_FILE" "$2")
+  [ -n "$n" ] || { echo "$2 not in $ENV_FILE"; return 1; }
+  [ "$(gh pr view "$n" -R "thunderbird/$1" --json state -q .state 2>/dev/null)" = OPEN ] && echo "$2=#$n open in $1" || { echo "$2=#$n is not an open $1 PR"; return 1; }
+}
+c_recipients() {
+  local dir; dir=$(from_file "$ENV_FILE" SECRET_DIR)
+  [ -n "$dir" ] && [ -s "$dir/app-password-users.csv" ] && echo "$(($(grep -c . "$dir/app-password-users.csv") - 1)) recipient row(s) in \$SECRET_DIR/app-password-users.csv" || { echo "no app-password-users.csv in SECRET_DIR (#1547 part 2)"; return 1; }
+}
+c_git_transport() {
+  local bad="" r
+  for r in "$@"; do git ls-remote --exit-code "https://github.com/thunderbird/$r.git" HEAD >/dev/null 2>&1 || bad="$bad $r"; done
+  [ -z "$bad" ] && echo "git ls-remote over https works for $*" || { echo "git ls-remote failed:$bad (run gh auth setup-git)"; return 1; }
+}
 c_spf_final() { case "$(from_file "$ENV_FILE" SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
@@ -222,6 +247,10 @@ row "P1 T10a" paddle-sandbox-key c_paddle
 row "T7" t7-pr-and-revert c_pr_pair keycloak-customer-deploy T7_PR T7_REVERT_PR
 row "T8" t8-pr-and-revert c_pr_pair accounts-deploy T8_PR T8_REVERT_PR
 row "W7" spf-final-txt c_spf_final
+row "T14 W1" freeze-pr c_env_pr platform-infrastructure FREEZE_PR
+row "T14 W7" flip-pr c_env_pr thundermail-deploy FLIP_PR
+row "T14" notice-recipients-csv c_recipients
+row "T7 T8 W1 W8" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
 row "W7 P3" test-mailbox-external c_test_mailbox
 row "W5 W6 W7 P3" test-user-stage c_test_user
 row "ALL" github-gh c_github

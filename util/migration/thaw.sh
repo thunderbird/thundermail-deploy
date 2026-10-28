@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${FREEZE_PR:?set FREEZE_PR}"
 : "${PI_DIR:?set PI_DIR}"
-ENV_FILE=${CUTOVER_ENV:-${ENV_FILE:-$HOME/.local/state/talos/cutover-tb-stage.env}}
+ENV_FILE=${CUTOVER_ENV:-${ENV_FILE:-/dev/shm/talos/cutover-tb-stage.env}}
 PI_REPO=thunderbird/platform-infrastructure
 
 FREEZE_SHA=$(gh pr view "$FREEZE_PR" -R "$PI_REPO" --json mergeCommit -q .mergeCommit.oid)

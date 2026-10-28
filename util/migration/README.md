@@ -1,10 +1,11 @@
 # Cutover tooling
 
 Scripts for the tb-stage cutover (platform-infrastructure milestone 1536). Every command
-in the in-window issues sources the env file first, then `util/migration/timing.sh`:
+in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it) first,
+then `util/migration/timing.sh`:
 
 ```bash
-set -a; . ~/.local/state/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
+set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
@@ -28,16 +29,21 @@ set -a; . ~/.local/state/talos/cutover-tb-stage.env; set +a; . util/migration/ti
 
 `runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
 security group through the existing `stalwart-config-applier` SecurityGroupPolicy label
-(not `app=stalwart`, so no Service selects it). The `postgres` container writes
-`/work/.pgpass` at start from the mounted Secrets, so no password is ever an exec
-argument. Entries are keyed so that each of the four Neon targets resolves:
+(not `app=stalwart`, so no Service selects it). It runs on `role: mail` nodes like Stalwart,
+as uid 70 with no capabilities. The `postgres` container writes `/secrets/.pgpass` (a
+memory volume) at start from the mounted Secrets, so no password is ever an exec argument,
+and connects with `PGSSLMODE=verify-full` against the image's CA bundle. Every line names
+its host; the pod refuses to start unless the three legacy hosts are distinct:
 
 | line | matches | password |
 |---|---|---|
 | target host (direct and pooler form, read from the `stalwart-config` ConfigMap) | Stalwart target | `stalwart-postgresql-admin-password` |
-| `*:5432:keycloak:*` | legacy Keycloak | `rehearsal-legacy-pg` key `keycloak` |
-| `*:5432:neondb:neondb_owner` | legacy Accounts | `rehearsal-legacy-pg` key `accounts` |
-| `*:5432:*:*` | legacy Stalwart | `rehearsal-legacy-pg` key `stalwart` |
+| `rehearsal-legacy-pg` key `keycloak-host` | legacy Keycloak | key `keycloak` |
+| `rehearsal-legacy-pg` key `accounts-host` | legacy Accounts | key `accounts` |
+| `rehearsal-legacy-pg` key `stalwart-host` | legacy Stalwart | key `stalwart` |
+
+The `python` container installs hash-pinned wheels as a non-root user and does not mount
+`/work`.
 
 `build-cutover-env.sh --check` runs `psql -Atc 'select 1'` against all four, which proves
 the keying for the real hosts.
