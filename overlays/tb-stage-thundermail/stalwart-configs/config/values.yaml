@@ -17,12 +17,14 @@ stalwartPgAdminUsername: neondb_owner
 dnsManagement: Manual
 dnsPublishSpf: false
 authBanRateCount: 5000
+scanBanRateCount: 30
+addressBookName: Thundermail Address Book
 allowedIPs:
   ipallow-legacy-1:
-    address: '${LEGACY_ALLOWED_IP_1}'
+    address: 10.11.0.0/16
     reason: Migrated from v0.15
   ipallow-legacy-2:
-    address: '${LEGACY_ALLOWED_IP_2}'
+    address: 18.96.47.152/29
     reason: Migrated from v0.15
 webhookURL: https://accounts.stage-thundermail.com/api/v1/telemetry/stalwart/webhook/
 webhookEvents:

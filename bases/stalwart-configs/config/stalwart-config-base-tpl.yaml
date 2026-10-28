@@ -47,11 +47,6 @@ value:
       '@type': Enabled
     allowRelaying: false
 ---
-'@type': destroy
-object: DnsServer
-value:
-  description: 'Cloudflare DNS provider for __DOMAIN_FQDN__ zone'
----
 '@type': upsert
 object: Directory
 matchOn:
@@ -111,7 +106,7 @@ value:
 '@type': update
 object: AddressBook
 value:
-  defaultDisplayName: 'Thundermail Contacts'
+  defaultDisplayName: __ADDRESS_BOOK_NAME__
   vCardVersion: v3
 ---
 '@type': update
@@ -430,7 +425,7 @@ value:
     '*wordpress*': true
     '*drupal*': true
   scanBanRate:
-    count: 1000
+    count: __SCAN_BAN_RATE_COUNT__
     period: 86400000 # 24 hours
   scanBanPeriod: null
 ---
