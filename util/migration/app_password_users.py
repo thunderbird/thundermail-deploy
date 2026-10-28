@@ -22,23 +22,14 @@ Usage:
 """
 import argparse, csv, json, os, sys
 
-
-def str_list(v):
-    if v is None:
-        return []
-    if isinstance(v, list):
-        return v
-    if isinstance(v, dict):
-        if isinstance(v.get("stringList"), list):
-            return v["stringList"]
-        return [v["string"]] if isinstance(v.get("string"), str) else []
-    return [v]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from shapes import norm_addr, strings, unwrap_list, unwrap_str
 
 
 def app_passwords(principal):
     """Names of the v0.15 app passwords. Stored as `$app$<name>$<hash>`; the hash is never read."""
     names = []
-    for s in str_list(principal.get("secrets")):
+    for s in unwrap_list(principal.get("secrets")):
         if isinstance(s, str) and s.startswith("$app$"):
             name, _, _ = s[len("$app$"):].partition("$")
             names.append(name or "(unnamed)")
@@ -70,18 +61,19 @@ def main():
 
     rows = []
     for x in items:
-        if x.get("type") != "individual":
+        if unwrap_str(x.get("type")) != "individual":
             continue
         names = app_passwords(x)
         if not names:
             continue
-        emails = [e for e in str_list(x.get("emails")) if isinstance(e, str)]
-        primary = next((e for e in emails if not e.startswith("@")), x["name"])
-        c = contacts.get(x["name"].lower()) or contacts.get(primary.lower()) or {}
+        name = unwrap_str(x.get("name"))
+        emails = [norm_addr(e) for e in strings(x.get("emails"))]
+        primary = next((e for e in emails if not e.startswith("@")), name)
+        c = contacts.get(name.lower()) or contacts.get(primary.lower()) or {}
         mine = [n for n in names if not n.startswith(APPOINTMENT_PREFIX)]
         appt = len(names) - len(mine)
         rows.append({
-            "account": x["name"],
+            "account": name,
             "primary_address": primary,
             "display_name": x.get("description") or "",
             "notice": "both" if mine and appt else ("app_passwords" if mine else "appointment"),
@@ -101,7 +93,7 @@ def main():
     os.umask(old)
 
     total = sum(r["app_password_count"] for r in rows)
-    accounts = sum(1 for x in items if x.get("type") == "individual")
+    accounts = sum(1 for x in items if unwrap_str(x.get("type")) == "individual")
     print(f"{len(rows)} of {accounts} accounts lose app passwords in the migration:")
     for kind in ("app_passwords", "appointment", "both"):
         print(f"  notice={kind}: {sum(1 for r in rows if r['notice'] == kind)} accounts")

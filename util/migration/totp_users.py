@@ -12,21 +12,12 @@ Usage:
 """
 import argparse, csv, json, os, sys
 
-
-def str_list(v):
-    if v is None:
-        return []
-    if isinstance(v, list):
-        return v
-    if isinstance(v, dict):
-        if isinstance(v.get("stringList"), list):
-            return v["stringList"]
-        return [v["string"]] if isinstance(v.get("string"), str) else []
-    return [v]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from shapes import norm_addr, strings, unwrap_list, unwrap_str
 
 
 def has_totp(principal):
-    return any(isinstance(s, str) and s.startswith("otpauth://") for s in str_list(principal.get("secrets")))
+    return any(isinstance(s, str) and s.startswith("otpauth://") for s in unwrap_list(principal.get("secrets")))
 
 
 def main():
@@ -39,12 +30,13 @@ def main():
     items = p if isinstance(p, list) else p.get("items", p)
     rows = []
     for x in items:
-        if x.get("type") != "individual" or not has_totp(x):
+        if unwrap_str(x.get("type")) != "individual" or not has_totp(x):
             continue
-        emails = [e for e in str_list(x.get("emails")) if isinstance(e, str)]
+        name = unwrap_str(x.get("name"))
+        emails = [norm_addr(e) for e in strings(x.get("emails"))]
         rows.append({
-            "account": x["name"],
-            "primary_address": next((e for e in emails if not e.startswith("@")), x["name"]),
+            "account": name,
+            "primary_address": next((e for e in emails if not e.startswith("@")), name),
             "display_name": x.get("description") or "",
         })
 
@@ -56,7 +48,7 @@ def main():
         w.writerows(rows)
     os.umask(old)
 
-    accounts = sum(1 for x in items if x.get("type") == "individual")
+    accounts = sum(1 for x in items if unwrap_str(x.get("type")) == "individual")
     print(f"{len(rows)} of {accounts} accounts use TOTP")
     print(f"wrote {a.out}")
 

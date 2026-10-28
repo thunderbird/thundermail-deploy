@@ -11,17 +11,12 @@ Env: STALWART_URL (e.g. http://localhost:18081), STALWART_USER, STALWART_PASSWOR
 --expect-hostname is required: the script reads the target's defaultHostname and stops on a mismatch.
 Exit code is 1 if any write failed.
 """
-import argparse, base64, json, os, re, sys, urllib.request
+import argparse, base64, json, os, sys, urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from shapes import duration_ms, norm_addr, strings, unwrap_str
 
 EVENT_RENAMES = {"queue.queue-message-authenticated": "queue.authenticated-message-queued"}
-UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000, "d": 86_400_000}
-
-
-def duration_ms(v):
-    m = re.fullmatch(r"(\d+)\s*(ms|s|m|h|d)", str(v).strip())
-    if not m:
-        raise ValueError(f"unparsed duration {v!r}")
-    return int(m[1]) * UNITS[m[2]]
 
 
 def rate(v):
@@ -95,7 +90,7 @@ def plan(s):
             item = {"address": a, "reason": "manual" if kind == "BlockedIp" else "migrated from v0.15"}
             out.append((kind, "create", item, a))
 
-    if "session.mta-sts.mx" in s or "session.mta-sts.mode" in s:
+    if "session.mta-sts.mx" in s or "session.mta-sts.mode" in s or any(k.startswith("session.mta-sts.mx.") for k in s):
         mx = [v for k, v in sorted(s.items()) if k == "session.mta-sts.mx" or k.startswith("session.mta-sts.mx.")]
         upd = {"mxHosts": {m: True for m in mx}}
         if "session.mta-sts.mode" in s:
@@ -154,14 +149,13 @@ def catch_alls(principals_path):
     items = p if isinstance(p, list) else p.get("items", p)
     out = {}
     for x in items:
-        if x.get("type") != "individual":
+        if unwrap_str(x.get("type")) != "individual":
             continue
-        emails = x.get("emails") or []
-        emails = emails if isinstance(emails, list) else [emails]
-        primary = next((e for e in emails if not e.startswith("@")), x["name"])
+        emails = [norm_addr(e) for e in strings(x.get("emails"))]
+        primary = next((e for e in emails if not e.startswith("@")), unwrap_str(x.get("name")))
         for e in emails:
             if e.startswith("@"):
-                d = e[1:].lower()
+                d = e[1:]
                 if d in out and out[d] != primary:
                     sys.exit(f"catch-all @{d} is claimed by both {out[d]} and {primary}; fix it in v0.15 first")
                 out[d] = primary

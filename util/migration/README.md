@@ -74,6 +74,8 @@ the keying for the real hosts.
   only `__TS__` and `__FREIGHT__`.
 - `apply_unmigrated.py` re-applies the v0.15 settings `convert` leaves out; `--only KIND[,KIND]`
   is the inverse of `--skip` (`python3 test_apply_unmigrated.py`).
+- `shapes.py` reads dump values the way `migrate_v016.py` does (wrapped lists and strings,
+  durations, address domains); the helpers and `verify/` use it (`python3 test_shapes.py`).
 - `app_password_users.py` and `totp_users.py` take `--principals principals.json --out FILE.csv`
   and list who loses app passwords or uses TOTP; `APP_PASSWORDS.md` has the notices and
   `export_contacts.py` the Accounts contact export. `verify/` is the read-only check suite.

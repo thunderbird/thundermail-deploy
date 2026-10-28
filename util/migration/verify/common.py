@@ -9,6 +9,9 @@ Configuration comes from environment variables (see README.md).
 """
 import base64, json, os, ssl, subprocess, sys, time, urllib.error, urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shapes import norm_addr, norm_domain, strings, unwrap_int, unwrap_str
+
 OUT = os.environ.get("VERIFY_OUT", "out")
 os.umask(0o077)
 os.makedirs(OUT, exist_ok=True)
@@ -50,23 +53,11 @@ def dec(s):
 
 
 # ---------- source: principals dump ----------
-def str_list(v):
-    if v is None:
-        return []
-    if isinstance(v, list):
-        return v
-    if isinstance(v, dict):
-        if isinstance(v.get("stringList"), list):
-            return v["stringList"]
-        return [v["string"]] if isinstance(v.get("string"), str) else []
-    return [v]
-
-
 def principals():
     """principals.json from `migrate_v016.py dump`. Returns {id: principal} for individual accounts."""
     p = json.load(open(need("PRINCIPALS")))
     items = p if isinstance(p, list) else p.get("items", p)
-    return {x["id"]: x for x in items if x.get("type") == "individual"}, items
+    return {unwrap_int(x.get("id")): x for x in items if unwrap_str(x.get("type")) == "individual"}, items
 
 
 # ---------- source: Postgres (read-only) ----------
