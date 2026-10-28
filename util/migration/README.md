@@ -12,7 +12,7 @@ set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.s
 
 - `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
   NEED count (`--for T0` prints every row). It never prints a value.
-- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`) live in `~/.local/state/talos/cutover-operator.env`
+- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator.env`
   (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
@@ -168,12 +168,21 @@ the keying for the real hosts.
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
-  4 `mail.` CNAME and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
+  4 `mail.` CNAME, then the apex `/.well-known/{caldav,carddav,jmap,autoconfig}` 302 to
+  `mail.stage-thundermail.com` as a zone dynamic redirect rule (the origin behind the apex CNAME
+  302s them to production; rule snapshot plus `restore-redirect.sh` line R in the restore file),
+  and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
   edits `spf.` in place to `SPF_FINAL_TXT` with TTL 300 in one upsert (custom domains include it,
   so it is never deleted); the apex and `mail.` SPF TXTs stay as they are (#1535).
+- W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw,
+  cancels its unfinished runs (`accounts-merge-yml` row), and at the end checks `disabled_manually`,
+  no unfinished runs and legacy ECS `desiredCount` 0; re-enable it only after the
+  thunderbird-accounts PR that sets the four stage `desired_count` to 0 merges.
 - Every in-window merge goes through `merge_pr` (window/lib.sh): `gh pr ready` on a draft, a stop when
-  the branch still needs an approving review (collect approvals before the window), then
-  `gh pr merge --merge`; an already merged PR passes.
+  the branch still needs an approving review, then `gh pr merge --merge --match-head-commit`; an already
+  merged PR passes. With `ADMIN_MERGE=1` (operator decision 2026-10-28) a `REVIEW_REQUIRED` PR merges
+  with `--admin` once its checks are green and Greptile's latest comment scores 5/5 on the head
+  (`admin-merge` row). The dry run reads the PR and reports the merge or the refusal as a NEED.
 - W4 also waits for the legacy task queue `f` to drain (`task-queue` row), compares account and
   group ids with `verify/02_directory.py` (`account-ids` row), and re-runs `rclone copy` and
   `check` after the W3 blob-check (`blob-recheck` row) before it leaves recovery mode. Convert

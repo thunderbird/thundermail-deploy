@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need ARGO_APPS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_STAGE KUBECONFIG_HUB PI_DIR
+need ARGO_APPS LEGACY_ECS_TARGETS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_STAGE KUBECONFIG_HUB PI_DIR
 pending THAW_PR REPLICAS_BEFORE
 PI=thunderbird/platform-infrastructure
+ACC=thunderbird/thunderbird-accounts
 PROMOTION=$EVIDENCE_DIR/promotion-accounts-$TS.yaml
 
 snap() {
@@ -87,6 +88,45 @@ thaw() {
   "${KH[@]}" -n argocd get application "${apps[@]}" -o jsonpath='{range .items[*]}{.metadata.name} {.spec.syncPolicy.automated.selfHeal} {.status.sync.status} {.status.health.status}{"\n"}{end}'
 }
 
+wf_state() { gh api "repos/$ACC/actions/workflows/merge.yml" --jq .state; }
+wf_unfinished() { gh api "repos/$ACC/actions/workflows/merge.yml/runs?per_page=100" --jq '[.workflow_runs[] | select(.status != "completed") | .id] | join(" ")'; }
+wf_drained() { [ -z "$(wf_unfinished)" ]; }
+legacy_desired() {
+  local t d all=""
+  for t in $LEGACY_ECS_TARGETS; do d=$(aws_legacy ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[0].desiredCount' --output text) || return 1; all="$all $d"; done
+  tr ' ' '\n' <<<"$all" | grep . | sort -u | tr '\n' ' '
+}
+
+accounts_ci_off() {
+  local st who
+  local id runs
+  printf '  + gh workflow disable merge.yml -R %s (deploy-stage puts the legacy ECS desired_count back to 1); gh run cancel its unfinished runs, wait 300s until none; row accounts-merge-yml: state after, who; re-enable only after the thunderbird-accounts desired_count 0 PR merges\n' "$ACC"
+  st=$(wf_state) || return 1
+  runs=$(wf_unfinished) || return 1
+  VALUE=$st
+  echo "merge.yml state now: $st; unfinished runs: ${runs:-none}"
+  [ "$APPLY" = 1 ] || return 0
+  [ "$st" = disabled_manually ] || gh workflow disable merge.yml -R "$ACC" || return 1
+  for id in $(wf_unfinished); do gh run cancel "$id" -R "$ACC" || return 1; done
+  until_ok 300 wf_drained || { echo "merge.yml runs still unfinished after 300s: $(wf_unfinished)"; return 1; }
+  who=$(gh api user --jq .login) || return 1
+  VALUE=$(wf_state) || return 1
+  mark accounts-merge-yml state "$VALUE by $who"
+  [ "$VALUE" = disabled_manually ]
+}
+
+accounts_ci_verify() {
+  VALUE=$(wf_state) || return 1
+  local runs desired
+  runs=$(wf_unfinished) || return 1
+  desired=$(legacy_desired) || return 1
+  if [ "$VALUE" != disabled_manually ] || [ -n "$runs" ] || [ "$desired" != "0 " ]; then
+    [ "$APPLY" = 1 ] || { echo "merge.yml is $VALUE (unfinished runs: ${runs:-none}), legacy ECS desired ${desired}before the apply; the apply expects disabled_manually, no runs, desired 0"; return 0; }
+    echo "$ACC merge.yml is $VALUE, unfinished runs: ${runs:-none}, legacy ECS desired: ${desired:-none}; want disabled_manually, none, 0"; return 1
+  fi
+  echo "$ACC merge.yml disabled_manually, no unfinished runs, legacy ECS desired 0; gh workflow enable merge.yml -R $ACC only after the desired_count 0 PR merges"
+}
+
 last_promo() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath='{.status.lastPromotion.name}'; }
 promoted() { [ "$(last_promo)" != "$PROMO_BEFORE" ]; }
 stage_get() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath="$1"; }
@@ -120,7 +160,9 @@ step scale-up "" scale_up
 step cleanup "" cleanup
 step freight-race "" freight_race
 go_gate
+step accounts-ci-off state accounts_ci_off
 step thaw "" thaw
 step kargo-verify "" kargo_verify
+step accounts-ci-verify state accounts_ci_verify
 printf 'after #1577 signs off: rm -rf %s %s\n' "$SECRET_DIR" "$ENV_FILE"
 finish
