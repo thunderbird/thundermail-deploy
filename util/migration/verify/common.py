@@ -50,6 +50,18 @@ def dec(s):
 
 
 # ---------- source: principals dump ----------
+def str_list(v):
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return v
+    if isinstance(v, dict):
+        if isinstance(v.get("stringList"), list):
+            return v["stringList"]
+        return [v["string"]] if isinstance(v.get("string"), str) else []
+    return [v]
+
+
 def principals():
     """principals.json from `migrate_v016.py dump`. Returns {id: principal} for individual accounts."""
     p = json.load(open(need("PRINCIPALS")))

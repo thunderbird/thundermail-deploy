@@ -23,7 +23,7 @@ Usage:
 import argparse, csv, json, os, sys
 
 
-def secret_list(v):
+def str_list(v):
     if v is None:
         return []
     if isinstance(v, list):
@@ -38,7 +38,7 @@ def secret_list(v):
 def app_passwords(principal):
     """Names of the v0.15 app passwords. Stored as `$app$<name>$<hash>`; the hash is never read."""
     names = []
-    for s in secret_list(principal.get("secrets")):
+    for s in str_list(principal.get("secrets")):
         if isinstance(s, str) and s.startswith("$app$"):
             name, _, _ = s[len("$app$"):].partition("$")
             names.append(name or "(unnamed)")
@@ -75,8 +75,7 @@ def main():
         names = app_passwords(x)
         if not names:
             continue
-        emails = x.get("emails") or []
-        emails = emails if isinstance(emails, list) else [emails]
+        emails = [e for e in str_list(x.get("emails")) if isinstance(e, str)]
         primary = next((e for e in emails if not e.startswith("@")), x["name"])
         c = contacts.get(x["name"].lower()) or contacts.get(primary.lower()) or {}
         mine = [n for n in names if not n.startswith(APPOINTMENT_PREFIX)]

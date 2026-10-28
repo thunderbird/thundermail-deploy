@@ -13,7 +13,7 @@ Usage:
 import argparse, csv, json, os, sys
 
 
-def secret_list(v):
+def str_list(v):
     if v is None:
         return []
     if isinstance(v, list):
@@ -26,7 +26,7 @@ def secret_list(v):
 
 
 def has_totp(principal):
-    return any(isinstance(s, str) and s.startswith("otpauth://") for s in secret_list(principal.get("secrets")))
+    return any(isinstance(s, str) and s.startswith("otpauth://") for s in str_list(principal.get("secrets")))
 
 
 def main():
@@ -41,8 +41,7 @@ def main():
     for x in items:
         if x.get("type") != "individual" or not has_totp(x):
             continue
-        emails = x.get("emails") or []
-        emails = emails if isinstance(emails, list) else [emails]
+        emails = [e for e in str_list(x.get("emails")) if isinstance(e, str)]
         rows.append({
             "account": x["name"],
             "primary_address": next((e for e in emails if not e.startswith("@")), x["name"]),
