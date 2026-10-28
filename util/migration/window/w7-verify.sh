@@ -3,7 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 [ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
 need TARGET_NLB_DNS CF_ZONE_ID
-pending SPF_FINAL_TXT TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
+pending TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
 Z=stage-thundermail.com
 M=mail.$Z
 TABLE=$EVIDENCE_DIR/w7-verify-$(mode)-$TS.txt
@@ -62,9 +62,21 @@ dkim() {
   echo "$n selector(s) resolve with v=DKIM1"
 }
 
+doh_before() { find "$EVIDENCE_DIR" -maxdepth 1 -name "zone-doh-before-$CF_ZONE_ID-*.txt" -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-; }
+
+apex_same() {
+  local before want
+  before=$(doh_before)
+  [ -s "$before" ] || { echo "no zone-doh-before file for the zone"; return 1; }
+  want=$(awk -F'\t' -v z="$Z" '$1 == z && $2 == "TXT" {print $3}' "$before" | jq -r '.[] | gsub("\" \""; "") | ltrimstr("\"") | rtrimstr("\"") | select(startswith("v=spf1"))')
+  [ "$(grep -c . <<<"$want")" = 1 ] || { echo "$(basename "$before") does not hold exactly one apex v=spf1"; return 1; }
+  one_spf "$Z" "$want" || return 1
+  echo "$Z v=spf1 unchanged from $(basename "$before")"
+}
+
 acme_same() {
   local before line name type ans
-  before=$(find "$EVIDENCE_DIR" -maxdepth 1 -name "zone-doh-before-$CF_ZONE_ID-*.txt" -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+  before=$(doh_before)
   [ -s "$before" ] || { echo "no zone-doh-before file for the zone"; return 1; }
   while IFS=$'\t' read -r name type ans; do
     line=$(dq "$name" "$type" | sort | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -122,8 +134,8 @@ submission() {
 
 dns() {
   chk mx has "$Z" MX "10 $M."
-  chk spf-apex one_spf "$Z"
-  chk spf-host one_spf "spf.$Z" "$SPF_FINAL_TXT"
+  chk spf-apex apex_same
+  chk spf-host one_spf "spf.$Z" "$SPF_DECIDED_TXT"
   chk spf-host-ttl spf_ttl
   chk spf-chain-apex chain "$Z" 0
   chk spf-chain-host chain "spf.$Z" 0

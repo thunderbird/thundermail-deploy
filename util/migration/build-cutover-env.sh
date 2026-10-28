@@ -229,7 +229,7 @@ check() {
     [ "$s" = active ] && [ -n "$z" ] && { [ -z "$CF_ZONE_ID" ] || [ "$z" = "$CF_ZONE_ID" ]; } && echo "active, zone visible${CF_ZONE_ID:+ and equal to CF_ZONE_ID}" || { echo "status=$s zone_visible=$([ -n "$z" ] && echo yes || echo no)"; return 1; }
   }
   agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && echo "active, stage and tb.pro zone ids set" || { echo "status=$s"; return 1; }; }
-  spf_final() { case "$SPF_FINAL_TXT" in "v=spf1 "*) echo "v=spf1 record, len=${#SPF_FINAL_TXT}" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 (len=${#SPF_FINAL_TXT})"; return 1 ;; esac; }
+  spf_final() { if [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ]; then echo "equals the #1535 text, len=${#SPF_FINAL_TXT}"; else echo "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT' (len=${#SPF_FINAL_TXT})"; return 1; fi; }
   pr_pair() {
     local repo=thunderbird/$1 pr=$2 rev=$3 head base
     [ -n "$pr" ] && [ -n "$rev" ] || { echo "PR numbers empty"; return 1; }

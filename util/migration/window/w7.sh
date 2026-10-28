@@ -121,7 +121,7 @@ prereqs
 helpers snapshot-zone.sh restore-zone.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
 NEXT=$(next_step)
 if [ "$APPLY" = 1 ]; then
-  case "$SPF_FINAL_TXT" in "v=spf1 "*) ;; *) stop "SPF_FINAL_TXT does not begin with 'v=spf1 ' (#1535 decision)" ;; esac
+  [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ] || stop "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT'"
 fi
 [ "$APPLY" = 0 ] || [ "$NEXT" != 6 ] || { echo "W7 steps 1-4 and verification are done for this cut"; finish; exit 0; }
 [ "$APPLY" = 0 ] || [ "$NEXT" != 1 ] || step snap-zone records snap_zone

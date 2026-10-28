@@ -8,6 +8,7 @@ AWS_REGION=${AWS_REGION:-eu-central-1}
 LEGACY_AWS_PROFILE=${LEGACY_AWS_PROFILE:-mzla-legacy}
 STAGE_AWS_PROFILE=${STAGE_AWS_PROFILE:-mzla-tb-stage}
 CF_API=https://api.cloudflare.com/client/v4
+. "$MIG_DIR/spf-decided.sh"
 APPLY=0
 ARGS=()
 for a in "$@"; do
