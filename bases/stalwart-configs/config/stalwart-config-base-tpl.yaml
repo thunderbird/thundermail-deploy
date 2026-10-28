@@ -205,8 +205,7 @@ value:
 object: NetworkListener
 matchOn:
   - protocol
-  - useTls
-  - tlsImplicit
+  - bind
 value:
   listen-smtp-starttls:
     name: smtp-starttls
@@ -222,15 +221,14 @@ value:
 object: NetworkListener
 matchOn:
   - protocol
-  - useTls
-  - tlsImplicit
+  - bind
 value:
   listen-smtp:
     name: smtp-plain
     bind:
       '[::]:25': true
     protocol: smtp
-    useTls: false
+    useTls: true
     tlsImplicit: false
     overrideProxyTrustedNetworks:
       '__INTERNAL_IP_CIDR__': true
