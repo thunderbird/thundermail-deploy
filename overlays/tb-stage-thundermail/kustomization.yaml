@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - nginx/ssl-certificate-externalsecret.yaml
   - ../../bases
+  - stalwart-mail/cloudflare-api-token.yaml
 
 namespace: "thundermail"
 
