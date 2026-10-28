@@ -96,3 +96,51 @@ the keying for the real hosts.
   successful rollback it moves that cycle's records files to `tbpro-p2-rolled-back-<ts>/`.
 - `post/p2-verify.sh` expects `301 https://<target>/login/?p2=1` from each tb.pro host (DoH
   plus `curl --resolve`, `TRIES` attempts 10 s apart) and exits 1 otherwise.
+
+## Window scripts
+
+`window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
+`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
+`/dev/shm/talos/cutover-tb-stage.env`, else `~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
+(`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
+
+- `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,
+  and prints every write as the exact command; it never runs `kubectl exec`. Timing rows get a
+  `dryrun-` prefix. `--apply` runs the writes.
+- W2 writes only with `--apply --go '<operator words>'`; W5 phase 1 (`--apply`) stops after
+  the `apply_unmigrated.py` dry run and records the plan counts, and phase 2 (`--apply --go`)
+  refuses a changed plan; W4 needs `--go` once a `drop-schema` row exists for the current cut.
+  The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
+- Legacy credentials are sent only to a loopback `OLD_STALWART_URL` served by the operator's own
+  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator.
+- Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check or signal prints
+  `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands and exits 1. Nothing
+  rolls back automatically. Exit 2 means a NEED item is listed.
+- Restore files: `cut-legacy-restore.txt` for W2 and `w<n>-*-restore.txt` otherwise, written by
+  `--apply` once per cut (a `restore-W<n>` row); dry runs write `*.dry-run.txt`.
+- After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
+  ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
+- W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
+  4 `mail.` CNAME and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
+  edits `spf.` in place to `SPF_FINAL_TXT` (custom domains include it, so it is never deleted).
+- Every in-window merge goes through `merge_pr` (window/lib.sh): `gh pr ready` on a draft, a stop when
+  the branch still needs an approving review (collect approvals before the window), then
+  `gh pr merge --merge`; an already merged PR passes.
+- W4 also waits for the legacy task queue `f` to drain (`task-queue` row), compares account and
+  group ids with `verify/02_directory.py` (`account-ids` row), and re-runs `rclone copy` and
+  `check` after the W3 blob-check (`blob-recheck` row) before it leaves recovery mode. Convert
+  stops on `warning: (dropping|renaming) (User|Group)` lines that are not in
+  `$SECRET_DIR/convert-dropped-baseline.txt` (the lines the T10 dry run accepted).
+- `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
+  `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
+  start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
+  created in the Accounts UI from stdin, checks a JMAP session and appends
+  `TEST_SENDER_APP_PASSWORD`.
+- `cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT]` is dry-run by default; an SPF upsert edits
+  the one `v=spf1` TXT at NAME in place, empty content is refused, and it refuses to delete `spf.*`
+  or touch `_externaldns.*`.
+- `freight_for SHA` (window/lib.sh), used by W5 and W7, selects the Freight whose preview commit has the same
+  `overlays/tb-stage-thundermail/stalwart-configs` and `bases/stalwart-configs` trees as SHA
+  (preview commits never carry the merge SHA), and stops when TMD main has changed those paths since
+  SHA or no Freight matches. `T6_SHA` comes from the env file or, when empty, from the merge commit
+  of `T6_PR`, and W5 appends it. T7 and T8 read `T7_PR`/`T7_REVERT_PR` and `T8_PR`/`T8_REVERT_PR`.
