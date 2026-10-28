@@ -17,7 +17,7 @@ data:
     stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
     stalwartPgDatabase: neondb
     stalwartPgAdminUsername: neondb_owner
-    dnsManagement: Manual
+    dnsManagement: Automatic
     dnsPublishSpf: false
     authBanRateCount: 5000
     scanBanRateCount: 30
@@ -39,5 +39,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-gt4c67f2t5
+  name: stalwart-config-values-h5mt8dtc97
   namespace: thundermail
