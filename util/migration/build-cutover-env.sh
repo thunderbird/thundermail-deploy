@@ -25,6 +25,7 @@ sm_stage() { aws_stage secretsmanager get-secret-value --secret-id "$1" --output
 k8s_secret() { kstage -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 -d; }
 direct() { sed 's/-pooler//'; }
 cf_zone() { [ -n "${CF_TOKEN:-}" ] || return 0; curl -sS -m 30 -K <(bearer "$CF_TOKEN") "$CF_API/zones?name=$1" | jq -r '.result[0].id // empty'; }
+pr_by_head() { gh pr list -R "thunderbird/$1" --state open --json number,headRefName --jq "[.[] | select(.headRefName | test(\"(^|/)$2\$\"))] | if length == 1 then .[0].number else empty end"; }
 neon_get() { curl -sS -m 60 -K <(bearer "$NEON_KEY") "$NEON_API/$1"; }
 neon_lookup() {
   local ep=${1%%.*} pid bid
@@ -126,6 +127,13 @@ build() {
   put KARGO_WAREHOUSE_CONFIGS deploy-thundermail-tb-stage01-git "Kargo warehouse"
   put FREEZE_PR "$(op FREEZE_PR)$([ -z "$(op FREEZE_PR)" ] && try gh pr list -R thunderbird/platform-infrastructure --head freeze-tb-stage --state open --json number --jq '.[0].number')" "gh pr list -R thunderbird/platform-infrastructure --head freeze-tb-stage, or FREEZE_PR in the environment"
   put T6_PR "$(op T6_PR)" "operator: TMD values.yaml PR number (T6_PR in the environment)"
+  for d in T7_PR:keycloak-customer-deploy:tbstage-t7 T7_REVERT_PR:keycloak-customer-deploy:tbstage-t7-revert T8_PR:accounts-deploy:tbstage-t8 T8_REVERT_PR:accounts-deploy:tbstage-t8-revert; do
+    local v repo head n
+    IFS=: read -r v repo head <<<"$d"
+    n=$(op "$v")
+    [ -n "$n" ] || n=$(try pr_by_head "$repo" "$head")
+    put "$v" "$n" "$v in the environment, else the one open thunderbird/$repo PR with head */$head (gh pr list)"
+  done
   put FLIP_PR "$(op FLIP_PR)" "operator: TMD dnsManagement Automatic PR number (FLIP_PR in the environment)"
   put APPOINTMENT_PR "$(op APPOINTMENT_PR)" "operator: appointment stage PR number (APPOINTMENT_PR in the environment)"
   for d in PI_DIR:platform-infrastructure KCD_DIR:keycloak-customer-deploy ACD_DIR:accounts-deploy APPOINTMENT_DIR:appointment; do
@@ -153,6 +161,7 @@ build() {
   put TEST_SENDER "$(op TEST_USER)" "same as TEST_USER"
   put SPF_APEX_TXT "$(op SPF_APEX_TXT)" "operator: apex SPF text decided in the SPF spike"
   put SPF_MAIL_TXT "$(op SPF_MAIL_TXT)" "operator: mail. SPF text decided in the SPF spike"
+  put SPF_FINAL_TXT "$(op SPF_FINAL_TXT)" "operator: spf. TXT from the #1535 decision (SPF_FINAL_TXT in the environment)"
   put SUPPORT_CHANNEL "$(op SUPPORT_CHANNEL)" "operator: support announcement channel"
   for v in KUBECONFIG_STAGE KUBECONFIG_HUB KUBECONFIG_DEV; do
     put "$v" "${!v}" "aws eks update-kubeconfig --kubeconfig ${!v} ($v in the environment)"
@@ -209,6 +218,14 @@ check() {
     [ "$s" = active ] && [ -n "$z" ] && { [ -z "$CF_ZONE_ID" ] || [ "$z" = "$CF_ZONE_ID" ]; } && echo "active, zone visible${CF_ZONE_ID:+ and equal to CF_ZONE_ID}" || { echo "status=$s zone_visible=$([ -n "$z" ] && echo yes || echo no)"; return 1; }
   }
   agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && [ -n "$CF_ZONE_ID_DEVTM" ] && echo "active, three zone ids set" || { echo "status=$s"; return 1; }; }
+  spf_final() { case "$SPF_FINAL_TXT" in "v=spf1 "*) echo "v=spf1 record, len=${#SPF_FINAL_TXT}" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 (len=${#SPF_FINAL_TXT})"; return 1 ;; esac; }
+  pr_pair() {
+    local repo=thunderbird/$1 pr=$2 rev=$3 head base
+    [ -n "$pr" ] && [ -n "$rev" ] || { echo "PR numbers empty"; return 1; }
+    head=$(gh pr view "$pr" -R "$repo" --json state,headRefName -q 'select(.state == "OPEN") | .headRefName')
+    base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName')
+    [ -n "$head" ] && [ "$base" = "$head" ] && echo "#$pr open, revert #$rev open on its head" || { echo "#$pr head=${head:-not open}, revert #$rev base=${base:-not open}"; return 1; }
+  }
   count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
     local out snap
@@ -247,6 +264,9 @@ check() {
   chk kargo-warehouse-configs khub -n "$KARGO_PROJECT_CONFIGS" get warehouse "$KARGO_WAREHOUSE_CONFIGS" -o name
   chk cf-token-shared-scope shared_scope
   chk cf-token-agent agent_token
+  chk spf-final-txt spf_final
+  chk t7-prs pr_pair keycloak-customer-deploy "${T7_PR:-}" "${T7_REVERT_PR:-}"
+  chk t8-prs pr_pair accounts-deploy "${T8_PR:-}" "${T8_REVERT_PR:-}"
   chk restore-legacy-sg-dry-run pair legacy-sg legacy-sg
   chk restore-ecs-dry-run pair ecs ecs
   chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
