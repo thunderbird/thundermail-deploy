@@ -69,14 +69,15 @@ rules=$(for r in $REDIRECTS; do jq -nc --arg from "${r%%=*}" --arg to "${r#*=}" 
   action: "redirect",
   action_parameters: {from_value: {status_code: 301, target_url: {expression: ("concat(\"" + $to + "\", http.request.uri.path)")}, preserve_query_string: true}}
 }'; done | jq -sc '.')
-body=$(jq -nc --argjson cur "$existing" --argjson new "$rules" '
-  ($new | map(.ref)) as $refs
-  | {rules: ($new + [$cur[] | select(.ref as $r | $refs | index($r) | not)
-      | {id, ref, description, expression, action, action_parameters, enabled} | with_entries(select(.value != null))])}')
-new=$(jq 'length' <<<"$rules")
-kept=$(jq --argjson n "$new" '.rules | length - $n' <<<"$body")
-echo "PUT $EP"
-jq . <<<"$body"
+rsid=$(jq -r '.result.id // empty' "$before")
+if [ -z "$rsid" ]; then
+  calls=$(jq -c --arg url "$EP" '{method: "PUT", url: $url, body: {rules: .}}' <<<"$rules")
+else
+  calls=$(jq -c --argjson cur "$existing" --arg base "$CF_API/zones/$ZONE/rulesets/$rsid/rules" 'reverse[] as $r
+    | ([$cur[] | select(.ref == $r.ref) | .id] | first) as $id
+    | {method: (if $id then "PATCH" else "POST" end), url: (if $id then "\($base)/\($id)" else $base end), body: ($r + {position: {before: ""}})}' <<<"$rules")
+fi
+jq -r '"\(.method) \(.url) \(.body | tojson)"' <<<"$calls"
 
 recs=""
 for r in $REDIRECTS; do
@@ -95,8 +96,11 @@ if [ "$APPLY" = 1 ]; then
   saved=$(mktemp --suffix=.json "$EVIDENCE_DIR/tbpro-p2-records-before-$TS-XXXX")
   jq -s '.' <<<"$recs" > "$saved"
   echo "saved $saved"
-  r=$(write -X PUT "$EP" --data "$body")
-  ok "$r" || { echo "PUT failed: $(errs "$r")"; fail=$((fail + 1)); }
+  while IFS= read -r c; do
+    [ -n "$c" ] && [ "$fail" = 0 ] || continue
+    r=$(write -X "$(jq -r .method <<<"$c")" "$(jq -r .url <<<"$c")" --data "$(jq -c .body <<<"$c")")
+    ok "$r" || { echo "$(jq -r .method <<<"$c") $(jq -r '.body.ref // "entrypoint"' <<<"$c") failed: $(errs "$r")"; fail=$((fail + 1)); }
+  done <<<"$calls"
   if [ "$fail" = 0 ]; then
     while IFS= read -r rec; do
       [ -n "$rec" ] || continue
@@ -105,5 +109,5 @@ if [ "$APPLY" = 1 ]; then
     done <<<"$todo"
   fi
 fi
-printf 'mode=%s zone=%s rules_new=%s rules_kept=%s proxied_flips=%s failed=%s before=%s\n' "$(mode)" "$ZONE" "$new" "$kept" "$flips" "$fail" "$before"
+printf 'mode=%s zone=%s rule_calls=%s other_rules_untouched=%s proxied_flips=%s failed=%s before=%s\n' "$(mode)" "$ZONE" "$(lines "$calls")" "$(jq '[.[] | select((.ref // "") | startswith("p2_") | not)] | length' <<<"$existing")" "$flips" "$fail" "$before"
 [ "$fail" = 0 ]

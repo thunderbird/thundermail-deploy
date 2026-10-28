@@ -100,13 +100,23 @@ c_cf_agent() {
   local tok s; tok=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
   [ -n "$tok" ] || { echo "CF_API_TOKEN_AGENT empty"; return 1; }
   s=$(cf_status "$tok"); [ "$s" = active ] || { echo "token status $s"; return 1; }
-  local zones tbpro rc resp
+  local zones
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
-  [ "$zones" = "dev-thundermail.com,stage-thundermail.com,tb.pro" ] || { echo "zones visible: ${zones:-none}"; return 1; }
+  [ "$zones" = "dev-thundermail.com,stage-thundermail.com,tb.pro" ] && echo "active, three zones" || { echo "zones visible: ${zones:-none}"; return 1; }
+}
+c_cf_agent_p2() {
+  mode600 "$HOME/.cloudflare.env" || { echo "$HOME/.cloudflare.env missing or not mode 600"; return 1; }
+  local tok v zones tbpro rc resp; tok=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
+  [ -n "$tok" ] || { echo "CF_API_TOKEN_AGENT empty"; return 1; }
+  v=$(curl -s -m 20 -K <(bearer "$tok") "$CF/user/tokens/verify")
+  [ "$(jq -r '.result.status // "error"' <<<"$v")" = active ] || { echo "token status $(jq -r '.result.status // "error"' <<<"$v")"; return 1; }
+  [ -n "$(jq -r '.result.expires_on // empty' <<<"$v")" ] || { echo "P2 token has no expires_on"; return 1; }
+  zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
+  [ "$zones" = "tb.pro" ] || { echo "zones visible: ${zones:-none} (P2 token must see tb.pro only)"; return 1; }
   tbpro=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?name=tb.pro" | jq -r '.result[0].id // empty')
   resp=$(curl -s -m 20 -w '\n%{http_code}' -K <(bearer "$tok") "$CF/zones/$tbpro/rulesets/phases/http_request_dynamic_redirect/entrypoint")
   rc=$(tail -1 <<<"$resp")
-  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, three zones, tb.pro redirect entrypoint $rc"
+  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, expires, tb.pro only, redirect entrypoint $rc"
   else echo "tb.pro redirect entrypoint $rc"; return 1; fi
 }
 c_kc_admin_stage() { sm mzla-tb-stage mzla/tb-stage/keycloak-customer-admin-client | jq -Rs -e 'try (fromjson|has("client-secret")) catch false' >/dev/null 2>&1 && echo "SM client-secret key present; token endpoint not probed (needs a port-forward)" || { echo "SM mzla/tb-stage/keycloak-customer-admin-client has no client-secret key"; return 1; }; }
@@ -198,7 +208,8 @@ row "T2 T6 T10 T11 W1 W5 W7 W8 V1" kube-hub c_kube_hub
 row "T1 T3 T5 T6 T10 W1 W5 W7 W8" kube-tb-dev c_kube_dev
 row "T7 T8 T10 T11 T13 W4" neon-api-key+neonctl c_neon
 row "T5 T9 T10 T13 W7" cf-token-shared-external-dns c_cf_shared
-row "T9 T10 T13 W7 P2" cf-token-agent c_cf_agent
+row "T9 T10 T13 W7" cf-token-agent c_cf_agent
+row "P2" cf-token-agent-p2 c_cf_agent_p2
 row "T7 P3" keycloak-admin-tb-stage c_kc_admin_stage
 row "T13" keycloak-admin-legacy c_kc_admin_legacy
 row "T10 T11 W2 W4" stalwart-admin-legacy c_stalwart_legacy
