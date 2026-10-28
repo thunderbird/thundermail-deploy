@@ -24,3 +24,8 @@ convert.stderr
 verify-*/
 /config.json
 /util/migration/config.json
+app-password-users.csv
+totp-users.csv
+contacts.csv
+/util/migration/verify/out/
+__pycache__/
