@@ -6,14 +6,14 @@ mkdir -p "$SECRET_DIR"
 LEG=leg:$LEGACY_BLOB_BUCKET
 TGT=tgt:$TARGET_BLOB_BUCKET
 TARGET_BEFORE=$EVIDENCE_DIR/blobs-target-before-$TS.txt
-TARGET_KEYS=$EVIDENCE_DIR/blobs-target-before-keys-$TS.txt
+TARGET_KEYS=$EVIDENCE_DIR/blobs-target-before-keys-$TS-$$.txt
 BASELINE=0
 BASELINE_BYTES=0
 LEGACY_SIZE=$EVIDENCE_DIR/blobs-legacy-$TS.txt
 COPY_LOG=$SECRET_DIR/rclone-copy-$(mode)-$TS.log
 COPY=(rclone copy "$LEG" "$TGT" --transfers 64 --checkers 64 --s3-no-check-bucket --fast-list --retries 5 --low-level-retries 20 --stats 60s --stats-one-line --stats-log-level NOTICE --log-level NOTICE --log-file "$COPY_LOG")
 
-first_zero() { awk -F'\t' '$1 == "cut-ecs" {z = 0} $1 == "snap-blobs" && $4 == "objects" && $5 == "0" {z = 1} END {exit !z}' "$TIMING_TSV" 2>/dev/null; }
+first_seen() { awk -F'\t' -v n="$1" '$1 == "cut-ecs" {z = 0} $1 == "snap-blobs" && $4 == "objects" && $5 == n {z = 1} END {exit !z}' "$TIMING_TSV" 2>/dev/null; }
 listed() { rclone lsd "$1:" | awk -v b="$2" '$NF == b {f = 1} END {exit !f}'; }
 
 snap_blobs() {
@@ -45,8 +45,8 @@ snap_blobs() {
     mark_restore
   fi
   if [ "$APPLY" = 0 ] || [ "$VALUE" = 0 ]; then return 0; fi
-  first_zero || { echo "target bucket is not empty and no snap-blobs row for this cut saw it empty"; return 1; }
-  echo "resuming: an earlier snap-blobs row for this cut saw 0 objects"
+  first_seen "$BASELINE" || { echo "target bucket is not empty and no snap-blobs row for this cut saw only the $BASELINE baseline object(s)"; return 1; }
+  echo "resuming: an earlier snap-blobs row for this cut saw only the $BASELINE baseline object(s)"
 }
 
 legacy_size() {

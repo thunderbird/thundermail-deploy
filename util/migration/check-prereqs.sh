@@ -212,9 +212,10 @@ c_pr_pair() {
   [ -n "$head" ] && [ "$base" = "$head" ] && echo "$2=#$pr open, $3=#$rev open on its head" || { echo "$2=#$pr head=${head:-not open}, $3=#$rev base=${base:-not open}"; return 1; }
 }
 c_env_pr() {
-  local n; n=$(ev "$2")
+  local n st; n=$(ev "$2")
   [ -n "$n" ] || { echo "$2 not in $ENV_FILE"; return 1; }
-  [ "$(gh pr view "$n" -R "thunderbird/$1" --json state -q .state 2>/dev/null)" = OPEN ] && echo "$2=#$n open in $1" || { echo "$2=#$n is not an open $1 PR"; return 1; }
+  st=$(gh pr view "$n" -R "thunderbird/$1" --json state -q .state 2>/dev/null)
+  case "$st" in OPEN|MERGED) echo "$2=#$n $st in $1" ;; *) echo "$2=#$n is ${st:-unknown} in $1, not open or merged"; return 1 ;; esac
 }
 c_recipients() {
   local dir; dir=$(ev SECRET_DIR)
