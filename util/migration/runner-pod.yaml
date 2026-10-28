@@ -8,6 +8,15 @@ metadata:
 spec:
   restartPolicy: Always
   terminationGracePeriodSeconds: 5
+  nodeSelector:
+    role: mail
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: postgres
       image: postgres:18-alpine
@@ -18,21 +27,24 @@ spec:
           esc() { sed 's/[\\:]/\\&/g' "$1" | tr -d '\n'; }
           pooler=$(sed -n 's/.*"host": *"\([^"]*\)".*/\1/p' /etc/stalwart-config/config.json | head -1)
           direct=$(printf '%s' "$pooler" | sed 's/-pooler//')
+          for k in stalwart keycloak accounts stalwart-host keycloak-host accounts-host; do [ -s "/etc/pg/legacy/$k" ] || { echo "rehearsal-legacy-pg has no $k key" >&2; exit 1; }; done
+          [ -s "$PGSSLROOTCERT" ] || { echo "no CA bundle at $PGSSLROOTCERT" >&2; exit 1; }
+          [ "$(for k in stalwart keycloak accounts; do cat "/etc/pg/legacy/$k-host"; echo; done | sort -u | grep -c .)" = 3 ] || { echo "rehearsal-legacy-pg hosts are not three distinct hosts" >&2; exit 1; }
           umask 077
           {
             printf '%s:5432:*:*:%s\n' "$direct" "$(esc /etc/pg/target/STALWART_POSTGRESQL_ADMIN_PASSWORD)"
             printf '%s:5432:*:*:%s\n' "$pooler" "$(esc /etc/pg/target/STALWART_POSTGRESQL_ADMIN_PASSWORD)"
-            printf '*:5432:keycloak:*:%s\n' "$(esc /etc/pg/legacy/keycloak)"
-            printf '*:5432:neondb:neondb_owner:%s\n' "$(esc /etc/pg/legacy/accounts)"
-            printf '*:5432:*:*:%s\n' "$(esc /etc/pg/legacy/stalwart)"
-          } > /work/.pgpass
-          chmod 600 /work/.pgpass
+            for k in stalwart keycloak accounts; do printf '%s:5432:*:*:%s\n' "$(esc "/etc/pg/legacy/$k-host")" "$(esc "/etc/pg/legacy/$k")"; done
+          } > /secrets/.pgpass
+          chmod 600 /secrets/.pgpass
           exec sleep infinity
       env:
         - name: PGPASSFILE
-          value: /work/.pgpass
+          value: /secrets/.pgpass
         - name: PGSSLMODE
-          value: require
+          value: verify-full
+        - name: PGSSLROOTCERT
+          value: /etc/ssl/certs/ca-certificates.crt
         - name: PGCONNECT_TIMEOUT
           value: "15"
       resources:
@@ -41,9 +53,15 @@ spec:
           memory: 256Mi
         limits:
           memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
       volumeMounts:
         - name: work
           mountPath: /work
+        - name: secrets
+          mountPath: /secrets
         - name: target-pg
           mountPath: /etc/pg/target
           readOnly: true
@@ -59,8 +77,22 @@ spec:
         - /bin/sh
         - -ec
         - |
-          pip install --quiet --no-cache-dir requests urllib3
+          cat > /tmp/requirements.txt <<'REQ'
+          requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+          urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+          idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+          certifi==2026.10.23 --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+          charset-normalizer==3.5.2 --hash=sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685
+          REQ
+          pip install --quiet --no-cache-dir --user --only-binary :all: --require-hashes -r /tmp/requirements.txt
           exec sleep infinity
+      env:
+        - name: HOME
+          value: /tmp
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
       resources:
         requests:
           cpu: 50m
@@ -68,12 +100,19 @@ spec:
         limits:
           memory: 512Mi
       volumeMounts:
-        - name: work
-          mountPath: /work
+        - name: tmp
+          mountPath: /tmp
   volumes:
     - name: work
       emptyDir:
         sizeLimit: 20Gi
+    - name: secrets
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Mi
+    - name: tmp
+      emptyDir:
+        sizeLimit: 1Gi
     - name: target-pg
       secret:
         secretName: stalwart-postgresql-admin-password

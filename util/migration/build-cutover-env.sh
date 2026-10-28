@@ -9,10 +9,13 @@ for a in "$@"; do
   esac
 done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
+ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-stage.env}
+OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
+load_operator_env "$OPERATOR_ENV"
 VALUES=$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID"
+OPERATOR_VARS="FREEZE_PR T6_PR FLIP_PR APPOINTMENT_PR SPF_APEX_TXT SPF_MAIL_TXT SPF_FINAL_TXT TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER SUPPORT_CHANNEL"
 SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD"
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -26,11 +29,14 @@ k8s_secret() { kstage -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 
 direct() { sed 's/-pooler//'; }
 cf_zone() { [ -n "${CF_TOKEN:-}" ] || return 0; curl -sS -m 30 -K <(bearer "$CF_TOKEN") "$CF_API/zones?name=$1" | jq -r '.result[0].id // empty'; }
 pr_by_head() { gh pr list -R "thunderbird/$1" --state open --json number,headRefName --jq "[.[] | select(.headRefName | test(\"(^|/)$2\$\"))] | if length == 1 then .[0].number else empty end"; }
-neon_get() { curl -sS -m 60 -K <(bearer "$NEON_KEY") "$NEON_API/$1"; }
+neon_get() { curl -sS -m 60 -K <(bearer "${KEY:-$NEON_KEY}") "$NEON_API/$1"; }
 neon_lookup() {
-  local ep=${1%%.*} pid bid
-  [ -n "${NEON_KEY:-}" ] || return 0
-  for pid in $NEON_PROJECTS; do
+  local ep=${2%%.*} pid bid KEY pids
+  KEY=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$1")
+  KEY=${KEY:-${NEON_KEY:-}}
+  [ -n "$KEY" ] || return 0
+  pids=$(op "NEON_PROJECT_$1")
+  for pid in ${pids:-$NEON_PROJECTS}; do
     [ -n "${NEON_EP_CACHE[$pid]:-}" ] || NEON_EP_CACHE[$pid]=$(try neon_get "projects/$pid/endpoints" | jq -c '[.endpoints[]? | {id, branch_id}]')
     bid=$(jq -r --arg ep "$ep" '.[] | select(.id == $ep) | .branch_id' <<<"${NEON_EP_CACHE[$pid]:-[]}")
     if [ -n "$bid" ]; then
@@ -41,10 +47,11 @@ neon_lookup() {
 }
 
 build() {
-  KUBECONFIG_STAGE=$(realpath -m "${KUBECONFIG_STAGE:-$REPO_DIR/.work/kc-stage}")
-  KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$REPO_DIR/.work/kc-hub}")
-  KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$REPO_DIR/.work/kc-dev}")
+  KUBECONFIG_STAGE=$(realpath -m "${KUBECONFIG_STAGE:-$HOME/.local/state/talos/kc-stage}")
+  KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
+  KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
   mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
+  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   local count=0 missing=0
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-tb-stage.XXXXXX")
   trap 'rm -f "$tmp"' EXIT
@@ -92,13 +99,13 @@ build() {
   declare -A NEON_EP_CACHE=()
   [ -n "$NEON_KEY" ] && NEON_PROJECTS=$(try neon_get "projects?limit=400${org:+&org_id=$org}" | jq -r '.projects[]?.id' | tr '\n' ' ')
   local r
-  r=$(neon_lookup "$(jq -r '.host // empty' <<<"${lpg:-{\}}" | direct)")
-  put NEON_PROJECT_STALWART_LEGACY "$(cut -f1 <<<"$r")" "Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
+  r=$(neon_lookup STALWART_LEGACY "$(jq -r '.host // empty' <<<"${lpg:-{\}}" | direct)")
+  put NEON_PROJECT_STALWART_LEGACY "$(op NEON_PROJECT_STALWART_LEGACY)$([ -n "$(op NEON_PROJECT_STALWART_LEGACY)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_LEGACY in the environment, else Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
   put NEON_LEGACY_STALWART_BRANCH "$(cut -f2 <<<"$r")" "Neon API: branch of that endpoint"
-  r=$(neon_lookup "$(try sm_legacy accounts/stage/keycloak-database-host | direct)")
-  put NEON_PROJECT_KC "$(cut -f1 <<<"$r")" "Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
-  r=$(neon_lookup "$(try sm_legacy accounts/stage/database-host | direct)")
-  put NEON_PROJECT_ACCOUNTS "$(cut -f1 <<<"$r")" "Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
+  r=$(neon_lookup KC "$(try sm_legacy accounts/stage/keycloak-database-host | direct)")
+  put NEON_PROJECT_KC "$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
+  r=$(neon_lookup ACCOUNTS "$(try sm_legacy accounts/stage/database-host | direct)")
+  put NEON_PROJECT_ACCOUNTS "$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
 
   put LEGACY_BLOB_BUCKET "$(try aws_legacy s3api list-buckets --query "Buckets[?contains(Name,'stage') && ends_with(Name,'-stalwart-s3-store')].Name | [0]" --output text | grep -v '^None$' || true)" "aws s3api list-buckets --profile mzla-legacy (name *stage*-stalwart-s3-store)"
   put TARGET_BLOB_BUCKET "$(yq -r '.blobStoreBucket // ""' "$VALUES")" "overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml blobStoreBucket"
@@ -136,23 +143,25 @@ build() {
   done
   put FLIP_PR "$(op FLIP_PR)" "operator: TMD dnsManagement Automatic PR number (FLIP_PR in the environment)"
   put APPOINTMENT_PR "$(op APPOINTMENT_PR)" "operator: appointment stage PR number (APPOINTMENT_PR in the environment)"
-  for d in PI_DIR:platform-infrastructure KCD_DIR:keycloak-customer-deploy ACD_DIR:accounts-deploy APPOINTMENT_DIR:appointment; do
+  for d in PI_DIR:platform-infrastructure KCD_DIR:keycloak-customer-deploy ACD_DIR:accounts-deploy APPOINTMENT_DIR:appointment TMD_DIR:thundermail-deploy; do
     local v=${d%%:*} repo=${d##*:} path
     path=${!v:-$HOME/src/tb/$repo}
     [ -d "$path/.git" ] || path=""
     put "$v" "$path" "local checkout of thunderbird/$repo ($v in the environment, default \$HOME/src/tb/$repo)"
   done
-  put TMD_DIR "$REPO_DIR" "this checkout"
 
   put AWS_REGION "$AWS_REGION" "eu-central-1"
   CF_TOKEN=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
   put CF_API_TOKEN_AGENT "$CF_TOKEN" "\$HOME/.cloudflare.env CF_API_TOKEN_AGENT"
-  put CF_ZONE_ID "$(try cf_zone stage-thundermail.com)" "GET /zones?name=stage-thundermail.com"
+  local zid; zid=$(try cf_zone stage-thundermail.com)
+  [ -n "$zid" ] || zid=$(try shared_zone_id stage-thundermail.com)
+  put CF_ZONE_ID "$zid" "GET /zones?name=stage-thundermail.com with CF_API_TOKEN_AGENT, else with the shared external-dns token (read-only)"
   put CF_ZONE_ID_TBPRO "$(try cf_zone tb.pro)" "GET /zones?name=tb.pro"
-  put CF_ZONE_ID_DEVTM "$(try cf_zone dev-thundermail.com)" "GET /zones?name=dev-thundermail.com"
   put PADDLE_API_KEY "$(from_file "$HOME/.paddle.env" PADDLE_API_KEY)" "\$HOME/.paddle.env PADDLE_API_KEY"
   put ACCOUNTS_WEBHOOK_URL https://accounts.stage-thundermail.com/api/v1/telemetry/stalwart/webhook/ "tb-stage Accounts telemetry webhook"
-  put TARGET_NLB_DNS "$(try aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)" "aws elbv2 describe-load-balancers --profile mzla-tb-stage --names stalwart-nginx-thundermail"
+  local nlb; nlb=$(try kstage -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+  [ -n "$nlb" ] || nlb=$(try aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)
+  put TARGET_NLB_DNS "$nlb" "kubectl -n thundermail get svc nginx .status.loadBalancer.ingress[0].hostname, resolved live on every build (else aws elbv2 --names stalwart-nginx-thundermail)"
   put TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox; must be TEST_USER's Keycloak email (the backup address)"
   put TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
   put TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
@@ -187,10 +196,13 @@ build() {
   chmod 600 "$tmp"
   mv "$tmp" "$ENV_FILE"
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
+  old=$HOME/.local/state/talos/cutover-tb-stage.env
+  [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
   [ "$missing" = 0 ]
 }
 
 check() {
+  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   [ -f "$ENV_FILE" ] || die "$ENV_FILE missing: run build-cutover-env.sh first"
   set -a; . "$ENV_FILE"; set +a
   . "$MIG_DIR/timing.sh"
@@ -201,6 +213,7 @@ check() {
     if out=$("$@" 2>&1); then printf 'PASS  %-32s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-110)"
     else fails=$((fails + 1)); printf 'FAIL  %-32s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-110)"; fi
   }
+  operator_values() { local v bad=""; for v in $OPERATOR_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all operator values set" || { echo "empty:$bad"; return 1; }; }
   nonempty() { local v bad=""; for v in $SECRET_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all set" || { echo "empty:$bad"; return 1; }; }
   dirs() {
     local bad="" d
@@ -217,7 +230,7 @@ check() {
     z=$(curl -s -m 20 -K <(bearer "$tok") "$CF_API/zones?name=stage-thundermail.com" | jq -r '.result[0].id // empty')
     [ "$s" = active ] && [ -n "$z" ] && { [ -z "$CF_ZONE_ID" ] || [ "$z" = "$CF_ZONE_ID" ]; } && echo "active, zone visible${CF_ZONE_ID:+ and equal to CF_ZONE_ID}" || { echo "status=$s zone_visible=$([ -n "$z" ] && echo yes || echo no)"; return 1; }
   }
-  agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && [ -n "$CF_ZONE_ID_DEVTM" ] && echo "active, three zone ids set" || { echo "status=$s"; return 1; }; }
+  agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && echo "active, stage and tb.pro zone ids set" || { echo "status=$s"; return 1; }; }
   spf_final() { case "$SPF_FINAL_TXT" in "v=spf1 "*) echo "v=spf1 record, len=${#SPF_FINAL_TXT}" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 (len=${#SPF_FINAL_TXT})"; return 1 ;; esac; }
   pr_pair() {
     local repo=thunderbird/$1 pr=$2 rev=$3 head base
@@ -225,6 +238,12 @@ check() {
     head=$(gh pr view "$pr" -R "$repo" --json state,headRefName -q 'select(.state == "OPEN") | .headRefName')
     base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName')
     [ -n "$head" ] && [ "$base" = "$head" ] && echo "#$pr open, revert #$rev open on its head" || { echo "#$pr head=${head:-not open}, revert #$rev base=${base:-not open}"; return 1; }
+  }
+  nlb_live() {
+    local h st
+    h=$(kstage -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+    st=$([ -n "$h" ] && aws_stage elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$h'].State.Code | [0]" --output text 2>/dev/null)
+    [ -n "$h" ] && [ "$h" = "${TARGET_NLB_DNS:-}" ] && [ "$st" = active ] && echo "TARGET_NLB_DNS matches the live nginx Service, NLB active" || { echo "env=${TARGET_NLB_DNS:-empty} live=${h:-none} state=${st:-none}: rebuild the env file"; return 1; }
   }
   count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
@@ -240,6 +259,7 @@ check() {
   }
 
   chk secrets-non-empty nonempty
+  chk operator-values operator_values
   chk dirs-and-kubeconfigs dirs
   chk runner-pod runner
   for h in STALWART_LEGACY_PG_HOST:STALWART_LEGACY_PG_USER:STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST:STALWART_TARGET_PG_USER:STALWART_TARGET_PG_DB KC_LEGACY_PG_HOST:KC_LEGACY_PG_USER:KC_LEGACY_PG_DB ACCOUNTS_LEGACY_PG_HOST:ACCOUNTS_LEGACY_PG_USER:ACCOUNTS_LEGACY_PG_NAME; do
@@ -258,7 +278,7 @@ check() {
   chk legacy-asg-targets count_eq "$(aws_legacy application-autoscaling describe-scalable-targets --service-namespace ecs --resource-ids $LEGACY_ASG_RESOURCE_IDS --query 'length(ScalableTargets)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_ASG_RESOURCE_IDS")" scalable_targets
   chk legacy-mgmt-instance count_eq "$(aws_legacy ec2 describe-instances --instance-ids "$LEGACY_MGMT_INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)" running state
   chk legacy-pub-lb count_eq "$(aws_legacy elbv2 describe-load-balancers --load-balancer-arns "$LEGACY_PUB_LB_ARN" --query 'length(LoadBalancers)' 2>/dev/null)" 1 load_balancers
-  chk target-nlb count_eq "$(aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null)" "$TARGET_NLB_DNS" dns
+  chk target-nlb nlb_live
   chk argo-apps count_eq "$(khub -n argocd get application $ARGO_APPS -o name 2>/dev/null | grep -c .)" "$(wc -w <<<"$ARGO_APPS")" applications
   chk kargo-stage-accounts khub -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o name
   chk kargo-stage-configs khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
@@ -270,10 +290,10 @@ check() {
   chk t8-prs pr_pair accounts-deploy "${T8_PR:-}" "${T8_REVERT_PR:-}"
   chk restore-legacy-sg-dry-run pair legacy-sg legacy-sg
   chk restore-ecs-dry-run pair ecs ecs
-  chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
+  chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-2*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
   chk restore-zone-dry-run pair zone zone "$CF_ZONE_ID"
   chk restore-realm-dry-run pair realm realm "$KC_LEGACY_URL" "$KC_LEGACY_URL"
-  chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/snapshot-secret-versions.sh $1 >/dev/null && read -r id v < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && "$0"/restore-secret-version.sh "$id" "$v" --dry-run | tail -1' "$MIG_DIR" "$secret_ids"
+  chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/restore-secret-version.sh --check $1 >/dev/null && "$0"/snapshot-secret-versions.sh $1 >/dev/null && n=0 && while read -r id v; do "$0"/restore-secret-version.sh "$id" "$v" --dry-run >/dev/null && n=$((n + 1)) || exit 1; done < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && echo "secrets=$n checked, list and dry-run ok"' "$MIG_DIR" "$secret_ids"
   chk restore-target-db-dry-run target_db
   local end; end=$(date -u +%FT%TZ)
   printf 'env-check\t%s\t%s\tfailures\t%s\n' "$start" "$end" "$fails" >> "$TIMING_TSV"

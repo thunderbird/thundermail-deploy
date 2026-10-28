@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+[ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
 need TARGET_NLB_DNS CF_ZONE_ID
 pending SPF_APEX_TXT SPF_FINAL_TXT TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
 Z=stage-thundermail.com

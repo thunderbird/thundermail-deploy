@@ -16,9 +16,9 @@ suite() {
   out=$(VERIFY_OUT=$VERIFY_OUT bash -c 'set -a; . "$1"; set +a; mkdir -p "$VERIFY_OUT"; bash "$2" > "$VERIFY_OUT/run_all.txt" 2>&1; echo "exit=$? out=$VERIFY_OUT"' _ "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/run_all.sh") || return 1
   VERIFY_OUT=${out##* out=}
   f=$VERIFY_OUT/run_all.txt
-  VALUE=$(grep -c '^  FAIL  ' "$f" || true)
+  VALUE=$(( $(grep -c '^  FAIL  ' "$f" || true) + $(grep -c '^Traceback ' "$f" || true) ))
   UNEXPECTED_WARN=$(grep '^  WARN  ' "$f" | grep -vcFf <(grep -v '^[[:space:]]*$' "$EXPECTED_WARN") || true)
-  printf 'run_all %s PASS=%s WARN=%s (not in expected-warn.txt: %s) FAIL=%s (%s)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$f" || true)" "$(grep -c '^  WARN  ' "$f" || true)" "$UNEXPECTED_WARN" "$VALUE" "$f"
+  printf 'run_all %s PASS=%s WARN=%s (not in expected-warn.txt: %s) FAIL=%s (FAIL lines plus %s crashed checks) (%s)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$f" || true)" "$(grep -c '^  WARN  ' "$f" || true)" "$UNEXPECTED_WARN" "$VALUE" "$(grep -c '^Traceback ' "$f" || true)" "$f"
   echo "counts:"
   grep -E '^  (PASS|WARN)  .*[0-9]' "$f" | sed -E "s/'[^']*'/<x>/g; s/\"[^\"]*\"/<x>/g; s/[^ ]+@[^ ]+/<addr>/g" || true
   [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ] && [ "$UNEXPECTED_WARN" = 0 ]; }

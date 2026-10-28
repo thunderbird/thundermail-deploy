@@ -7,17 +7,18 @@ usage() {
 usage: check-prereqs.sh [--for KEY]
 
 Prints HAVE or NEED for every tool and credential the tb-stage cutover uses.
-KEY limits the rows to one task (T1 T2 T3 T5..T11 T10m T10a T13 T14 W1..W8 P1..P3 V1).
+KEY limits the rows to one task (T1 T2 T3 T5..T11 T10m T10a T13 T14 W1..W8 P1..P3 V1); T0 prints every row.
 Values are never printed; exit status is the number of NEED rows, or 64 for a usage error.
 USAGE
 }
 
-KEYS="T1 T2 T3 T5 T6 T7 T8 T9 T10 T10m T10a T11 T13 T14 W1 W2 W3 W4 W5 W6 W7 W8 P1 P2 P3 V1"
+KEYS="T0 T1 T2 T3 T5 T6 T7 T8 T9 T10 T10m T10a T11 T13 T14 W1 W2 W3 W4 W5 W6 W7 W8 P1 P2 P3 V1"
 FOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --for)
       [ $# -ge 2 ] || { echo "--for needs a task key" >&2; usage >&2; exit 64; }
+      [ "$2" != T0 ] || { FOR=""; shift 2; continue; }
       case " $KEYS " in *" $2 "*) FOR=$2 ;; *) echo "unknown task key: $2 (one of $KEYS)" >&2; exit 64 ;; esac
       shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -25,9 +26,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-WORK_DIR=${WORK_DIR:-$REPO_DIR/.work}
-ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
+WORK_DIR=${WORK_DIR:-$HOME/.local/state/talos}
+ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-stage.env}
+OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
 KC_STAGE=${KUBECONFIG_STAGE:-$WORK_DIR/kc-stage}
 KC_HUB=${KUBECONFIG_HUB:-$WORK_DIR/kc-hub}
 KC_DEV=${KUBECONFIG_DEV:-$WORK_DIR/kc-dev}
@@ -42,7 +43,18 @@ sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
 from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//; s/'\\\\''/'/g"; }
-envfile_has() { [ -f "$ENV_FILE" ] && [ -n "$(from_file "$ENV_FILE" "$1")" ]; }
+ev() { printf '%s' "${!1:-$(from_file "$ENV_FILE" "$1")}"; }
+envfile_has() { [ -n "$(ev "$1")" ]; }
+load_operator_env() {
+  local f=$1 name val
+  [ -e "$f" ] || return 0
+  [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  while IFS= read -r name; do
+    [ -z "${!name:-}" ] || continue
+    val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")
+    [ -z "$val" ] || export "$name=$val"
+  done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$f")
+}
 cq() { case $1 in *[$'\n\r']*) return 1 ;; esac; local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
 bearer() { local v; v=$(cq "$1") || return 1; printf 'header = "Authorization: Bearer %s"\n' "$v"; }
 cf_status() { curl -s -m 20 -K <(bearer "$1") "$CF/user/tokens/verify" | jq -r '.result.status // "error"'; }
@@ -64,6 +76,8 @@ legacy_api() {
   curl -sk -m 10 -o /dev/null -w '%{http_code}' -K <(printf 'user = "admin:%s"\n' "$(cq "$pw")") "https://127.0.0.1:18080$1" || true
 }
 
+load_operator_env "$OPERATOR_ENV"
+c_operator_env() { mode600 "$OPERATOR_ENV" && echo "$OPERATOR_ENV mode 600, $(grep -cE '^(export )?[A-Za-z_][A-Za-z0-9_]*=' "$OPERATOR_ENV") name(s), $(n=0; while IFS= read -r v; do [ -z "${!v:-}" ] || n=$((n + 1)); done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$OPERATOR_ENV"); echo "$n") set" || { echo "$OPERATOR_ENV missing or not mode 600"; return 1; }; }
 c_sso() { aws sts get-caller-identity --profile "$1" --query Arn --output text 2>/dev/null | grep -q AWSReservedSSO_AdministratorAccess && echo "AdministratorAccess via $1" || { echo "no session for $1 (aws sso login --sso-session mzla)"; return 1; }; }
 c_kube_stage() {
   can_all "$KC_STAGE" 'patch deployments thundermail' 'patch deployments thundermail scale' 'create pods thundermail' 'delete pods thundermail' \
@@ -84,8 +98,20 @@ c_kube_dev() { can_all "$KC_DEV" 'create pods thundermail' 'patch deployments th
 c_neon() {
   command -v neonctl >/dev/null || { echo "neonctl missing"; return 1; }
   mode600 "$HOME/.neon-api.env" || { echo "$HOME/.neon-api.env missing or not mode 600"; return 1; }
-  local n; n=$(set -a; . "$HOME/.neon-api.env"; set +a; CI=true neonctl projects list --output json 2>/dev/null | jq '[(if type=="object" then (.projects + (.shared_with_you // [])) else . end)[]] | length' 2>/dev/null)
-  [ "${n:-0}" -ge 3 ] && echo "$n project(s) visible" || { echo "neonctl sees ${n:-0} project(s), want the three stage projects"; return 1; }
+  local p id key ok=0 bad="" n
+  for p in STALWART_LEGACY KC ACCOUNTS; do
+    id=$(ev "NEON_PROJECT_$p")
+    [ -n "$id" ] || continue
+    key=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$p")
+    key=${key:-$(from_file "$HOME/.neon-api.env" NEON_API_KEY)}
+    if NEON_API_KEY=$key CI=true neonctl projects get "$id" --output json >/dev/null 2>&1; then ok=$((ok + 1)); else bad="$bad $p"; fi
+  done
+  if [ $((ok)) -gt 0 ] || [ -n "$bad" ]; then
+    [ -z "$bad" ] && [ "$ok" = 3 ] && echo "three NEON_PROJECT_* readable with their keys" || { echo "NEON_PROJECT_* readable: $ok of 3${bad:+, failed:$bad}"; return 1; }
+    return 0
+  fi
+  n=$(set -a; . "$HOME/.neon-api.env"; set +a; CI=true neonctl projects list --output json 2>/dev/null | jq '[(if type=="object" then (.projects + (.shared_with_you // [])) else . end)[]] | length' 2>/dev/null)
+  [ "${n:-0}" -ge 3 ] && echo "$n project(s) visible (NEON_PROJECT_* not in the env file yet)" || { echo "neonctl sees ${n:-0} project(s), want the three stage projects"; return 1; }
 }
 c_cf_shared() {
   local tok s z
@@ -102,7 +128,9 @@ c_cf_agent() {
   s=$(cf_status "$tok"); [ "$s" = active ] || { echo "token status $s"; return 1; }
   local zones
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
-  [ "$zones" = "dev-thundermail.com,stage-thundermail.com,tb.pro" ] && echo "active, three zones" || { echo "zones visible: ${zones:-none}"; return 1; }
+  case ",$zones," in *,stage-thundermail.com,*) ;; *) echo "zones visible: ${zones:-none} (needs stage-thundermail.com and tb.pro)"; return 1 ;; esac
+  case ",$zones," in *,tb.pro,*) ;; *) echo "zones visible: ${zones:-none} (needs stage-thundermail.com and tb.pro)"; return 1 ;; esac
+  echo "active, stage-thundermail.com and tb.pro visible"
 }
 c_cf_agent_p2() {
   mode600 "$HOME/.cloudflare.env" || { echo "$HOME/.cloudflare.env missing or not mode 600"; return 1; }
@@ -112,11 +140,11 @@ c_cf_agent_p2() {
   [ "$(jq -r '.result.status // "error"' <<<"$v")" = active ] || { echo "token status $(jq -r '.result.status // "error"' <<<"$v")"; return 1; }
   [ -n "$(jq -r '.result.expires_on // empty' <<<"$v")" ] || { echo "P2 token has no expires_on"; return 1; }
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
-  [ "$zones" = "tb.pro" ] || { echo "zones visible: ${zones:-none} (P2 token must see tb.pro only)"; return 1; }
+  case ",$zones," in *,tb.pro,*) ;; *) echo "zones visible: ${zones:-none} (P2 needs tb.pro)"; return 1 ;; esac
   tbpro=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?name=tb.pro" | jq -r '.result[0].id // empty')
   resp=$(curl -s -m 20 -w '\n%{http_code}' -K <(bearer "$tok") "$CF/zones/$tbpro/rulesets/phases/http_request_dynamic_redirect/entrypoint")
   rc=$(tail -1 <<<"$resp")
-  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, expires, tb.pro only, redirect entrypoint $rc"
+  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, expires, tb.pro visible, redirect entrypoint $rc"
   else echo "tb.pro redirect entrypoint $rc"; return 1; fi
 }
 c_kc_admin_stage() { sm mzla-tb-stage mzla/tb-stage/keycloak-customer-admin-client | jq -Rs -e 'try (fromjson|has("client-secret")) catch false' >/dev/null 2>&1 && echo "SM client-secret key present; token endpoint not probed (needs a port-forward)" || { echo "SM mzla/tb-stage/keycloak-customer-admin-client has no client-secret key"; return 1; }; }
@@ -149,13 +177,13 @@ c_paddle() {
 }
 c_test_mailbox() {
   envfile_has TEST_MAILBOX && envfile_has TEST_MAILBOX_IMAP_HOST && envfile_has TEST_MAILBOX_IMAP_USER && envfile_has TEST_MAILBOX_IMAP_PASSWORD || { echo "TEST_MAILBOX* not in $ENV_FILE"; return 1; }
-  local h n; h=$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_HOST)
-  n=$(printf 'a LOGIN "%s" "%s"\r\nb LOGOUT\r\n' "$(cq "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_USER)")" "$(cq "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_PASSWORD)")" | timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$h" -servername "$h" -connect "$h:993" 2>/dev/null | grep -c '^a OK')
+  local h n; h=$(ev TEST_MAILBOX_IMAP_HOST)
+  n=$(printf 'a LOGIN "%s" "%s"\r\nb LOGOUT\r\n' "$(cq "$(ev TEST_MAILBOX_IMAP_USER)")" "$(cq "$(ev TEST_MAILBOX_IMAP_PASSWORD)")" | timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$h" -servername "$h" -connect "$h:993" 2>/dev/null | grep -c '^a OK')
   [ "$n" = 1 ] && echo "IMAP LOGIN ok" || { echo "IMAP LOGIN failed"; return 1; }
 }
 c_test_user() {
   envfile_has TEST_USER || { echo "TEST_USER not in $ENV_FILE"; return 1; }
-  local code; code=$(legacy_api "/api/principal/$(from_file "$ENV_FILE" TEST_USER)") || { echo "$code"; return 1; }
+  local code; code=$(legacy_api "/api/principal/$(ev TEST_USER)") || { echo "$code"; return 1; }
   [ "$code" = 200 ] && echo "TEST_USER principal 200 on legacy" || { echo "TEST_USER principal $code on legacy"; return 1; }
 }
 c_github() {
@@ -179,13 +207,28 @@ c_atlantis_pg() {
 c_appt_workflow() { [ "$(gh api repos/thunderbird/appointment/actions/workflows/deploy-staging.yml --jq .state 2>/dev/null)" = active ] && echo "deploy-staging.yml active" || { echo "deploy-staging.yml not active"; return 1; }; }
 c_pr_pair() {
   local repo=thunderbird/$1 pr rev head base
-  pr=$(from_file "$ENV_FILE" "$2"); rev=$(from_file "$ENV_FILE" "$3")
+  pr=$(ev "$2"); rev=$(ev "$3")
   [ -n "$pr" ] && [ -n "$rev" ] || { echo "$2/$3 not in $ENV_FILE"; return 1; }
   head=$(gh pr view "$pr" -R "$repo" --json state,headRefName -q 'select(.state == "OPEN") | .headRefName' 2>/dev/null)
   base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName' 2>/dev/null)
   [ -n "$head" ] && [ "$base" = "$head" ] && echo "$2=#$pr open, $3=#$rev open on its head" || { echo "$2=#$pr head=${head:-not open}, $3=#$rev base=${base:-not open}"; return 1; }
 }
-c_spf_final() { case "$(from_file "$ENV_FILE" SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
+c_env_pr() {
+  local n st; n=$(ev "$2")
+  [ -n "$n" ] || { echo "$2 not in $ENV_FILE"; return 1; }
+  st=$(gh pr view "$n" -R "thunderbird/$1" --json state -q .state 2>/dev/null)
+  case "$st" in OPEN|MERGED) echo "$2=#$n $st in $1" ;; *) echo "$2=#$n is ${st:-unknown} in $1, not open or merged"; return 1 ;; esac
+}
+c_recipients() {
+  local dir; dir=$(ev SECRET_DIR)
+  [ -n "$dir" ] && [ "$(grep -c . "$dir/app-password-users.csv" 2>/dev/null || echo 0)" -gt 1 ] && echo "$(($(grep -c . "$dir/app-password-users.csv") - 1)) recipient row(s) in \$SECRET_DIR/app-password-users.csv" || { echo "no recipient rows in SECRET_DIR/app-password-users.csv (#1547 part 2)"; return 1; }
+}
+c_git_transport() {
+  local bad="" r
+  for r in "$@"; do git ls-remote --exit-code "https://github.com/thunderbird/$r.git" HEAD >/dev/null 2>&1 || bad="$bad $r"; done
+  [ -z "$bad" ] && echo "git ls-remote over https works for $*" || { echo "git ls-remote failed:$bad (run gh auth setup-git)"; return 1; }
+}
+c_spf_final() { case "$(ev SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
 c_venv() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import requests, urllib3' 2>/dev/null && echo "$VENV_PY imports ok" || { echo "venv missing: $VENV_PY"; return 1; }; }
@@ -222,8 +265,13 @@ row "P1 T10a" paddle-sandbox-key c_paddle
 row "T7" t7-pr-and-revert c_pr_pair keycloak-customer-deploy T7_PR T7_REVERT_PR
 row "T8" t8-pr-and-revert c_pr_pair accounts-deploy T8_PR T8_REVERT_PR
 row "W7" spf-final-txt c_spf_final
+row "T14 W1" freeze-pr c_env_pr platform-infrastructure FREEZE_PR
+row "T14 W7" flip-pr c_env_pr thundermail-deploy FLIP_PR
+row "T14" notice-recipients-csv c_recipients
+row "T7 T8 W1 W8" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
 row "W7 P3" test-mailbox-external c_test_mailbox
 row "W5 W6 W7 P3" test-user-stage c_test_user
+row "T0" operator-env-file c_operator_env
 row "ALL" github-gh c_github
 row "T10m" github-push-pi-pg c_push platform-infrastructure platform-grafana
 row "T10m" atlantis-platform-grafana c_atlantis_pg

@@ -23,7 +23,7 @@ printf '%s\n' \
 
 replicas() { "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}'; }
 runner_up() { [ "$("${KS[@]}" "${NS[@]}" get pod runner -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
-stalwart_up() { [ "$("${KS[@]}" "${NS[@]}" get pod -l app=stalwart -o jsonpath='{.items[0].status.phase}' 2>/dev/null)" = Running ]; }
+stalwart_up() { local p; p=$(stalwart_pods | head -1); [ -n "$p" ] && [ "$("${KS[@]}" "${NS[@]}" get "$p" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
 schema_ok() { [ "$(bash "$MIG_DIR/schema-version.sh" 2>/dev/null)" = 00000006 ]; }
 blob_ok() { awk -F'\t' '$1 == "cut-ecs" {c = NR} $1 == "snap-blobs" {s = NR; v = ""} $1 == "stop-W3" {v = ""} $1 == "blob-check" && $4 == "differences" {v = $5; b = NR} END {exit !(c > 0 && s > c && b > s && v == "0")}' "$TIMING_TSV"; }
 show_to() { local f=$1; shift; printf '  + %s >> %s\n' "$(shq "$@")" "$f"; }
@@ -36,8 +36,26 @@ retake() {
 
 preflight() {
   local r state
-  until_ok 60 runner_up || { echo "runner pod is not Running: re-apply util/migration/runner-pod.yaml"; return 1; }
-  echo "runner Running"
+  if [ "$APPLY" = 0 ] && ! runner_up; then
+    printf 'NEED  runner pod not Running: apply util/migration/runner-pod.yaml before W4 (dry run continues)\n'
+    NEEDS=$((NEEDS + 1))
+  else
+    until_ok 60 runner_up || { echo "runner pod is not Running: re-apply util/migration/runner-pod.yaml"; return 1; }
+    echo "runner Running"
+  fi
+  if runner_up; then
+    local who h u d err
+    for who in STALWART_LEGACY STALWART_TARGET; do
+      h=${who}_PG_HOST u=${who}_PG_USER d=${who}_PG_DB
+      if err=$("${POD[@]}" psql -h "${!h}" -U "${!u}" -d "${!d}" -Atc 'select 1' 2>&1 >/dev/null); then
+        echo "psql select 1 on $who (${!h}): ok"
+      else
+        echo "psql select 1 on $who (${!h}) failed: $(tail -1 <<<"$err")"
+        [ "$APPLY" = 0 ] || return 1
+        NEEDS=$((NEEDS + 1))
+      fi
+    done
+  fi
   r=$(replicas) || return 1
   echo "deploy/stalwart replicas=$r"
   if [ "$APPLY" = 0 ]; then
@@ -90,7 +108,7 @@ blob_recheck() {
   [ "$APPLY" = 1 ] || return 0
   until_ok 3600 blob_ok || { echo "no blob-check differences=0 row for the current cut after 3600s; stay in recovery mode"; return 1; }
   rclone copy "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" --transfers 64 --checkers 64 --s3-no-check-bucket --fast-list --retries 5 --low-level-retries 20 --log-level NOTICE --log-file "$S/rclone-recopy-$TS.log" || { echo "incremental rclone copy failed"; return 1; }
-  out=$(rclone check "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" 2>&1) || rc=$?
+  out=$(rclone check --one-way "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" 2>&1) || rc=$?
   printf '%s\n' "$out" > "$S/rclone-recheck-$TS.log"
   if [ "$rc" = 0 ]; then VALUE=0; else VALUE=errors-exit-$rc; echo "rclone check after the dump failed (exit $rc); see $S/rclone-recheck-$TS.log"; return 1; fi
   echo "blobs match after the legacy dump"

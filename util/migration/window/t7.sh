@@ -26,7 +26,7 @@ snap() {
   if restore_staged; then echo "restore already staged for this cut: $RESTORE"; return 0; fi
   printf '%s\n' \
     "gh pr ready $T7_REVERT_PR -R $REPO, an approving review, gh pr merge $T7_REVERT_PR -R $REPO --merge, then main -> env/tb-stage in $KCD_DIR (merge commit) and wait on the $APP sync revision" \
-    "bash $MIG_DIR/restore-secret-version.sh $SECRET_ID $(cut -f2 "$(tail -1 <<<"$out")") --dry-run, then --apply, then force-sync externalsecret $NS/keycloak-customer-db" \
+    "$(if unchanged; then echo "secret unchanged by this step: $SECRET_ID stays on version $(cut -f2 "$(tail -1 <<<"$out")"); no secret rollback, the revert PR is the restore. If a put did happen: "; fi)bash $MIG_DIR/restore-secret-version.sh $SECRET_ID $(cut -f2 "$(tail -1 <<<"$out")") --dry-run, then --apply, then force-sync externalsecret $NS/keycloak-customer-db" \
     "before legacy Keycloak restarts on main: bash $MIG_DIR/restore-realm.sh with ${realm:-the realm-before snapshot}" > "$RESTORE" || return 1
   mark_restore
 }
@@ -37,10 +37,21 @@ gate() {
   bash "$MIG_DIR/gate-keycloak-version.sh"
 }
 
+legacy_sha() { jq -cnS --arg u "$KC_LEGACY_PG_USER" --arg p "$KC_LEGACY_PG_PASSWORD" '{username: $u, password: $p}' | sha256sum | cut -c1-16; }
+current_sha() { aws_stage secretsmanager get-secret-value --secret-id "$SECRET_ID" --output json | jq -r '.SecretString' | jq -cS . | sha256sum | cut -c1-16; }
+unchanged() { [ "$(current_sha)" = "$(legacy_sha)" ]; }
+
 put() {
+  if unchanged; then
+    VALUE=unchanged
+    echo "unchanged: $SECRET_ID already holds the legacy credential; no put, the current version stays the rollback target"
+    return 0
+  fi
+  VALUE=put
+  if [ "$APPLY" = 0 ]; then printf '  + bash %s %s %s --apply (legacy credential JSON written only under --apply)\n' "$MIG_DIR/put-secret-version.sh" "$SECRET_ID" "$JSON"; return 0; fi
   jq -n --arg u "$KC_LEGACY_PG_USER" --arg p "$KC_LEGACY_PG_PASSWORD" '{username: $u, password: $p}' > "$JSON" || return 1
   chmod 600 "$JSON"
-  if [ "$APPLY" = 1 ]; then bash "$MIG_DIR/put-secret-version.sh" "$SECRET_ID" "$JSON" --apply; else bash "$MIG_DIR/put-secret-version.sh" "$SECRET_ID" "$JSON"; fi
+  bash "$MIG_DIR/put-secret-version.sh" "$SECRET_ID" "$JSON" --apply
 }
 
 refreshed() { [ "$("${KS[@]}" -n "$NS" get externalsecret keycloak-customer-db -o jsonpath='{.status.refreshTime}')" \> "$T7_START" ]; }
@@ -91,7 +102,7 @@ helpers snapshot-secret-versions.sh gate-keycloak-version.sh put-secret-version.
 step t7-start "" start
 step snap-secret-versions secrets snap
 step gate-keycloak "" gate
-step put-secret "" put
+step put-secret state put
 step secret-refresh "" refresh
 go_gate
 step env-sync-keycloak "" env_sync

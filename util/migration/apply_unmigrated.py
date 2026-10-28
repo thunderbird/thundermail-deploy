@@ -193,7 +193,9 @@ def main():
                     help="apply only these object types (inverse of --skip), e.g. --only BlockedIp,Domain")
     ap.add_argument("--expect-hostname", required=True,
                     help="the target's defaultHostname; the script stops if STALWART_URL points at a different server")
-    ap.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
+    mode.add_argument("--dry-run", action="store_true", help="the default; cannot be combined with --apply")
     a = ap.parse_args()
     only = parse_only(a.only)
     if os.environ.get("OLD_STALWART_URL") and os.environ["OLD_STALWART_URL"].rstrip("/") == os.environ["STALWART_URL"].rstrip("/"):

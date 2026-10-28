@@ -34,7 +34,30 @@ legacy_loopback() {
   hp=${hp%%/*}
   case "${hp%:*}" in 127.0.0.1|localhost|'[::1]') ;; *) echo "OLD_STALWART_URL host ${hp%:*} is not loopback: credentials not sent"; return 1 ;; esac
   l=$(ss -ltnpH "sport = :${hp##*:}" 2>/dev/null)
-  [ -n "$l" ] && ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
+  [ -n "$l" ] || { echo "nothing listens on :${hp##*:}: start the SSM port-forward; credentials not sent"; return 1; }
+  ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
   echo "OLD_STALWART_URL is loopback through the SSM tunnel of $(id -un)"
+}
+env_path_ok() {
+  local f=$1 d
+  d=$(dirname "$1")
+  [ ! -L "$d" ] && [ -O "$d" ] && [ -z "$(find "$d" -maxdepth 0 -perm /022)" ] || return 1
+  [ ! -e "$f" ] || { [ ! -L "$f" ] && [ -O "$f" ] && [ -z "$(find "$f" -maxdepth 0 -perm /022)" ]; }
+}
+load_operator_env() {
+  local f=$1 name val
+  [ -e "$f" ] || return 0
+  [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  while IFS= read -r name; do
+    [ -z "${!name:-}" ] || continue
+    val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")
+    [ -z "$val" ] || export "$name=$val"
+  done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$f")
+}
+shared_zone_id() {
+  local tok
+  tok=$(aws_stage secretsmanager get-secret-value --secret-id mzla/tb-stage/cloudflare-external-dns --query SecretString --output text 2>/dev/null | jq -r '.apiToken // empty') || return 1
+  [ -n "$tok" ] || return 1
+  curl -sS -m 30 -K <(printf 'header = "Authorization: Bearer %s"\n' "$tok") "$CF_API/zones?name=$1" | jq -re '.result[0].id // empty'
 }
 latest() { ls -1t "$1" 2>/dev/null | head -1; }

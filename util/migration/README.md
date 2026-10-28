@@ -1,16 +1,19 @@
 # Cutover tooling
 
 Scripts for the tb-stage cutover (platform-infrastructure milestone 1536). Every command
-in the in-window issues sources the env file first, then `util/migration/timing.sh`:
+in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it) first,
+then `util/migration/timing.sh`:
 
 ```bash
-set -a; . ~/.local/state/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
+set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
 
 - `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
-  NEED count. It never prints a value.
+  NEED count (`--for T0` prints every row). It never prints a value.
+- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`) live in `~/.local/state/talos/cutover-operator.env`
+  (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
@@ -28,16 +31,21 @@ set -a; . ~/.local/state/talos/cutover-tb-stage.env; set +a; . util/migration/ti
 
 `runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
 security group through the existing `stalwart-config-applier` SecurityGroupPolicy label
-(not `app=stalwart`, so no Service selects it). The `postgres` container writes
-`/work/.pgpass` at start from the mounted Secrets, so no password is ever an exec
-argument. Entries are keyed so that each of the four Neon targets resolves:
+(not `app=stalwart`, so no Service selects it). It runs on `role: mail` nodes like Stalwart,
+as uid 70 with no capabilities. The `postgres` container writes `/secrets/.pgpass` (a
+memory volume) at start from the mounted Secrets, so no password is ever an exec argument,
+and connects with `PGSSLMODE=verify-full` against the image's CA bundle. Every line names
+its host; the pod refuses to start unless the three legacy hosts are distinct:
 
 | line | matches | password |
 |---|---|---|
 | target host (direct and pooler form, read from the `stalwart-config` ConfigMap) | Stalwart target | `stalwart-postgresql-admin-password` |
-| `*:5432:keycloak:*` | legacy Keycloak | `rehearsal-legacy-pg` key `keycloak` |
-| `*:5432:neondb:neondb_owner` | legacy Accounts | `rehearsal-legacy-pg` key `accounts` |
-| `*:5432:*:*` | legacy Stalwart | `rehearsal-legacy-pg` key `stalwart` |
+| `rehearsal-legacy-pg` key `keycloak-host` | legacy Keycloak | key `keycloak` |
+| `rehearsal-legacy-pg` key `accounts-host` | legacy Accounts | key `accounts` |
+| `rehearsal-legacy-pg` key `stalwart-host` | legacy Stalwart | key `stalwart` |
+
+The `python` container installs hash-pinned wheels as a non-root user and does not mount
+`/work`.
 
 `build-cutover-env.sh --check` runs `psql -Atc 'select 1'` against all four, which proves
 the keying for the real hosts.
@@ -85,6 +93,8 @@ the keying for the real hosts.
 - `thaw.sh` (run after the freeze PR merges with a merge commit) reverts the merged
   freeze commit on a branch from `main`, opens the draft thaw PR on platform-infrastructure
   and appends `FREEZE_SHA` and `THAW_PR` to the env file. Needs `FREEZE_PR` and `PI_DIR`.
+  Dry run by default (prints the git and gh commands); `--apply` writes. It refuses to run
+  until `FREEZE_PR` is merged with a merge commit.
 - `post/p1-verify.sh` checks the Appointment stage reconnection: new OIDC and Accounts
   hosts in the frontend bundle, OIDC discovery and login page, API codes, and the CalDAV
   connect when `P1_OIDC_ACCESS_TOKEN` or `P1_CALDAV_USER`/`P1_CALDAV_APP_PASSWORD` are set; a skipped check makes it exit 2 (INCOMPLETE).
@@ -133,6 +143,10 @@ the keying for the real hosts.
   rolls back automatically. Exit 2 means a NEED item is listed.
 - Restore files: `cut-legacy-restore.txt` for W2 and `w<n>-*-restore.txt` otherwise, written by
   `--apply` once per cut (a `restore-W<n>` row); dry runs write `*.dry-run.txt`.
+- W3 accepts objects Stalwart wrote into the target bucket before the copy when none of them is
+  in the legacy bucket (the 0.16 web-admin bundle, written at pod start): it records their keys
+  as a baseline, stages `rclone delete --exclude-from <baseline keys>` so a restore keeps them,
+  and its `rclone check` is `--one-way` (every legacy object present and equal on the target).
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,

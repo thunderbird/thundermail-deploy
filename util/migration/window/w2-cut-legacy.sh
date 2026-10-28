@@ -76,11 +76,13 @@ port_open() {
 }
 
 probe_legacy() {
-  local dns ip port open=0
+  local dns ip port ports open=0
   dns=$("${AWSL[@]}" elbv2 describe-load-balancers --load-balancer-arns "$LEGACY_PUB_LB_ARN" --query 'LoadBalancers[0].DNSName' --output text) || return 1
+  ports=$("${AWSL[@]}" elbv2 describe-listeners --load-balancer-arn "$LEGACY_PUB_LB_ARN" --query 'Listeners[].Port' --output text) || return 1
+  [ -n "$ports" ] || { echo "no listeners on $LEGACY_PUB_LB_ARN"; return 1; }
   ip=$(doh "$dns")
   [ -n "$ip" ] || { echo "no A record for $dns via DoH"; return 1; }
-  for port in 993 25 443; do
+  for port in $ports; do
     if port_open "$ip" "$port"; then echo "  $dns ($ip):$port open"; open=$((open + 1)); else echo "  $dns ($ip):$port closed"; fi
   done
   VALUE=$open
