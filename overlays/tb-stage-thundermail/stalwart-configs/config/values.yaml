@@ -14,7 +14,7 @@ oidcIssuerURL: https://auth.stage-thundermail.com/realms/tbpro
 stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
 stalwartPgDatabase: neondb
 stalwartPgAdminUsername: neondb_owner
-dnsManagement: Automatic
+dnsManagement: Manual
 dnsPublishSpf: false
 authBanRateCount: 5000
 scanBanRateCount: 30
