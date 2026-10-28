@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: runner
+  namespace: thundermail
+  labels:
+    app.kubernetes.io/name: stalwart-config-applier
+spec:
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 5
+  containers:
+    - name: postgres
+      image: postgres:18-alpine
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          esc() { sed 's/[\\:]/\\&/g' "$1" | tr -d '\n'; }
+          pooler=$(sed -n 's/.*"host": *"\([^"]*\)".*/\1/p' /etc/stalwart-config/config.json | head -1)
+          direct=$(printf '%s' "$pooler" | sed 's/-pooler//')
+          umask 077
+          {
+            printf '%s:5432:*:*:%s\n' "$direct" "$(esc /etc/pg/target/STALWART_POSTGRESQL_ADMIN_PASSWORD)"
+            printf '%s:5432:*:*:%s\n' "$pooler" "$(esc /etc/pg/target/STALWART_POSTGRESQL_ADMIN_PASSWORD)"
+            printf '*:5432:keycloak:*:%s\n' "$(esc /etc/pg/legacy/keycloak)"
+            printf '*:5432:neondb:neondb_owner:%s\n' "$(esc /etc/pg/legacy/accounts)"
+            printf '*:5432:*:*:%s\n' "$(esc /etc/pg/legacy/stalwart)"
+          } > /work/.pgpass
+          chmod 600 /work/.pgpass
+          exec sleep infinity
+      env:
+        - name: PGPASSFILE
+          value: /work/.pgpass
+        - name: PGSSLMODE
+          value: require
+        - name: PGCONNECT_TIMEOUT
+          value: "15"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 2Gi
+      volumeMounts:
+        - name: work
+          mountPath: /work
+        - name: target-pg
+          mountPath: /etc/pg/target
+          readOnly: true
+        - name: legacy-pg
+          mountPath: /etc/pg/legacy
+          readOnly: true
+        - name: stalwart-config
+          mountPath: /etc/stalwart-config
+          readOnly: true
+    - name: python
+      image: python:3.12-alpine
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          pip install --quiet --no-cache-dir requests urllib3
+          exec sleep infinity
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+      volumeMounts:
+        - name: work
+          mountPath: /work
+  volumes:
+    - name: work
+      emptyDir:
+        sizeLimit: 20Gi
+    - name: target-pg
+      secret:
+        secretName: stalwart-postgresql-admin-password
+    - name: legacy-pg
+      secret:
+        secretName: rehearsal-legacy-pg
+    - name: stalwart-config
+      configMap:
+        name: stalwart-config

@@ -100,12 +100,14 @@ c_cf_agent() {
   local tok s; tok=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
   [ -n "$tok" ] || { echo "CF_API_TOKEN_AGENT empty"; return 1; }
   s=$(cf_status "$tok"); [ "$s" = active ] || { echo "token status $s"; return 1; }
-  local zones tbpro rc
+  local zones tbpro rc resp
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
   [ "$zones" = "dev-thundermail.com,stage-thundermail.com,tb.pro" ] || { echo "zones visible: ${zones:-none}"; return 1; }
   tbpro=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?name=tb.pro" | jq -r '.result[0].id // empty')
-  rc=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -K <(bearer "$tok") "$CF/zones/$tbpro/rulesets/phases/http_request_dynamic_redirect/entrypoint")
-  [ "$rc" = 200 ] && echo "active, three zones, tb.pro redirect entrypoint 200" || { echo "tb.pro redirect entrypoint $rc"; return 1; }
+  resp=$(curl -s -m 20 -w '\n%{http_code}' -K <(bearer "$tok") "$CF/zones/$tbpro/rulesets/phases/http_request_dynamic_redirect/entrypoint")
+  rc=$(tail -1 <<<"$resp")
+  if [ "$rc" = 200 ] || { [ "$rc" = 404 ] && sed '$d' <<<"$resp" | jq -e '[.errors[]?.code] | index(10003)' >/dev/null 2>&1; }; then echo "active, three zones, tb.pro redirect entrypoint $rc"
+  else echo "tb.pro redirect entrypoint $rc"; return 1; fi
 }
 c_kc_admin_stage() { sm mzla-tb-stage mzla/tb-stage/keycloak-customer-admin-client | jq -Rs -e 'try (fromjson|has("client-secret")) catch false' >/dev/null 2>&1 && echo "SM client-secret key present; token endpoint not probed (needs a port-forward)" || { echo "SM mzla/tb-stage/keycloak-customer-admin-client has no client-secret key"; return 1; }; }
 c_kc_admin_legacy() {
