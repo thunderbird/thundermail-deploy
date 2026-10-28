@@ -91,7 +91,11 @@ thaw() {
 wf_state() { gh api "repos/$ACC/actions/workflows/merge.yml" --jq .state; }
 wf_unfinished() { gh api "repos/$ACC/actions/workflows/merge.yml/runs?per_page=100" --jq '[.workflow_runs[] | select(.status != "completed") | .id] | join(" ")'; }
 wf_drained() { [ -z "$(wf_unfinished)" ]; }
-legacy_desired() { local t; for t in $LEGACY_ECS_TARGETS; do aws_legacy ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[0].desiredCount' --output text; done | sort -u | tr '\n' ' '; }
+legacy_desired() {
+  local t d all=""
+  for t in $LEGACY_ECS_TARGETS; do d=$(aws_legacy ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[0].desiredCount' --output text) || return 1; all="$all $d"; done
+  tr ' ' '\n' <<<"$all" | grep . | sort -u | tr '\n' ' '
+}
 
 accounts_ci_off() {
   local st who
