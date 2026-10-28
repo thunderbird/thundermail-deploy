@@ -158,16 +158,17 @@ reload() {
 }
 
 readback() {
-  local ips ip ids n=0
+  local ips ip ids n=0 unbanned=0
   [ "$APPLY" = 1 ] || live apply_unmigrated.py "$S/settings.json" "$S/principals.json" stalwart-cli || return 0
   unmigrated_plan || return 1
-  VALUE=$(( ${BLOCKED:-0} + CATCHALL + OTHER ))
   ips=$(nginx_ips) || return 1
   for ip in $ips; do
     ids=$(banned_ids "$ip") || return 1
     [ -z "$ids" ] || n=$((n + 1))
+    if jq -e --arg k "server.blocked-ip.$ip" 'has($k)' "$S/settings.json" >/dev/null; then unbanned=$((unbanned + 1)); fi
   done
-  echo "read-back: unmigrated changes=$VALUE nginx pod IPs banned=$n"
+  VALUE=$(( ${BLOCKED:-0} - unbanned + CATCHALL + OTHER ))
+  echo "read-back: unmigrated changes=$VALUE (besides $unbanned un-banned nginx pod IPs) nginx pod IPs banned=$n"
   [ "$APPLY" = 0 ] || { [ "$VALUE" = 0 ] && [ "$n" = 0 ]; }
 }
 

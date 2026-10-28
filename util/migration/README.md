@@ -154,7 +154,7 @@ the keying for the real hosts.
   Role`), so its restore reapplies those too. After `apply_unmigrated.py --apply` and the nginx
   un-ban (`stalwart-cli delete BlockedIp --ids <id>`, id from `stalwart-cli query BlockedIp --where
   address=<ip> --json`) it runs `stalwart-cli create action/ReloadSettings` and
-  `action/ReloadBlockedIps`, then reads back: `apply_unmigrated.py` dry run 0 changes, no nginx pod
+  `action/ReloadBlockedIps`, then reads back: `apply_unmigrated.py` dry run 0 changes besides the un-banned nginx pod IPs, no nginx pod
   IP in `BlockedIp`.
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
