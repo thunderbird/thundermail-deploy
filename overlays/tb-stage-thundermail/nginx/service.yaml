@@ -23,3 +23,7 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8081"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/"
+spec:
+  ports:
+    - port: 587
+      targetPort: submission
