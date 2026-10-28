@@ -10,6 +10,8 @@ for a in "$@"; do
 done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-stage.env}
+OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
+load_operator_env "$OPERATOR_ENV"
 VALUES=$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID"

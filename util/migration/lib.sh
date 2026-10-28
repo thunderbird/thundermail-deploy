@@ -38,6 +38,16 @@ legacy_loopback() {
   ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
   echo "OLD_STALWART_URL is loopback through the SSM tunnel of $(id -un)"
 }
+load_operator_env() {
+  local f=$1 name val
+  [ -e "$f" ] || return 0
+  [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  while IFS= read -r name; do
+    [ -z "${!name:-}" ] || continue
+    val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")
+    [ -z "$val" ] || export "$name=$val"
+  done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$f")
+}
 shared_zone_id() {
   local tok
   tok=$(aws_stage secretsmanager get-secret-value --secret-id mzla/tb-stage/cloudflare-external-dns --query SecretString --output text 2>/dev/null | jq -r '.apiToken // empty') || return 1

@@ -28,6 +28,7 @@ done
 
 WORK_DIR=${WORK_DIR:-$HOME/.local/state/talos}
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-stage.env}
+OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
 KC_STAGE=${KUBECONFIG_STAGE:-$WORK_DIR/kc-stage}
 KC_HUB=${KUBECONFIG_HUB:-$WORK_DIR/kc-hub}
 KC_DEV=${KUBECONFIG_DEV:-$WORK_DIR/kc-dev}
@@ -42,7 +43,18 @@ sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
 from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//; s/'\\\\''/'/g"; }
-envfile_has() { [ -f "$ENV_FILE" ] && [ -n "$(from_file "$ENV_FILE" "$1")" ]; }
+ev() { printf '%s' "${!1:-$(from_file "$ENV_FILE" "$1")}"; }
+envfile_has() { [ -n "$(ev "$1")" ]; }
+load_operator_env() {
+  local f=$1 name val
+  [ -e "$f" ] || return 0
+  [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  while IFS= read -r name; do
+    [ -z "${!name:-}" ] || continue
+    val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")
+    [ -z "$val" ] || export "$name=$val"
+  done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$f")
+}
 cq() { case $1 in *[$'\n\r']*) return 1 ;; esac; local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
 bearer() { local v; v=$(cq "$1") || return 1; printf 'header = "Authorization: Bearer %s"\n' "$v"; }
 cf_status() { curl -s -m 20 -K <(bearer "$1") "$CF/user/tokens/verify" | jq -r '.result.status // "error"'; }
@@ -64,6 +76,8 @@ legacy_api() {
   curl -sk -m 10 -o /dev/null -w '%{http_code}' -K <(printf 'user = "admin:%s"\n' "$(cq "$pw")") "https://127.0.0.1:18080$1" || true
 }
 
+load_operator_env "$OPERATOR_ENV"
+c_operator_env() { mode600 "$OPERATOR_ENV" && echo "$OPERATOR_ENV mode 600, $(grep -cE '^(export )?[A-Za-z_][A-Za-z0-9_]*=' "$OPERATOR_ENV") name(s), $(n=0; while IFS= read -r v; do [ -z "${!v:-}" ] || n=$((n + 1)); done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$OPERATOR_ENV"); echo "$n") set" || { echo "$OPERATOR_ENV missing or not mode 600"; return 1; }; }
 c_sso() { aws sts get-caller-identity --profile "$1" --query Arn --output text 2>/dev/null | grep -q AWSReservedSSO_AdministratorAccess && echo "AdministratorAccess via $1" || { echo "no session for $1 (aws sso login --sso-session mzla)"; return 1; }; }
 c_kube_stage() {
   can_all "$KC_STAGE" 'patch deployments thundermail' 'patch deployments thundermail scale' 'create pods thundermail' 'delete pods thundermail' \
@@ -86,7 +100,7 @@ c_neon() {
   mode600 "$HOME/.neon-api.env" || { echo "$HOME/.neon-api.env missing or not mode 600"; return 1; }
   local p id key ok=0 bad="" n
   for p in STALWART_LEGACY KC ACCOUNTS; do
-    id=$(from_file "$ENV_FILE" "NEON_PROJECT_$p")
+    id=$(ev "NEON_PROJECT_$p")
     [ -n "$id" ] || continue
     key=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$p")
     key=${key:-$(from_file "$HOME/.neon-api.env" NEON_API_KEY)}
@@ -161,13 +175,13 @@ c_paddle() {
 }
 c_test_mailbox() {
   envfile_has TEST_MAILBOX && envfile_has TEST_MAILBOX_IMAP_HOST && envfile_has TEST_MAILBOX_IMAP_USER && envfile_has TEST_MAILBOX_IMAP_PASSWORD || { echo "TEST_MAILBOX* not in $ENV_FILE"; return 1; }
-  local h n; h=$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_HOST)
-  n=$(printf 'a LOGIN "%s" "%s"\r\nb LOGOUT\r\n' "$(cq "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_USER)")" "$(cq "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_PASSWORD)")" | timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$h" -servername "$h" -connect "$h:993" 2>/dev/null | grep -c '^a OK')
+  local h n; h=$(ev TEST_MAILBOX_IMAP_HOST)
+  n=$(printf 'a LOGIN "%s" "%s"\r\nb LOGOUT\r\n' "$(cq "$(ev TEST_MAILBOX_IMAP_USER)")" "$(cq "$(ev TEST_MAILBOX_IMAP_PASSWORD)")" | timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$h" -servername "$h" -connect "$h:993" 2>/dev/null | grep -c '^a OK')
   [ "$n" = 1 ] && echo "IMAP LOGIN ok" || { echo "IMAP LOGIN failed"; return 1; }
 }
 c_test_user() {
   envfile_has TEST_USER || { echo "TEST_USER not in $ENV_FILE"; return 1; }
-  local code; code=$(legacy_api "/api/principal/$(from_file "$ENV_FILE" TEST_USER)") || { echo "$code"; return 1; }
+  local code; code=$(legacy_api "/api/principal/$(ev TEST_USER)") || { echo "$code"; return 1; }
   [ "$code" = 200 ] && echo "TEST_USER principal 200 on legacy" || { echo "TEST_USER principal $code on legacy"; return 1; }
 }
 c_github() {
@@ -191,19 +205,19 @@ c_atlantis_pg() {
 c_appt_workflow() { [ "$(gh api repos/thunderbird/appointment/actions/workflows/deploy-staging.yml --jq .state 2>/dev/null)" = active ] && echo "deploy-staging.yml active" || { echo "deploy-staging.yml not active"; return 1; }; }
 c_pr_pair() {
   local repo=thunderbird/$1 pr rev head base
-  pr=$(from_file "$ENV_FILE" "$2"); rev=$(from_file "$ENV_FILE" "$3")
+  pr=$(ev "$2"); rev=$(ev "$3")
   [ -n "$pr" ] && [ -n "$rev" ] || { echo "$2/$3 not in $ENV_FILE"; return 1; }
   head=$(gh pr view "$pr" -R "$repo" --json state,headRefName -q 'select(.state == "OPEN") | .headRefName' 2>/dev/null)
   base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName' 2>/dev/null)
   [ -n "$head" ] && [ "$base" = "$head" ] && echo "$2=#$pr open, $3=#$rev open on its head" || { echo "$2=#$pr head=${head:-not open}, $3=#$rev base=${base:-not open}"; return 1; }
 }
 c_env_pr() {
-  local n; n=$(from_file "$ENV_FILE" "$2")
+  local n; n=$(ev "$2")
   [ -n "$n" ] || { echo "$2 not in $ENV_FILE"; return 1; }
   [ "$(gh pr view "$n" -R "thunderbird/$1" --json state -q .state 2>/dev/null)" = OPEN ] && echo "$2=#$n open in $1" || { echo "$2=#$n is not an open $1 PR"; return 1; }
 }
 c_recipients() {
-  local dir; dir=$(from_file "$ENV_FILE" SECRET_DIR)
+  local dir; dir=$(ev SECRET_DIR)
   [ -n "$dir" ] && [ -s "$dir/app-password-users.csv" ] && echo "$(($(grep -c . "$dir/app-password-users.csv") - 1)) recipient row(s) in \$SECRET_DIR/app-password-users.csv" || { echo "no app-password-users.csv in SECRET_DIR (#1547 part 2)"; return 1; }
 }
 c_git_transport() {
@@ -211,7 +225,7 @@ c_git_transport() {
   for r in "$@"; do git ls-remote --exit-code "https://github.com/thunderbird/$r.git" HEAD >/dev/null 2>&1 || bad="$bad $r"; done
   [ -z "$bad" ] && echo "git ls-remote over https works for $*" || { echo "git ls-remote failed:$bad (run gh auth setup-git)"; return 1; }
 }
-c_spf_final() { case "$(from_file "$ENV_FILE" SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
+c_spf_final() { case "$(ev SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
 c_venv() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import requests, urllib3' 2>/dev/null && echo "$VENV_PY imports ok" || { echo "venv missing: $VENV_PY"; return 1; }; }
@@ -254,6 +268,7 @@ row "T14" notice-recipients-csv c_recipients
 row "T7 T8 W1 W8" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
 row "W7 P3" test-mailbox-external c_test_mailbox
 row "W5 W6 W7 P3" test-user-stage c_test_user
+row "T0" operator-env-file c_operator_env
 row "ALL" github-gh c_github
 row "T10m" github-push-pi-pg c_push platform-infrastructure platform-grafana
 row "T10m" atlantis-platform-grafana c_atlantis_pg

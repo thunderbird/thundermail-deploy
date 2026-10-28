@@ -12,6 +12,8 @@ set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.s
 
 - `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
   NEED count (`--for T0` prints every row). It never prints a value.
+- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`) live in `~/.local/state/talos/cutover-operator.env`
+  (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
