@@ -146,6 +146,30 @@ setenv() {
   export "$1=$2"
 }
 
+setenv_secret() {
+  local q
+  printf '  + append %s (len=%s) to %s\n' "$1" "${#2}" "$ENV_FILE"
+  [ "$APPLY" = 1 ] || return 0
+  q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
+  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE" || return 1
+  export "$1=$2"
+}
+
+merge_pr() {
+  local repo=$1 pr=$2 st
+  printf '  + gh pr ready %s -R %s when draft; require an approval when the branch needs one; gh pr merge %s -R %s --merge\n' "$pr" "$repo" "$pr" "$repo"
+  [ "$APPLY" = 1 ] || return 0
+  st=$(gh pr view "$pr" -R "$repo" --json state,isDraft,reviewDecision -q '"\(.state) \(.isDraft) \(.reviewDecision)"') || return 1
+  case "$st" in
+    MERGED*) echo "$repo#$pr is already merged"; return 0 ;;
+    OPEN*) ;;
+    *) echo "$repo#$pr is $st"; return 1 ;;
+  esac
+  case "$st" in *" REVIEW_REQUIRED"|*" CHANGES_REQUESTED") echo "$repo#$pr needs an approving review before the merge (collect it before the window)"; return 1 ;; esac
+  case "$st" in *" true "*) gh pr ready "$pr" -R "$repo" || return 1 ;; esac
+  gh pr merge "$pr" -R "$repo" --merge
+}
+
 listener() { ss -ltnpH "sport = :$1" 2>/dev/null; }
 owned_by() { local l; l=$(listener "$1"); [ -n "$l" ] && ! grep -vq "users:((\"$2\"" <<<"$l"; }
 

@@ -25,7 +25,7 @@ snap() {
   VALUE=$(grep -c . "$(tail -1 <<<"$out")")
   if restore_staged; then echo "restore already staged for this cut: $RESTORE"; return 0; fi
   printf '%s\n' \
-    "gh pr merge $T7_REVERT_PR -R $REPO --merge, then main -> env/tb-stage in $KCD_DIR (merge commit) and wait on the $APP sync revision" \
+    "gh pr ready $T7_REVERT_PR -R $REPO, an approving review, gh pr merge $T7_REVERT_PR -R $REPO --merge, then main -> env/tb-stage in $KCD_DIR (merge commit) and wait on the $APP sync revision" \
     "bash $MIG_DIR/restore-secret-version.sh $SECRET_ID $(cut -f2 "$(tail -1 <<<"$out")") --dry-run, then --apply, then force-sync externalsecret $NS/keycloak-customer-db" \
     "before legacy Keycloak restarts on main: bash $MIG_DIR/restore-realm.sh with ${realm:-the realm-before snapshot}" > "$RESTORE" || return 1
   mark_restore
@@ -55,7 +55,7 @@ refresh() {
 app_rev() { [ "$("${KH[@]}" -n argocd get application "$APP" -o jsonpath='{.status.sync.revision}')" = "$T7_ENV_SHA" ]; }
 
 env_sync() {
-  run gh pr merge "$T7_PR" -R "$REPO" --merge || return 1
+  merge_pr "$REPO" "$T7_PR" || return 1
   run gh pr edit "$T7_REVERT_PR" -R "$REPO" --base main || return 1
   run git -C "$KCD_DIR" fetch origin || return 1
   run git -C "$KCD_DIR" checkout -B env/tb-stage origin/env/tb-stage || return 1

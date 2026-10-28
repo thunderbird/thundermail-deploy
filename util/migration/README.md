@@ -123,6 +123,19 @@ the keying for the real hosts.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
   4 `mail.` CNAME and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
   edits `spf.` in place to `SPF_FINAL_TXT` (custom domains include it, so it is never deleted).
+- Every in-window merge goes through `merge_pr` (window/lib.sh): `gh pr ready` on a draft, a stop when
+  the branch still needs an approving review (collect approvals before the window), then
+  `gh pr merge --merge`; an already merged PR passes.
+- W4 also waits for the legacy task queue `f` to drain (`task-queue` row), compares account and
+  group ids with `verify/02_directory.py` (`account-ids` row), and re-runs `rclone copy` and
+  `check` after the W3 blob-check (`blob-recheck` row) before it leaves recovery mode. Convert
+  stops on `warning: (dropping|renaming) (User|Group)` lines that are not in
+  `$SECRET_DIR/convert-dropped-baseline.txt` (the lines the T10 dry run accepted).
+- `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
+  `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
+  start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
+  created in the Accounts UI from stdin, checks a JMAP session and appends
+  `TEST_SENDER_APP_PASSWORD`.
 - `cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT]` is dry-run by default; an SPF upsert edits
   the one `v=spf1` TXT at NAME in place, empty content is refused, and it refuses to delete `spf.*`
   or touch `_externaldns.*`.

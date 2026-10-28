@@ -3,7 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD STALWART_URL STALWART_USER STALWART_PASSWORD \
   STALWART_LEGACY_PG_HOST STALWART_LEGACY_PG_USER STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST STALWART_TARGET_PG_USER STALWART_TARGET_PG_DB \
-  TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_STAGE SECRET_DIR TIMING_TSV
+  LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_STAGE SECRET_DIR TIMING_TSV
 mkdir -p "$SECRET_DIR"
 PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
 S=$SECRET_DIR
@@ -11,6 +11,8 @@ NS=(-n thundermail)
 POD=("${KS[@]}" "${NS[@]}" exec -i runner -c postgres --)
 PROBE="if [ ! -s /work/target-before.dump ]; then echo missing; elif [ -n \"\$(find /work/target-before.dump -mmin -720)\" ]; then echo fresh; else echo stale; fi"
 PRINCIPAL_WARN='WARN (failed to fetch|skipping principal type)'
+DROP_RE='^warning: (dropping|renaming) (User|Group) '
+DROP_BASELINE=$SECRET_DIR/convert-dropped-baseline.txt
 
 printf '%s\n' \
   "$(shq "${KS[@]}" "${NS[@]}" scale deploy/stalwart --replicas=0)" \
@@ -62,6 +64,38 @@ preflight() {
   bash "$MIG_DIR/restore-target-db.sh" /work/target-before.dump --dry-run | tail -1
 }
 
+task_queue() {
+  local q="select count(*) from f"
+  printf '  + %s\n' "$(shq "${POD[@]}" psql -h "$STALWART_LEGACY_PG_HOST" -U "$STALWART_LEGACY_PG_USER" -d "$STALWART_LEGACY_PG_DB" -Atc "$q")"
+  [ "$APPLY" = 1 ] || { echo "  wait up to 600s for 0 pending index tasks (table f), else stop"; return 0; }
+  until_ok 600 tasks_empty || { echo "legacy task queue f still holds $VALUE task(s) after 600s; migrate_v0_16 drops them"; return 1; }
+  echo "legacy task queue f is empty"
+}
+tasks_empty() { VALUE=$("${POD[@]}" psql -h "$STALWART_LEGACY_PG_HOST" -U "$STALWART_LEGACY_PG_USER" -d "$STALWART_LEGACY_PG_DB" -Atc "select count(*) from f") && [ "$VALUE" = 0 ]; }
+
+account_ids() {
+  local out
+  printf '  + . %s; python3 %s > %s/account-ids.txt (PASS required on the account ids and group ids lines)\n' "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/02_directory.py" "$S"
+  [ "$APPLY" = 1 ] || return 0
+  bash -c 'set -a; . "$1"; set +a; cd "$(dirname "$2")" && python3 "$2"' _ "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/02_directory.py" > "$S/account-ids.txt" 2>&1 || true
+  out=$(grep -E '^  (PASS|FAIL)  (account|group) ids:' "$S/account-ids.txt" | sed -E 's/, missing .*//')
+  printf '%s\n' "$out"
+  VALUE=$(grep -c '^  FAIL' <<<"$out" || true)
+  [ "$(grep -c '^  PASS' <<<"$out" || true)" = 2 ] || { echo "account and group ids differ from legacy or were not checked; see $S/account-ids.txt"; return 1; }
+}
+
+blob_recheck() {
+  local out rc=0
+  printf '  + after the W3 blob-check: rclone copy and rclone check leg:%s tgt:%s again, so blobs written before the legacy dump are in the target\n' "$LEGACY_BLOB_BUCKET" "$TARGET_BLOB_BUCKET"
+  [ "$APPLY" = 1 ] || return 0
+  until_ok 3600 blob_ok || { echo "no blob-check differences=0 row for the current cut after 3600s; stay in recovery mode"; return 1; }
+  rclone copy "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" --transfers 64 --checkers 64 --s3-no-check-bucket --fast-list --retries 5 --low-level-retries 20 --log-level NOTICE --log-file "$S/rclone-recopy-$TS.log" || { echo "incremental rclone copy failed"; return 1; }
+  out=$(rclone check "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" 2>&1) || rc=$?
+  printf '%s\n' "$out" > "$S/rclone-recheck-$TS.log"
+  if [ "$rc" = 0 ]; then VALUE=0; else VALUE=errors-exit-$rc; echo "rclone check after the dump failed (exit $rc); see $S/rclone-recheck-$TS.log"; return 1; fi
+  echo "blobs match after the legacy dump"
+}
+
 queue_drain() {
   local body
   if ! legacy_tunnel; then [ "$APPLY" = 0 ] || return 1; NEEDS=$((NEEDS + 1)); return 0; fi
@@ -90,7 +124,13 @@ convert() {
   [ "$rc" = 0 ] || { echo "convert exit $rc"; return 1; }
   [ -s "$S/export.json" ] || { echo "convert wrote no export.json"; return 1; }
   VALUE=$(grep -c . "$S/export.json")
-  DROPPED=$(grep -ciE 'dropp|renam|skipp' "$S/convert.stderr" || true)
+  grep -E "$DROP_RE" "$S/convert.stderr" > "$S/convert-dropped.txt" || true
+  if [ -s "$DROP_BASELINE" ]; then
+    DROPPED=$(grep -vxFf "$DROP_BASELINE" "$S/convert-dropped.txt" | grep -c . || true)
+    echo "dropped or renamed accounts: $(grep -c . "$S/convert-dropped.txt" || true), not in the T10 baseline: $DROPPED"
+  else
+    DROPPED=$(grep -c . "$S/convert-dropped.txt" || true)
+  fi
   echo "export_lines=$VALUE dropped_accounts=$DROPPED"
 }
 
@@ -168,29 +208,32 @@ admin_id() {
   echo "read back: BlobStore=$TARGET_BLOB_BUCKET InMemoryStore host=$host"
 }
 
+recheck_ok() { awk -F'\t' '$1 == "db-dump-legacy" {d = NR} $1 == "blob-recheck" && $4 == "differences" {v = $5; b = NR} END {exit !(d > 0 && b > d && v == "0")}' "$TIMING_TSV"; }
+
 leave_recovery() {
   if [ "$APPLY" = 0 ]; then
     if blob_ok; then echo "blob-check differences=0 for the current cut is in $TIMING_TSV"; else echo "no blob-check differences=0 row after the latest cut-ecs and snap-blobs rows in $TIMING_TSV yet (W2 and W3 write them)"; fi
   else
-    until_ok 3600 blob_ok || { echo "no blob-check differences=0 row for the current cut after 3600s; stay in recovery mode"; return 1; }
+    recheck_ok || { echo "no blob-recheck differences=0 row after the latest db-dump-legacy row; stay in recovery mode"; return 1; }
   fi
   run "${KS[@]}" "${NS[@]}" set env deploy/stalwart STALWART_RECOVERY_MODE- || return 1
   run "${KS[@]}" "${NS[@]}" rollout status deploy/stalwart --timeout=600s
 }
 
 prereqs
-helpers migrate_v016.py retarget-export.sh schema-version.sh restore-target-db.sh stalwart-cli "$PY"
+helpers migrate_v016.py retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/stage.env stalwart-cli rclone "$PY"
 if [ "$APPLY" = 1 ] && [ -n "$(after_cut drop-schema)" ]; then
   [ -n "$GO" ] || stop "DROP SCHEMA already started for this cut: a second DROP needs the operator's confirmation (--go)"
   go_gate
 fi
 step w4-preflight "" preflight
 step queue-drain queued queue_drain
+step task-queue tasks task_queue
 step dump "" dump
 step convert export_lines convert
 if [ "$APPLY" = 1 ]; then
   again convert dropped_accounts "$DROPPED" || stop "could not write the convert dropped_accounts row"
-  [ "$DROPPED" = 0 ] || stop "convert.stderr reports $DROPPED dropped, renamed or skipped account line(s)"
+  [ "$DROPPED" = 0 ] || stop "convert.stderr reports $DROPPED dropped or renamed User/Group line(s) outside the T10 baseline ($S/convert-dropped.txt)"
 fi
 step retarget "" retarget
 step db-dump-legacy bytes dump_legacy
@@ -198,5 +241,7 @@ step db-restore "" restore
 step recovery-boot schema recovery_boot
 step apply errors apply_export
 step admin-account-id "" admin_id
+step account-ids fails account_ids
+step blob-recheck differences blob_recheck
 step leave-recovery "" leave_recovery
 finish

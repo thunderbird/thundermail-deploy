@@ -47,6 +47,16 @@ stage_restore() {
   for f in "$RESTORE" "$SG_SNAP" "$ECS_BEFORE"; do [ -s "$f" ] || { echo "$f is missing or empty"; return 1; }; done
   VALUE=3
   printf 'present: %s %s %s\n' "$RESTORE" "$SG_SNAP" "$ECS_BEFORE"
+  mark_restore
+}
+
+cut_started() { [ "$APPLY" = 1 ] && [ -s "$RESTORE" ] && awk -F'\t' '$1 == "restore-W2" {r = NR; c = 0} r && ($1 == "go-W2" || $1 == "cut-stalwart" || $1 == "cut-ecs") {c = 1} END {exit !c}' "$TIMING_TSV" 2>/dev/null; }
+
+resume() {
+  SG_SNAP=$(awk '$2 ~ /restore-legacy-sg\.sh$/ {print $3; exit}' "$RESTORE")
+  ECS_BEFORE=$(awk '$2 ~ /restore-ecs\.sh$/ {print $3; exit}' "$RESTORE")
+  if [ ! -s "$SG_SNAP" ] || [ ! -s "$ECS_BEFORE" ]; then echo "the staged restore file does not name both snapshots"; return 1; fi
+  printf 'cut already started for this restore: keeping %s, %s, %s\n' "$RESTORE" "$SG_SNAP" "$ECS_BEFORE"
 }
 
 mgmt() {
@@ -79,7 +89,14 @@ probe_legacy() {
 closed() { probe_legacy && [ "$VALUE" = 0 ]; }
 
 cut_stalwart() {
-  run "${AWSL[@]}" ec2 revoke-security-group-ingress --group-id "$LEGACY_PUB_SG" --security-group-rule-ids "${RULES[@]}" --query Return --output text || return 1
+  local present=() id cur
+  cur=$("${AWSL[@]}" ec2 describe-security-group-rules --filters "Name=group-id,Values=$LEGACY_PUB_SG" --query "SecurityGroupRules[?IsEgress==\`false\`].SecurityGroupRuleId" --output text) || return 1
+  for id in "${RULES[@]}"; do grep -qw -- "$id" <<<"$cur" && present+=("$id"); done
+  if [ "${#present[@]}" -gt 0 ]; then
+    run "${AWSL[@]}" ec2 revoke-security-group-ingress --group-id "$LEGACY_PUB_SG" --security-group-rule-ids "${present[@]}" --query Return --output text || return 1
+  else
+    echo "no rule from LEGACY_PUB_SG_RULE_IDS is left on $LEGACY_PUB_SG: nothing to revoke"
+  fi
   if [ "$APPLY" = 1 ]; then
     until_ok 90 closed || { echo "$VALUE legacy port(s) still open 90s after the revoke"; return 1; }
   else
@@ -126,9 +143,13 @@ check_503() {
 }
 
 prereqs
-step snap-legacy-sg rules snap_sg
-step snap-ecs services snap_ecs
-step stage-restore files stage_restore
+if cut_started; then
+  step resume-restore "" resume
+else
+  step snap-legacy-sg rules snap_sg
+  step snap-ecs services snap_ecs
+  step stage-restore files stage_restore
+fi
 if ! mgmt; then
   [ "$APPLY" = 0 ] || stop "mgmt tunnel does not answer before the cut"
   NEEDS=$((NEEDS + 1))

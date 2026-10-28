@@ -62,6 +62,18 @@ acme_same() {
   echo "_acme-challenge answers match $(basename "$before")"
 }
 
+well_known() {
+  local ip p loc bad=""
+  ip=$(doh "$Z")
+  [ -n "$ip" ] || { echo "no A record for $Z"; return 1; }
+  for p in caldav carddav jmap autoconfig; do
+    loc=$(curl -s -m 15 -o /dev/null -w '%{redirect_url}' --resolve "$Z:443:$ip" "https://$Z/.well-known/$p")
+    case "$loc" in https://mail.thundermail.com/*) bad="$bad $p" ;; esac
+  done
+  [ -z "$bad" ] || { echo "/.well-known/{${bad# }} on $Z still redirects to production mail.thundermail.com"; return 1; }
+  echo "no /.well-known redirect from $Z to production"
+}
+
 tls() {
   local st=()
   [ -z "${2:-}" ] || st=(-starttls "$2")
@@ -116,6 +128,7 @@ dns() {
   chk jmap-srv jmap_443
   chk caldavs any "_caldavs._tcp.$Z" SRV
   chk carddavs any "_carddavs._tcp.$Z" SRV
+  chk well-known well_known
   chk dkim dkim
   chk acme-unchanged acme_same
   chk mail-cname cname_to "$M" "$TARGET_NLB_DNS"

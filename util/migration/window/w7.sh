@@ -18,7 +18,7 @@ cf() {
 }
 
 snap_zone() {
-  local out snap
+  local out snap realm
   if restore_staged; then echo "restore already staged for this cut: $RESTORE"; return 0; fi
   if [ "$APPLY" = 0 ] && [ -z "${CF_API_TOKEN_AGENT:-}" ]; then printf 'NEED  CF_API_TOKEN_AGENT for the zone snapshot\n  + bash %s %s\n' "$MIG_DIR/snapshot-zone.sh" "$CF_ZONE_ID"; NEEDS=$((NEEDS + 1)); return 0; fi
   out=$(bash "$MIG_DIR/snapshot-zone.sh" "$CF_ZONE_ID") || return 1
@@ -34,14 +34,16 @@ snap_zone() {
   else
     printf 'promotion.yaml.tpl missing: render it with __FREIGHT__=%s\n' "$FREIGHT_MANUAL" > "$MANUAL_PROMOTION"
   fi
+  realm=$(find "$SECRET_DIR" -maxdepth 1 -name 'realm-before-*.json' -size +0 -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
   printf '%s\n' \
+    "0 since-flip counts before the rollback go and again right before step 4: bash $MIG_DIR/window/w7-since-flip.sh" \
     "1 legacy SG: the restore-legacy-sg.sh lines in $EVIDENCE_DIR/cut-legacy-restore.txt" \
-    "2 promote the Manual Freight $FREIGHT_MANUAL while Stalwart is up: $(shq "${KH[@]}" create -f "$MANUAL_PROMOTION")" \
-    "3 $(shq "${KS[@]}" -n keycloak-customer scale sts/keycloak-customer --replicas=0); $(shq "${KS[@]}" -n accounts scale deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --replicas=0); $(shq "${KS[@]}" -n thundermail scale deploy/stalwart --replicas=0)" \
-    "4 legacy ECS: the restore-ecs.sh lines in $EVIDENCE_DIR/cut-legacy-restore.txt (Keycloak first, then Accounts)" \
-    "5 bash $MIG_DIR/restore-zone.sh $snap --dry-run, then --apply" \
-    "6 revert the FLIP_PR and PR $PR_B merge commits on TMD main (git revert -m 1 on a branch from main, merge commit), so Git renders Manual and drops the writer token" \
-    "7 before legacy Keycloak restarts on main: bash $MIG_DIR/restore-realm.sh with the realm-before snapshot in $SECRET_DIR" \
+    "2 promote the Manual Freight $FREIGHT_MANUAL while Stalwart is up: $(shq "${KH[@]}" create -f "$MANUAL_PROMOTION"); if the Job cannot run, apply the Manual render of that Freight's preview commit with stalwart-cli apply over the port-forward (stalwart-cli delete DnsServer fails while a Domain links it)" \
+    "3 while tb-stage Keycloak is up: bash $MIG_DIR/restore-realm.sh ${realm:-<realm-before snapshot>} https://auth.stage-thundermail.com --dry-run, then --apply" \
+    "4 $(shq "${KS[@]}" -n keycloak-customer scale sts/keycloak-customer --replicas=0); $(shq "${KS[@]}" -n accounts scale deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --replicas=0); $(shq "${KS[@]}" -n thundermail scale deploy/stalwart --replicas=0)" \
+    "5 legacy ECS: the restore-ecs.sh lines in $EVIDENCE_DIR/cut-legacy-restore.txt (Keycloak first, then Accounts)" \
+    "6 bash $MIG_DIR/restore-zone.sh $snap --dry-run, then --apply" \
+    "7 revert the FLIP_PR and PR $PR_B merge commits on TMD main (git revert -m 1 on a branch from main, merge commit); stay frozen (thaw PR unmerged) until Argo CD has synced the revert" \
     "8 revert the #1542 and #1543 repoints (pre-opened revert PRs, main -> env/tb-stage), restore-secret-version.sh, force-sync" > "$RESTORE" || return 1
   mark_restore
 }
@@ -57,7 +59,7 @@ es_ready() { [ "$("${KS[@]}" -n thundermail get externalsecret stalwart-cloudfla
 
 merge_b() {
   [ "$APPLY" = 0 ] || mark merge-148 pr "$PR_B"
-  run gh pr merge "$PR_B" -R "$TMD" --merge || return 1
+  merge_pr "$TMD" "$PR_B" || return 1
   printf '  + wait 300s for externalsecret stalwart-cloudflare-api-token Ready\n'
   [ "$APPLY" = 1 ] || return 0
   until_ok 300 es_ready || { echo "ExternalSecret stalwart-cloudflare-api-token is not Ready after 300s"; return 1; }
@@ -67,7 +69,7 @@ job_started() { [ "$("${KS[@]}" -n thundermail get job stalwart-config-apply -o 
 
 flip() {
   local sha
-  run gh pr merge "$FLIP_PR" -R "$TMD" --merge || return 1
+  merge_pr "$TMD" "$FLIP_PR" || return 1
   printf '  + FLIP_SHA from gh pr view FLIP_PR; wait 600s for freight_for FLIP_SHA; append FREIGHT; promote it; wait for job/stalwart-config-apply\n'
   [ "$APPLY" = 1 ] || return 0
   sha=$(gh pr view "$FLIP_PR" -R "$TMD" --json mergeCommit -q '.mergeCommit.oid // empty') || return 1

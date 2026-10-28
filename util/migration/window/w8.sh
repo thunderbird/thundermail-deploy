@@ -74,7 +74,7 @@ auto_promote() { [ "$("${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get projectconfig 
 
 thaw() {
   local sha
-  run gh pr merge "$THAW_PR" -R "$PI" --merge || return 1
+  merge_pr "$PI" "$THAW_PR" || return 1
   printf '  + append THAW_SHA; wait 400s each: app-of-apps sync revision contains THAW_SHA; %s selfHeal true; %s autoPromotionEnabled true\n' "$ARGO_APPS" "$KARGO_STAGE_ACCOUNTS"
   [ "$APPLY" = 1 ] || return 0
   sha=$(gh pr view "$THAW_PR" -R "$PI" --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
@@ -89,19 +89,27 @@ thaw() {
 
 last_promo() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath='{.status.lastPromotion.name}'; }
 promoted() { [ "$(last_promo)" != "$PROMO_BEFORE" ]; }
-verified() { [ "$("${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath='{.status.freightHistory[0].verificationHistory[0].phase}')" = Successful ]; }
+stage_get() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath="$1"; }
+ver_id() { stage_get '{.status.freightHistory[0].verificationHistory[0].id}'; }
+verified() { [ "$(ver_id)" != "$VER_BEFORE" ] && [ "$(stage_get '{.status.freightHistory[0].verificationHistory[0].phase}')" = Successful ]; }
 
 kargo_verify() {
-  printf '  + wait 120s for an auto-promotion; else create a Promotion from promotion-accounts.yaml.tpl with CURRENT_ACCOUNTS_FREIGHT; wait 1200s for a new lastPromotion and verification Successful\n'
+  printf '  + wait 120s for an auto-promotion; else create a Promotion from promotion-accounts.yaml.tpl with CURRENT_ACCOUNTS_FREIGHT; wait 1200s for a new lastPromotion and a newer Successful verification; effectiveAutoPromotionHolds empty\n'
   [ "$APPLY" = 1 ] || return 0
+  local cur holds
   PROMO_BEFORE=$(last_promo) || return 1
+  VER_BEFORE=$(ver_id) || return 1
   if ! until_ok 120 promoted; then
+    cur=$(stage_get '{.status.freightHistory[0].items.*.name}') || return 1
+    [ "$cur" = "$CURRENT_ACCOUNTS_FREIGHT" ] || { echo "$KARGO_STAGE_ACCOUNTS now holds $cur, not CURRENT_ACCOUNTS_FREIGHT $CURRENT_ACCOUNTS_FREIGHT: no manual re-promote"; return 1; }
     sed "s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$CURRENT_ACCOUNTS_FREIGHT/" "$MIG_DIR/promotion-accounts.yaml.tpl" > "$PROMOTION" || return 1
     "${KH[@]}" create -f "$PROMOTION" || return 1
   fi
   until_ok 1200 promoted || { echo "no new Promotion on $KARGO_STAGE_ACCOUNTS"; return 1; }
-  until_ok 1200 verified || { echo "verification on $KARGO_STAGE_ACCOUNTS is not Successful after 1200s"; return 1; }
-  echo "lastPromotion $(last_promo) verified"
+  until_ok 1200 verified || { echo "no new Successful verification on $KARGO_STAGE_ACCOUNTS after 1200s"; return 1; }
+  holds=$(stage_get '{.status.effectiveAutoPromotionHolds}')
+  [ -z "$holds" ] || { echo "effectiveAutoPromotionHolds is not empty: $holds"; return 1; }
+  echo "lastPromotion $(last_promo) verified ($(ver_id)); no auto-promotion holds"
 }
 
 prereqs

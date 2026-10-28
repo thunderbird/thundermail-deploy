@@ -60,9 +60,22 @@ no_freight() {
   FREIGHT="\${FREIGHT}"
 }
 
+created() { "${KH[@]}" -n "$KARGO_PROJECT_CONFIGS" get freight "$1" -o jsonpath='{.metadata.creationTimestamp}'; }
+
+not_older() {
+  local fb="" file a b
+  file=${FREIGHT_BEFORE:-$(find "$EVIDENCE_DIR" -maxdepth 1 -name 'freight-before-*.txt' -size +0 -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)}
+  [ ! -s "$file" ] || fb=$(cat "$file")
+  if [ -z "$fb" ] || [ "$fb" = "$1" ]; then echo "stage Freight before W5: ${fb:-unknown}"; return 0; fi
+  a=$(created "$1") && b=$(created "$fb") || return 1
+  echo "stage Freight before W5: $fb ($b); T6 match: $1 ($a)"
+  [ "$a" \> "$b" ] || [ "$a" = "$b" ]
+}
+
 freight() {
   resolve_t6 || { no_freight "T6_SHA unresolved (merge commit of the #1541 values PR)"; return; }
   freight_for "$T6_SHA" || { no_freight "no Freight to promote for T6_SHA"; return; }
+  not_older "$FREIGHT_FOUND" || { no_freight "the stage runs a newer Freight than the T6 match: promoting $FREIGHT_FOUND would roll it back"; return; }
   FREIGHT=$FREIGHT_FOUND
   setenv FREIGHT "$FREIGHT"
 }
@@ -171,6 +184,6 @@ step unmigrated-apply changes unmigrated_apply
 step unban-nginx banned unban_nginx
 step reload "" reload
 step accounts-stalwart-check http_code accounts_check
-printf 'manual: create and delete one app password for %s through Accounts (manage.py shell in deploy/accounts-web), check both Stalwart calls 2xx in the accounts-web log, then create one more and append TEST_SENDER_APP_PASSWORD to %s\n' "$TEST_USER" "$ENV_FILE"
+printf 'manual: create and delete one app password for %s through Accounts (manage.py shell in deploy/accounts-web), check both Stalwart calls 2xx in the accounts-web log, then create one more and store it with: bash %s --apply (reads it from stdin, checks a JMAP session, appends TEST_SENDER_APP_PASSWORD to %s)\n' "$TEST_USER" "$MIG_DIR/window/test-sender-password.sh" "$ENV_FILE"
 printf '  + %s | grep -cE %s\n' "$(shq "${KS[@]}" -n accounts logs deploy/accounts-web --since=10m)" "'app.?password'"
 finish

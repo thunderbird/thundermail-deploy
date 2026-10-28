@@ -23,7 +23,7 @@ snap() {
   VALUE=$(grep -c . "$REPLICAS_BEFORE")
   setenv REPLICAS_BEFORE "$REPLICAS_BEFORE" || return 1
   printf '%s\n' \
-    "gh pr merge \"\$THAW_PR\" -R $PI --merge" \
+    "gh pr ready \"\$THAW_PR\" -R $PI; gh pr merge \"\$THAW_PR\" -R $PI --merge (an approval first if PI main requires one)" \
     "bash $MIG_DIR/restore-replicas.sh $REPLICAS_BEFORE --dry-run" \
     "bash $MIG_DIR/restore-replicas.sh $REPLICAS_BEFORE --apply" > "$RESTORE" || return 1
   mark_restore
@@ -37,7 +37,7 @@ open_promotions() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get promotions -o js
 
 freeze() {
   local open
-  run gh pr merge "$FREEZE_PR" -R "$PI" --merge || return 1
+  merge_pr "$PI" "$FREEZE_PR" || return 1
   printf '  + bash %s, then reload %s for FREEZE_SHA and THAW_PR\n' "$THAW" "$ENV_FILE"
   printf '  + wait 400s each: app-of-apps sync revision contains FREEZE_SHA; %s selfHeal false; %s autoPromotionEnabled false\n' "$ARGO_APPS" "$KARGO_STAGE_ACCOUNTS"
   [ "$APPLY" = 1 ] || return 0
