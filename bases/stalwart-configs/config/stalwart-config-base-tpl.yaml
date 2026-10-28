@@ -336,6 +336,36 @@ value:
     match: {}
     else: 'false'
 ---
+# mustMatchSender only checks MAIL FROM, and DKIM signs by the envelope domain,
+# so without this any account could put any local address in From and pass
+# DMARC (GHSA-pjp3-mr54-7hxq). Also rejects alias/envelope mismatches and
+# send-on-behalf.
+'@type': upsert
+object: SieveSystemScript
+matchOn:
+  - name
+value:
+  from-must-match-sender:
+    name: from-must-match-sender
+    description: Reject authenticated mail whose From header is not the envelope sender
+    isActive: true
+    contents: |
+      require ["variables", "reject"];
+      if not address :all :comparator "i;ascii-casemap" :is "from" "${envelope.from}" {
+          reject "5.7.1 From header must match the authenticated sender";
+          stop;
+      }
+---
+'@type': update
+object: MtaStageData
+value:
+  script:
+    match:
+      '0':
+        if: '!is_empty(authenticated_as)'
+        then: "'from-must-match-sender'"
+    else: 'false'
+---
 '@type': update
 object: MtaSts
 value:
