@@ -16,6 +16,10 @@ W=$(basename "$0" .sh)
 KEY=$(tr '[:lower:]' '[:upper:]' <<<"${W%%-*}")
 SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
 KS=(kubectl --kubeconfig "${KUBECONFIG_STAGE:-}")
+KH=(kubectl --kubeconfig "${KUBECONFIG_HUB:-}")
+TMD_URL=https://github.com/thunderbird/thundermail-deploy.git
+PREVIEW_BRANCH=env/tb-stage-thundermail-stalwart-configs-preview
+CFG_PATHS="overlays/tb-stage-thundermail/stalwart-configs bases/stalwart-configs"
 SUF=""
 [ "$APPLY" = 1 ] || SUF=.dry-run
 RESTORE=$EVIDENCE_DIR/$W-restore$SUF.txt
@@ -167,6 +171,29 @@ port_forward() {
   PF=$!
   until_ok 30 curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "port-forward to $pod did not answer"; return 1; }
   echo "port-forward $pod -> $STALWART_URL"
+}
+
+cfg_trees() {
+  local p
+  for p in $CFG_PATHS; do git -C "$REPO_DIR" rev-parse -q --verify "$1:$p" 2>/dev/null || echo none; done | tr '\n' ' '
+}
+
+freight_for() {
+  local sha=$1 want main list name id
+  FREIGHT_FOUND=""
+  [ -n "$sha" ] || { echo "freight_for: no commit given"; return 1; }
+  timeout 120 git -C "$REPO_DIR" fetch -q "$TMD_URL" "+refs/heads/main:refs/remotes/window/main" "+refs/heads/$PREVIEW_BRANCH:refs/remotes/window/preview" || { echo "git fetch of main and $PREVIEW_BRANCH failed"; return 1; }
+  want=$(cfg_trees "$sha")
+  case "$want" in *none*) echo "$sha does not resolve $CFG_PATHS"; return 1 ;; esac
+  main=$(cfg_trees refs/remotes/window/main)
+  [ "$want" = "$main" ] || { echo "main changed $CFG_PATHS after $sha: promoting a Freight for $sha would roll main back"; return 1; }
+  list=$("${KH[@]}" -n "$KARGO_PROJECT_CONFIGS" get freight -o json | jq -r --arg wh "${KARGO_WAREHOUSE_CONFIGS:-}" '.items | map(select($wh == "" or .origin.name == $wh)) | sort_by(.metadata.creationTimestamp) | reverse | .[] | "\(.metadata.name) \(.commits[0].id // "")"') || return 1
+  while read -r name id; do
+    [ -n "$id" ] || continue
+    if [ "$(cfg_trees "$id")" = "$want" ]; then FREIGHT_FOUND=$name; break; fi
+  done <<<"$list"
+  [ -n "$FREIGHT_FOUND" ] || { echo "no Freight from ${KARGO_WAREHOUSE_CONFIGS:-$KARGO_PROJECT_CONFIGS} has a preview commit with the $CFG_PATHS trees of $sha"; return 1; }
+  echo "Freight $FREIGHT_FOUND (preview commit $id) matches $sha"
 }
 
 finish() {

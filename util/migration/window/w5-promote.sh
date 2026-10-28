@@ -6,13 +6,10 @@ pending STALWART_ADMIN_ACCOUNT_ID TEST_USER
 export STALWART_URL STALWART_USER STALWART_PASSWORD STALWART_ADMIN_ACCOUNT_ID
 PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
 S=$SECRET_DIR
-KH=(kubectl --kubeconfig "$KUBECONFIG_HUB")
 PHASE=1
 [ "$APPLY" = 1 ] && [ -n "$GO" ] && PHASE=2
 PROMOTION=$EVIDENCE_DIR/promotion-configs-$TS.yaml
 PROMOTION_RESTORE=$EVIDENCE_DIR/promotion-configs-restore$SUF-$TS.yaml
-PREVIEW_BRANCH=env/tb-stage-thundermail-stalwart-configs-preview
-CFG_PATHS="overlays/tb-stage-thundermail/stalwart-configs bases/stalwart-configs"
 UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname mail.stage-thundermail.com
   --skip WebHook --skip AllowedIp --skip MtaSts --skip MtaQueueQuota --skip Security --skip Calendar --skip AddressBook --skip Http)
 
@@ -44,11 +41,6 @@ snap_settings() {
   mark_restore
 }
 
-cfg_trees() {
-  local p
-  for p in $CFG_PATHS; do git -C "$REPO_DIR" rev-parse -q --verify "$1:$p" 2>/dev/null || echo none; done | tr '\n' ' '
-}
-
 resolve_t6() {
   local sha
   [ -z "${T6_SHA:-}" ] || return 0
@@ -69,20 +61,9 @@ no_freight() {
 }
 
 freight() {
-  local want list name id f=""
   resolve_t6 || { no_freight "T6_SHA unresolved (merge commit of the #1541 values PR)"; return; }
-  timeout 120 git -C "$REPO_DIR" fetch -q https://github.com/thunderbird/thundermail-deploy.git main "+refs/heads/$PREVIEW_BRANCH:refs/remotes/origin/$PREVIEW_BRANCH" || { echo "git fetch of main and $PREVIEW_BRANCH failed"; return 1; }
-  want=$(cfg_trees "$T6_SHA")
-  case "$want" in *none*) no_freight "T6_SHA $T6_SHA does not resolve $CFG_PATHS"; return ;; esac
-  list=$("${KH[@]}" -n "$KARGO_PROJECT_CONFIGS" get freight -o json | jq -r --arg wh "${KARGO_WAREHOUSE_CONFIGS:-}" '.items | map(select($wh == "" or .origin.name == $wh)) | sort_by(.metadata.creationTimestamp) | reverse | .[] | "\(.metadata.name) \(.commits[0].id // "")"') || return 1
-  while read -r name id; do
-    [ -n "$id" ] || continue
-    if [ "$(cfg_trees "$id")" = "$want" ]; then f=$name; break; fi
-  done <<<"$list"
-  echo "T6_SHA $T6_SHA config trees: $want"
-  [ -n "$f" ] || { no_freight "no Freight from ${KARGO_WAREHOUSE_CONFIGS:-the project} has a preview commit with those trees"; return; }
-  echo "Freight $f (preview commit $id)"
-  FREIGHT=$f
+  freight_for "$T6_SHA" || { no_freight "no Freight to promote for T6_SHA"; return; }
+  FREIGHT=$FREIGHT_FOUND
   setenv FREIGHT "$FREIGHT"
 }
 
@@ -154,12 +135,14 @@ reload() {
 }
 
 accounts_check() {
-  local cmd="curl -s -o /dev/null -w '%{http_code}\n' -u \"\$STALWART_JMAP_API_AUTH_USER:\$STALWART_JMAP_API_AUTH_SECRET\" \"\$STALWART_JMAP_API_URL/api/principal?limit=1\""
+  local out id cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
   printf '  + %s\n' "$(shq "${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd")"
   [ "$APPLY" = 1 ] || return 0
-  VALUE=$("${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd") || return 1
-  echo "Accounts -> Stalwart GET /api/principal: $VALUE"
-  [ "$VALUE" = 200 ]
+  out=$("${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd") || return 1
+  VALUE=$(tail -1 <<<"$out")
+  id=$(sed '$d' <<<"$out" | jq -r '.primaryAccounts["urn:stalwart:jmap"] // empty' 2>/dev/null || true)
+  echo "Accounts -> Stalwart GET /jmap/session: $VALUE urn:stalwart:jmap account ${id:+present}${id:-missing}"
+  [ "$VALUE" = 200 ] && [ -n "$id" ]
 }
 
 prereqs

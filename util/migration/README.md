@@ -99,8 +99,8 @@ the keying for the real hosts.
 
 ## Window scripts
 
-`window/w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`, `w5-promote.sh` and
-`w6-verify.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
+`window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
+`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
 `~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
@@ -120,7 +120,14 @@ the keying for the real hosts.
   `--apply` once per cut (a `restore-W<n>` row); dry runs write `*.dry-run.txt`.
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
-- W5 selects the Freight whose preview commit has the same
-  `overlays/tb-stage-thundermail/stalwart-configs` and `bases/stalwart-configs` trees as `T6_SHA`
-  (preview commits never carry the merge SHA). `T6_SHA` comes from the env file or, when empty,
-  from the merge commit of `T6_PR`, and W5 appends it.
+- W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
+  4 `mail.` CNAME and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
+  edits `spf.` in place to `SPF_FINAL_TXT` (custom domains include it, so it is never deleted).
+- `cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT]` is dry-run by default; an SPF upsert edits
+  the one `v=spf1` TXT at NAME in place, empty content is refused, and it refuses to delete `spf.*`
+  or touch `_externaldns.*`.
+- `freight_for SHA` (window/lib.sh), used by W5 and W7, selects the Freight whose preview commit has the same
+  `overlays/tb-stage-thundermail/stalwart-configs` and `bases/stalwart-configs` trees as SHA
+  (preview commits never carry the merge SHA), and stops when TMD main has changed those paths since
+  SHA or no Freight matches. `T6_SHA` comes from the env file or, when empty, from the merge commit
+  of `T6_PR`, and W5 appends it. T7 and T8 read `T7_PR`/`T7_REVERT_PR` and `T8_PR`/`T8_REVERT_PR`.
