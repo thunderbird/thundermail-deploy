@@ -51,9 +51,13 @@ the keying for the real hosts.
 - `restore-ecs.sh` restores desiredCount first, then min/max, then clears the suspension.
 - `snapshot-realm.sh URL` and `restore-realm.sh` use the Keycloak admin REST API through
   `curl` with the client credentials from the env file (same calls `kcadm` would make).
-- `gate-django-migrations.sh` compares the pinned image's migration plan (from the running
-  `accounts-web` pod) with `django_migrations` on the legacy main branch read through the
-  runner, so no one-off pod and no password in a pod spec.
+- `gate-django-migrations.sh --capture` (#1551, while `accounts-web` is up) saves the image's
+  migration plan and image as `django-plan-<ts>.txt`/`.image` in the evidence dir. The gate
+  compares that plan with `django_migrations` on the legacy main branch read through the
+  runner and fails if the deployment image changed, so it works with Accounts scaled to 0.
+- `gate-keycloak-version.sh` compares `migration_model` on the legacy main branch (runner)
+  with `KC_IMAGE_VERSION`, or with `kc.sh --version` run by podman on the statefulset image;
+  it never execs into a Keycloak pod.
 - `restore-target-db.sh` refuses to run unless the target host equals the tb-stage overlay
   host (direct form), differs from the legacy host, and `current_database()` is `neondb`.
 - `migrate_v016.py` is the upstream release copy (stalwartlabs/stalwart v0.16.26,
