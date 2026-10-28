@@ -128,7 +128,7 @@ delivery() {
 }
 
 submission() {
-  timeout 60 swaks --helo w7-check.local --to "$TEST_MAILBOX" --from "$TEST_SENDER" --server "$NLB_IP:587" --tls --tls-sni "$M" --tls-verify --tls-verify-target "$M" --auth PLAIN --auth-user "$TEST_SENDER" --auth-password "$TEST_SENDER_APP_PASSWORD" --header "Subject: $SUBJECT-out" >/dev/null 2>&1 || { echo "authenticated submission failed"; return 1; }
+  SWAKS_OPT_auth_password="$TEST_SENDER_APP_PASSWORD" timeout 60 swaks --helo w7-check.local --to "$TEST_MAILBOX" --from "$TEST_SENDER" --server "$NLB_IP:587" --tls --tls-sni "$M" --tls-verify --tls-verify-target "$M" --auth PLAIN --auth-user "$TEST_SENDER" --header "Subject: $SUBJECT-out" >/dev/null 2>&1 || { echo "authenticated submission failed"; return 1; }
   echo "250 for $TEST_MAILBOX; check SPF and DKIM pass in its received headers"
 }
 
@@ -168,7 +168,7 @@ probes() {
 }
 
 mail() {
-  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (subject %s), JMAP poll 300s, swaks 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
+  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (subject %s), JMAP poll 300s, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
   [ "$APPLY" = 1 ] || return 0
   chk inbound-test-user inbound "$TEST_USER"
   chk inbound-postmaster inbound "postmaster@$Z"
