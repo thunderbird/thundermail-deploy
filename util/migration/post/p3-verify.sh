@@ -24,6 +24,8 @@ if sys.argv[1] == "uidnext":
     sys.exit(0)
 since, domain, deadline = int(sys.argv[2]), sys.argv[3], time.time() + int(sys.argv[4])
 rcpt = os.environ["RCPT"].lower()
+seen = set()
+mismatch = False
 while time.time() < deadline:
     m.select("INBOX", readonly=True)
     for uid in m.uid("search", None, f"UID {since}:*")[1][0].split():
@@ -33,13 +35,16 @@ while time.time() < deadline:
         h = email.message_from_bytes(raw)
         addr = email.utils.parseaddr(h.get("From", ""))[1]
         to = [a.lower() for _, a in email.utils.getaddresses(h.get_all("To", []))]
-        if rcpt not in to or "password" not in h.get("Subject", "").lower():
+        if uid in seen or rcpt not in to or "password" not in h.get("Subject", "").lower():
             continue
+        seen.add(uid)
         print(f"uid={uid.decode()} date={h.get('Date')} from={addr} subject={h.get('Subject')}")
-        sys.exit(0 if addr.lower().endswith("@" + domain) else 3)
+        if addr.lower().endswith("@" + domain):
+            sys.exit(0)
+        mismatch = True
     time.sleep(15)
-print("no reset mail before the deadline")
-sys.exit(4)
+print("no reset mail from @" + domain + " before the deadline")
+sys.exit(3 if mismatch else 4)
 PY
 }
 
