@@ -192,6 +192,7 @@ spec:
         - name: cloudflare-api-token
           secret:
             secretName: stalwart-cloudflare-api-token
+            optional: true
             items:
               - key: STALWART_CLOUDFLARE_API_TOKEN
                 path: STALWART_CLOUDFLARE_API_TOKEN
