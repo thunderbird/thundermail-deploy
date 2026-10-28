@@ -1,3 +1,6 @@
+# shellcheck shell=bash
+ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
+if [ -f "$ENV_FILE" ]; then set -a; eval "$(< "$ENV_FILE")"; set +a; fi
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS
@@ -11,20 +14,31 @@ while [ $# -gt 0 ]; do
 done
 W=$(basename "$0" .sh)
 KEY=$(tr '[:lower:]' '[:upper:]' <<<"${W%%-*}")
-ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
 SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
 KS=(kubectl --kubeconfig "${KUBECONFIG_STAGE:-}")
-RESTORE=$EVIDENCE_DIR/$W-restore.txt
+SUF=""
+[ "$APPLY" = 1 ] || SUF=.dry-run
+RESTORE=$EVIDENCE_DIR/$W-restore$SUF.txt
 LOG=$EVIDENCE_DIR/$W-$(mode)-$TS.log
 NEEDS=0
 PF=""
-exec > >(tee -a "$LOG") 2>&1
+exec > >(exec setsid tee -a "$LOG") 2>&1
 trap 'stop "command failed at line $LINENO"' ERR
+trap 'stop "interrupted by signal"' INT TERM HUP
 trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null || true' EXIT
 
 sn() { if [ "$APPLY" = 1 ]; then printf '%s' "$1"; else printf 'dryrun-%s' "$1"; fi; }
 row() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(printf '%s' "$5" | tr '\t\n\r' '   ')" >> "$TIMING_TSV"; }
-again() { local l; l=$(tail -1 "$TIMING_TSV"); row "$(cut -f1 <<<"$l")" "$(cut -f2 <<<"$l")" "$(cut -f3 <<<"$l")" "$1" "$2"; }
+mark() { local now; now=$(date -u +%FT%TZ); row "$1" "$now" "$now" "$2" "$3"; }
+again() {
+  local l
+  l=$(awk -F'\t' -v s="$1" '$1 == s {l = $0} END {print l}' "$TIMING_TSV")
+  [ -n "$l" ] || return 1
+  row "$1" "$(cut -f2 <<<"$l")" "$(cut -f3 <<<"$l")" "$2" "$3"
+}
+after_cut() { awk -F'\t' -v s="$1" '$1 == "cut-ecs" {l = ""} $1 == s {l = $0} END {if (l != "") print l}' "$TIMING_TSV" 2>/dev/null; }
+restore_staged() { [ "$APPLY" = 1 ] && [ -s "$RESTORE" ] && [ -n "$(after_cut "restore-$KEY")" ]; }
+mark_restore() { [ "$APPLY" = 0 ] || mark "restore-$KEY" file "$RESTORE"; }
 cq() { local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
 curl_user() { printf 'user = "%s:%s"\n' "$(cq "$1")" "$(cq "$2")"; }
 doh() { curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data][0] // empty'; }
@@ -56,7 +70,7 @@ until_ok() { local end=$(( $(date +%s) + $1 )); shift; until "$@"; do [ "$(date 
 
 stop() {
   local now; now=$(date -u +%FT%TZ)
-  trap - ERR
+  trap - ERR INT TERM HUP
   printf 'STOP %s (%s): %s\n' "$KEY" "$(mode)" "$*"
   row "$(sn "stop-$KEY")" "$now" "$now" reason "$*"
   if [ -s "$RESTORE" ]; then
@@ -77,11 +91,9 @@ step() {
 }
 
 go_gate() {
-  local now
   if [ "$APPLY" = 0 ]; then printf '== operator go: the writes below run only with --apply --go "<operator words>"\n'; return 0; fi
   [ -n "$GO" ] || stop "no operator go: rerun with --apply --go '<the operator's words>'"
-  now=$(date -u +%FT%TZ)
-  row "go-$KEY" "$now" "$now" quote "$GO"
+  mark "go-$KEY" quote "$GO"
   printf '== operator go recorded in %s: %s\n' "$TIMING_TSV" "$GO"
 }
 
@@ -113,7 +125,7 @@ pending() {
   local v
   for v in "$@"; do
     [ -n "${!v:-}" ] && continue
-    [ "$APPLY" = 1 ] && stop "$v is empty in $ENV_FILE"
+    [ "$APPLY" = 1 ] && stop "$v is empty in $ENV_FILE (an earlier window step appends it)"
     printf "PENDING  %s is filled in-window; shown as \${%s} below\n" "$v" "$v"
     printf -v "$v" "\${%s}" "$v"
   done
@@ -124,16 +136,34 @@ setenv() {
   printf '  + append %s=%s to %s\n' "$1" "$2" "$ENV_FILE"
   [ "$APPLY" = 1 ] || return 0
   q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
-  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE"
+  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE" || return 1
   export "$1=$2"
 }
 
+listener() { ss -ltnpH "sport = :$1" 2>/dev/null; }
+owned_by() { local l; l=$(listener "$1"); [ -n "$l" ] && ! grep -vq "users:((\"$2\"" <<<"$l"; }
+
+legacy_tunnel() {
+  local hp=${OLD_STALWART_URL#*://}
+  hp=${hp%%/*}
+  case "${hp%:*}" in
+    127.0.0.1|localhost|'[::1]') ;;
+    *) echo "OLD_STALWART_URL is not a loopback URL: credentials not sent"; return 1 ;;
+  esac
+  owned_by "${hp##*:}" session-manager || { echo "no SSM tunnel owned by $(id -un) on :${hp##*:} (or a foreign listener): credentials not sent"; return 1; }
+}
+
 port_forward() {
-  local pod
-  if curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live"; then echo "port-forward already answers on $STALWART_URL"; return 0; fi
+  local pod port=${STALWART_URL##*:}
+  if [ -n "$(listener "$port")" ]; then
+    owned_by "$port" kubectl || { echo "a listener on :$port is not a kubectl owned by $(id -un): credentials not sent"; return 1; }
+    curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "kubectl listener on :$port does not answer"; return 1; }
+    echo "reusing the kubectl port-forward on $STALWART_URL"
+    return 0
+  fi
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart --field-selector=status.phase=Running -o name | head -1)
   [ -n "$pod" ] || { echo "no Running Stalwart pod"; return 1; }
-  "${KS[@]}" -n thundermail port-forward "$pod" "${STALWART_URL##*:}:8080" >/dev/null 2>&1 &
+  "${KS[@]}" -n thundermail port-forward "$pod" "$port:8080" >/dev/null 2>&1 &
   PF=$!
   until_ok 30 curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "port-forward to $pod did not answer"; return 1; }
   echo "port-forward $pod -> $STALWART_URL"

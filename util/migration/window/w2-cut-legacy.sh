@@ -2,7 +2,7 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need LEGACY_PUB_SG LEGACY_PUB_SG_RULE_IDS LEGACY_PUB_LB_ARN LEGACY_ECS_TARGETS LEGACY_ASG_RESOURCE_IDS OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD
-RESTORE=$EVIDENCE_DIR/cut-legacy-restore.txt
+RESTORE=$EVIDENCE_DIR/cut-legacy-restore$SUF.txt
 AWSL=(aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION")
 MAIL_HOST=mail.stage-thundermail.com
 WEB_HOSTS="accounts-stage.tb.pro auth-stage.tb.pro"
@@ -51,6 +51,7 @@ stage_restore() {
 
 mgmt() {
   local body
+  legacy_tunnel || return 1
   body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/principal?types=domain") || { echo "mgmt API on $OLD_STALWART_URL did not answer"; return 1; }
   jq -e '.data' <<<"$body" >/dev/null 2>&1 || { echo "mgmt API on $OLD_STALWART_URL answered without data"; return 1; }
   echo "mgmt API answers on $OLD_STALWART_URL (domains=$(jq -r '.data.total // (.data.items | length)' <<<"$body"))"
@@ -75,11 +76,16 @@ probe_legacy() {
   VALUE=$open
 }
 
+closed() { probe_legacy && [ "$VALUE" = 0 ]; }
+
 cut_stalwart() {
   run "${AWSL[@]}" ec2 revoke-security-group-ingress --group-id "$LEGACY_PUB_SG" --security-group-rule-ids "${RULES[@]}" --query Return --output text || return 1
-  probe_legacy || return 1
-  if [ "$APPLY" = 1 ] && [ "$VALUE" != 0 ]; then echo "$VALUE legacy port(s) still open after the revoke"; return 1; fi
-  mgmt
+  if [ "$APPLY" = 1 ]; then
+    until_ok 90 closed || { echo "$VALUE legacy port(s) still open 90s after the revoke"; return 1; }
+  else
+    probe_legacy || return 1
+  fi
+  mgmt || [ "$APPLY" = 0 ]
 }
 
 running() {
@@ -123,15 +129,18 @@ prereqs
 step snap-legacy-sg rules snap_sg
 step snap-ecs services snap_ecs
 step stage-restore files stage_restore
-mgmt || stop "mgmt tunnel does not answer before the cut"
+if ! mgmt; then
+  [ "$APPLY" = 0 ] || stop "mgmt tunnel does not answer before the cut"
+  NEEDS=$((NEEDS + 1))
+fi
 go_gate
 step cut-stalwart open_ports cut_stalwart
 step cut-ecs drain_seconds cut_ecs
-setenv CUT_ECS_END "$(tail -1 "$TIMING_TSV" | cut -f3)"
+setenv CUT_ECS_END "$(after_cut "$(sn cut-ecs)" | cut -f3)" || stop "could not append CUT_ECS_END to $ENV_FILE"
 if [ "$APPLY" = 1 ]; then
   step check-503 not_503 until_ok 180 check_503
 else
   step check-503 not_503 check_503
 fi
-mgmt || stop "mgmt tunnel stopped answering"
+mgmt || [ "$APPLY" = 0 ] || stop "mgmt tunnel stopped answering"
 finish

@@ -10,18 +10,25 @@ LEGACY_SIZE=$EVIDENCE_DIR/blobs-legacy-$TS.txt
 COPY_LOG=$SECRET_DIR/rclone-copy-$(mode)-$TS.log
 COPY=(rclone copy "$LEG" "$TGT" --transfers 64 --checkers 64 --s3-no-check-bucket --fast-list --retries 5 --low-level-retries 20 --stats 60s --stats-one-line --stats-log-level NOTICE --log-level NOTICE --log-file "$COPY_LOG")
 
+first_zero() { awk -F'\t' '$1 == "cut-ecs" {z = 0} $1 == "snap-blobs" && $4 == "objects" && $5 == "0" {z = 1} END {exit !z}' "$TIMING_TSV" 2>/dev/null; }
 listed() { rclone lsd "$1:" | awk -v b="$2" '$NF == b {f = 1} END {exit !f}'; }
 
 snap_blobs() {
   rclone size "$TGT" --json > "$TARGET_BEFORE" || return 1
   VALUE=$(jq -r .count "$TARGET_BEFORE")
   echo "target $TGT objects=$VALUE bytes=$(jq -r .bytes "$TARGET_BEFORE") ($TARGET_BEFORE)"
-  if [ "$VALUE" = 0 ]; then
-    printf 'rclone delete %s --dry-run\nrclone delete %s\n' "$TGT" "$TGT" > "$RESTORE"
+  if restore_staged; then
+    echo "restore already staged for this cut: $RESTORE"
+  elif [ "$VALUE" = 0 ]; then
+    printf 'rclone delete %s --dry-run\nrclone delete %s\n' "$TGT" "$TGT" > "$RESTORE" || return 1
+    mark_restore
   else
-    printf 'none staged: %s held %s objects before the copy, so rclone delete is not safe\n' "$TGT" "$VALUE" > "$RESTORE"
+    printf 'none staged: %s held %s objects before the copy, so rclone delete is not safe\n' "$TGT" "$VALUE" > "$RESTORE" || return 1
+    mark_restore
   fi
-  [ "$APPLY" = 0 ] || [ "$VALUE" = 0 ] || { echo "target bucket is not empty before the copy"; return 1; }
+  if [ "$APPLY" = 0 ] || [ "$VALUE" = 0 ]; then return 0; fi
+  first_zero || { echo "target bucket is not empty and no snap-blobs row for this cut saw it empty"; return 1; }
+  echo "resuming: an earlier snap-blobs row for this cut saw 0 objects"
 }
 
 legacy_size() {
@@ -36,7 +43,7 @@ copy() {
   local want; want=$(jq -r .count "$LEGACY_SIZE")
   if [ "$APPLY" = 1 ]; then
     run "${COPY[@]}" || { echo "rclone copy failed; log $COPY_LOG"; return 1; }
-    grep -a 'Transferred:' "$COPY_LOG" | tail -1 | sed 's/^.*NOTICE: */  last stats: /'
+    grep -aE 'NOTICE: +[0-9.]+ [KMGT]?i?B / ' "$COPY_LOG" | tail -1 | sed 's/^.*NOTICE: */  last stats: /'
     rclone size "$TGT" --json > "$EVIDENCE_DIR/blobs-target-after-$TS.txt" || return 1
     VALUE=$(jq -r .count "$EVIDENCE_DIR/blobs-target-after-$TS.txt")
     BYTES=$(jq -r .bytes "$EVIDENCE_DIR/blobs-target-after-$TS.txt")
@@ -53,23 +60,20 @@ copy() {
 }
 
 check_blobs() {
-  local out rc=0
+  local out rc=0 diffs
   out=$(rclone check "$LEG" "$TGT" 2>&1) || rc=$?
   printf '%s\n' "$out" > "$SECRET_DIR/rclone-check-$(mode)-$TS.log"
-  grep -aE 'differences found|matching files|files missing|missing on|hashes could not' <<<"$out" | grep -v 'ERROR' | sed 's/^.*NOTICE: */  /' || true
-  if [ "$rc" = 0 ]; then
-    VALUE=0
-  else
-    VALUE=$(sed -n 's/.* \([0-9][0-9]*\) differences found.*/\1/p' <<<"$out" | tail -1)
-    [ -n "$VALUE" ] || { echo "rclone check printed no difference count (exit $rc)"; return 1; }
-  fi
-  [ "$APPLY" = 0 ] || { [ "$rc" = 0 ] && [ "$VALUE" = 0 ]; }
+  grep -aE ': [0-9]+ (differences found|matching files|files missing|errors while checking|hashes could not)' <<<"$out" | sed -E 's/^.*(NOTICE|ERROR) *: */  /' || true
+  diffs=$(sed -n 's/.* \([0-9][0-9]*\) differences found.*/\1/p' <<<"$out" | tail -1)
+  echo "rclone check exit=$rc differences=${diffs:-unreported}"
+  if [ "$APPLY" = 0 ]; then VALUE=${diffs:-errors-exit-$rc}; return 0; fi
+  if [ "$rc" = 0 ]; then VALUE=0; else VALUE=errors-exit-$rc; return 1; fi
 }
 
 prereqs
 step snap-blobs objects snap_blobs
 step legacy-size objects legacy_size
 step blob-copy objects copy
-again bytes "$BYTES"
+again "$(sn blob-copy)" bytes "$BYTES" || stop "could not write the blob-copy bytes row"
 step blob-check differences check_blobs
 finish

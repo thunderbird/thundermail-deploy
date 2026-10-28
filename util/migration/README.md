@@ -100,15 +100,27 @@ the keying for the real hosts.
 ## Window scripts
 
 `window/w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`, `w5-promote.sh` and
-`w6-verify.sh` run one in-window step each, after the env file is sourced.
+`w6-verify.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
+`~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
+(`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
 - `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,
   and prints every write as the exact command; it never runs `kubectl exec`. Timing rows get a
   `dryrun-` prefix. `--apply` runs the writes.
-- W2 writes only with `--apply --go '<operator words>'`; W5 stops after the
-  `apply_unmigrated.py` dry run and continues with `--apply --go`; W4 needs `--go` to run
-  `DROP SCHEMA` a second time. The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
-- Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check prints
-  `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands
-  (`cut-legacy-restore.txt` for W2, `w<n>-*-restore.txt` otherwise) and exits 1. Nothing
+- W2 writes only with `--apply --go '<operator words>'`; W5 phase 1 (`--apply`) stops after
+  the `apply_unmigrated.py` dry run and records the plan counts, and phase 2 (`--apply --go`)
+  refuses a changed plan; W4 needs `--go` once a `drop-schema` row exists for the current cut.
+  The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
+- Legacy credentials are sent only to a loopback `OLD_STALWART_URL` served by the operator's own
+  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator.
+- Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check or signal prints
+  `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands and exits 1. Nothing
   rolls back automatically. Exit 2 means a NEED item is listed.
+- Restore files: `cut-legacy-restore.txt` for W2 and `w<n>-*-restore.txt` otherwise, written by
+  `--apply` once per cut (a `restore-W<n>` row); dry runs write `*.dry-run.txt`.
+- After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
+  ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
+- W5 selects the Freight whose preview commit has the same
+  `overlays/tb-stage-thundermail/stalwart-configs` and `bases/stalwart-configs` trees as `T6_SHA`
+  (preview commits never carry the merge SHA). `T6_SHA` comes from the env file or, when empty,
+  from the merge commit of `T6_PR`, and W5 appends it.

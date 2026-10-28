@@ -5,18 +5,23 @@ need STALWART_URL STALWART_USER STALWART_PASSWORD TARGET_NLB_DNS LEGACY_BLOB_BUC
 pending TEST_USER TEST_SENDER_APP_PASSWORD
 MAIL_HOST=mail.stage-thundermail.com
 VERIFY_OUT=$EVIDENCE_DIR/verify-$TS
+DEFAULT_WARN='got the default set'
+UNEXPECTED_WARN=0
 printf 'n/a: read-only step; %s stays as evidence\n' "$VERIFY_OUT" > "$RESTORE"
 
 suite() {
-  local out
+  local out f
   printf '  + . %s; bash %s > %s/run_all.txt 2>&1\n' "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/run_all.sh" "$VERIFY_OUT"
-  live verify/stage.env verify/run_all.sh || return "$APPLY"
   mkdir -p "$VERIFY_OUT"
   out=$(VERIFY_OUT=$VERIFY_OUT bash -c 'set -a; . "$1"; set +a; mkdir -p "$VERIFY_OUT"; bash "$2" > "$VERIFY_OUT/run_all.txt" 2>&1; echo "exit=$? out=$VERIFY_OUT"' _ "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/run_all.sh") || return 1
   VERIFY_OUT=${out##* out=}
-  VALUE=$(grep -c '^  FAIL  ' "$VERIFY_OUT/run_all.txt" || true)
-  printf 'run_all %s PASS=%s WARN=%s FAIL=%s (%s/run_all.txt)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$VERIFY_OUT/run_all.txt" || true)" "$(grep -c '^  WARN  ' "$VERIFY_OUT/run_all.txt" || true)" "$VALUE" "$VERIFY_OUT"
-  [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ]; }
+  f=$VERIFY_OUT/run_all.txt
+  VALUE=$(grep -c '^  FAIL  ' "$f" || true)
+  UNEXPECTED_WARN=$(grep '^  WARN  ' "$f" | grep -vc "$DEFAULT_WARN" || true)
+  printf 'run_all %s PASS=%s WARN=%s (outside the default set: %s) FAIL=%s (%s)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$f" || true)" "$(grep -c '^  WARN  ' "$f" || true)" "$UNEXPECTED_WARN" "$VALUE" "$f"
+  echo "counts:"
+  grep -E '^  (PASS|WARN)  .*[0-9]' "$f" | sed -E "s/'[^']*'/<x>/g; s/\"[^\"]*\"/<x>/g; s/[^ ]+@[^ ]+/<addr>/g" || true
+  [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ] && [ "$UNEXPECTED_WARN" = 0 ]; }
 }
 
 imap_folders() {
@@ -50,6 +55,9 @@ folders() {
 prereqs
 helpers verify/run_all.sh verify/stage.env
 if [ "$APPLY" = 1 ]; then port_forward || stop "no port-forward to Stalwart"; else port_forward || echo "no port-forward to Stalwart: target checks will fail"; fi
-step verify fails suite
+if live verify/stage.env verify/run_all.sh; then
+  step verify fails suite
+  again "$(sn verify)" unexpected_warns "$UNEXPECTED_WARN" || stop "could not write the verify unexpected_warns row"
+fi
 step imap-jmap-folders folders folders
 finish
