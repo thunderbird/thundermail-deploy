@@ -15,6 +15,8 @@ if [ "$DRY" = 1 ]; then
   printf 'dry-run: would run stalwart-cli snapshot %s --output %s\n' "$KINDS" "$settings"
   domains=$(stalwart-cli query Domain --fields id 2>/dev/null) || { echo "domains visible: unreachable (stalwart-cli could not query $STALWART_URL)"; exit 1; }
   printf 'domains visible: %s\n' "$(grep -c . <<<"$domains" || true)"
+  stalwart-cli snapshot $KINDS --quiet --output /dev/null || { echo "stalwart-cli snapshot $KINDS fails: add the kinds it names to KINDS"; exit 1; }
+  echo "snapshot of every kind resolves"
 else
   stalwart-cli snapshot $KINDS --output "$settings"
   printf 'settings objects=%s\n%s\n' "$(grep -c . "$settings")" "$settings"

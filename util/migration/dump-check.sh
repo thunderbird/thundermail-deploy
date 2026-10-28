@@ -26,7 +26,8 @@ for t in $TYPES; do
     known=$((known + server))
   elif [ "$t" = tenant ] && [ "$server" = error ] && [ "$dump" = 0 ]; then
     note="unreadable on both sides"
-  elif [ "$server" = "$all" ]; then
+  elif [ "$t" = other ] && [ "$server" = "$all" ]; then
+    known=$((known + dump))
     note="filter ignored, overall total"
   else
     bad=$((bad + 1))
@@ -36,4 +37,4 @@ done
 [ "$known" = "$all" ] || { echo "matched per-type counts sum to $known, the server total is $all"; bad=$((bad + 1)); }
 [ "$(jq length "$PRINCIPALS")" = "$all" ] || { echo "the dump holds $(jq length "$PRINCIPALS") principals, the server total is $all"; bad=$((bad + 1)); }
 [ "$bad" = 0 ] || die "dump-check: $bad check(s) failed between the server and $PRINCIPALS; do not convert this dump"
-echo "dump-check: every principal type matches ($(jq length "$PRINCIPALS") principals)"
+echo "dump-check: every compared principal type and the total match ($(jq length "$PRINCIPALS") principals)"
