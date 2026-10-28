@@ -64,6 +64,21 @@ the keying for the real hosts.
   a loopback `OLD_STALWART_URL` owned by this user's session-manager-plugin.
 - `restore-target-db.sh` refuses to run unless the target host equals the tb-stage overlay
   host (direct form), differs from the legacy host, and `current_database()` is `neondb`.
+- `retarget-export.sh export.json` points the converted export at tb-stage: BlobStore becomes S3
+  `$TARGET_BLOB_BUCKET` (region from the overlay `values.yaml`, keys `None`) and InMemoryStore
+  becomes `{"@type": "Redis", "url": $REDIS_URL}`; the original is kept as `export.json.pre-retarget`.
+- `quota-reset.sh --apply` creates the `resetUserQuotas` task from `quota-reset.json.tpl` for
+  `$STALWART_ADMIN_ACCOUNT_ID`, waits up to `QUOTA_RESET_TIMEOUT` (600 s) until no StoreMaintenance
+  or AccountMaintenance task is queued, then prints how many accounts show usage.
+- `promotion.yaml.tpl` (tb-stalwart-configs) and `promotion-accounts.yaml.tpl` (tb-accounts) hold
+  only `__TS__` and `__FREIGHT__`.
+- `apply_unmigrated.py` re-applies the v0.15 settings `convert` leaves out; `--only KIND[,KIND]`
+  is the inverse of `--skip` (`python3 test_apply_unmigrated.py`).
+- `shapes.py` reads dump values the way `migrate_v016.py` does (wrapped lists and strings,
+  durations, address domains); the helpers and `verify/` use it (`python3 test_shapes.py`).
+- `app_password_users.py` and `totp_users.py` take `--principals principals.json --out FILE.csv`
+  and list who loses app passwords or uses TOTP; `APP_PASSWORDS.md` has the notices and
+  `export_contacts.py` the Accounts contact export. `verify/` is the read-only check suite.
 - `migrate_v016.py` is the upstream release copy (stalwartlabs/stalwart v0.16.26,
   `resources/scripts/migrate_v016.py`, sha256 `ebc7c2cc8b3d9378476523ee5fd76c39b1bc0e788a890ff17b507b03c0757458`).
   Install its dependencies with `pip install -r util/migration/requirements.txt`.
