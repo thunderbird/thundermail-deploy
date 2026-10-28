@@ -101,7 +101,7 @@ the keying for the real hosts.
 
 `window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
 `w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
-`~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
+`/dev/shm/talos/cutover-tb-stage.env`, else `~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
 - `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,

@@ -1,5 +1,8 @@
 # shellcheck shell=bash
-ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
+ENV_FILE=${CUTOVER_ENV:-}
+if [ -z "$ENV_FILE" ]; then
+  for ENV_FILE in /dev/shm/talos/cutover-tb-stage.env "$HOME/.local/state/talos/cutover-tb-stage.env"; do [ -f "$ENV_FILE" ] && break; done
+fi
 if [ -f "$ENV_FILE" ]; then set -a; eval "$(< "$ENV_FILE")"; set +a; fi
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
