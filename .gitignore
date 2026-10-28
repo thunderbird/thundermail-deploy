@@ -22,3 +22,5 @@ unmigrated.txt
 apply.log
 convert.stderr
 verify-*/
+/config.json
+/util/migration/config.json

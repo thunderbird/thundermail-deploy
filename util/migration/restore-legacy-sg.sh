@@ -11,7 +11,7 @@ fail=0; n=0
 while IFS= read -r rule; do
   [ -n "$rule" ] || continue
   k=$(jq -r "$key" <<<"$rule")
-  grep -qxF "$k" <<<"$current" && continue
+  grep -qxF -- "$k" <<<"$current" && continue
   n=$((n + 1))
   perm=$(jq -c '{IpProtocol} + (if .FromPort != null then {FromPort, ToPort} else {} end)
     + (if .CidrIpv4 then {IpRanges: [{CidrIp: .CidrIpv4, Description: (.Description // "")}]}

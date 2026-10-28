@@ -11,6 +11,7 @@ test -n "$FREEZE_SHA"
 
 git -C "$PI_DIR" fetch origin main
 if git -C "$PI_DIR" fetch origin thaw-tb-stage 2>/dev/null; then
+  grep -q "This reverts commit $FREEZE_SHA" <<<"$(git -C "$PI_DIR" log origin/main..origin/thaw-tb-stage --format=%B)" || { echo "origin/thaw-tb-stage does not revert $FREEZE_SHA" >&2; exit 1; }
   git -C "$PI_DIR" checkout -B thaw-tb-stage origin/thaw-tb-stage
 else
   git -C "$PI_DIR" checkout -B thaw-tb-stage origin/main
@@ -31,7 +32,8 @@ Refs https://github.com/$PI_REPO/issues/1538"
 
 THAW_PR=$(gh pr create -R "$PI_REPO" --draft --base main --head thaw-tb-stage \
   --title "thaw: tb-stage selfHeal + auto-promotion" --body "$BODY" 2>/dev/null \
-  || gh pr view thaw-tb-stage -R "$PI_REPO" --json url -q .url)
+  || gh pr view thaw-tb-stage -R "$PI_REPO" --json url,state -q 'select(.state == "OPEN") | .url')
+: "${THAW_PR:?no open thaw PR for thaw-tb-stage}"
 
 printf 'FREEZE_SHA=%s\nTHAW_PR=%s\n' "$FREEZE_SHA" "$THAW_PR" >> "$ENV_FILE"
 echo "FREEZE_SHA=$FREEZE_SHA"

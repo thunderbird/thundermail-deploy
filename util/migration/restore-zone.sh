@@ -9,7 +9,7 @@ ZONE=""
 [ -n "$ZONE" ] || die "zone id not in the file name; pass --zone ZONE_ID"
 jq -e 'type == "array" and length > 0 and all(.[]; has("id") and has("name") and has("type"))' "$SNAP" >/dev/null || die "$SNAP is not a zone snapshot"
 need CF_API_TOKEN_AGENT
-protected='(.name | test("^_externaldns\\.")) or (.name | test("\\.dkim\\."))'
+protected='(.name | test("^_externaldns\\.")) or (.name | test("\\.dkim\\.|\\._domainkey\\."))'
 cur=$(mktemp); trap 'rm -f "$cur"' EXIT
 page=1
 : > "$cur"
@@ -30,7 +30,11 @@ plan=$(jq -n --slurpfile snap "$SNAP" --slurpfile curx <(jq -s '.' "$cur") "
       create: [\$s[] | select(\$byid[.id] == null)],
       update: [\$s[] | select(\$byid[.id] != null) | select(. != \$byid[.id])],
       delete: [\$c[] | select(\$sbyid[.id] == null)]
-    }")
+    }
+  | def k: del(.id);
+    (.create | map(k)) as \$ck | (.delete | map(k)) as \$dk
+  | .create |= map(select(k as \$x | any(\$dk[]; . == \$x) | not))
+  | .delete |= map(select(k as \$x | any(\$ck[]; . == \$x) | not))")
 body() { jq -c 'del(.id) | (if .data != null then del(.content) | del(.priority) else del(.data) end) | with_entries(select(.value != null))' <<<"$1"; }
 fail=0
 for op in delete update create; do

@@ -87,5 +87,6 @@ else
   echo "SKIP caldav PROPFIND: set P1_CALDAV_USER and P1_CALDAV_APP_PASSWORD"; skipped=$((skipped+1))
 fi
 
-if [ "$fail" -eq 0 ]; then echo "P1 VERIFY: PASS (skipped $skipped)"; else echo "P1 VERIFY: FAIL (skipped $skipped)"; fi
-exit "$fail"
+if [ "$fail" -ne 0 ]; then echo "P1 VERIFY: FAIL (skipped $skipped)"; exit "$fail"; fi
+if [ "$skipped" -ne 0 ]; then echo "P1 VERIFY: INCOMPLETE (skipped $skipped)"; exit 2; fi
+echo "P1 VERIFY: PASS"

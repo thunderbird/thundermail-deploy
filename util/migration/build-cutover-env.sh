@@ -13,7 +13,7 @@ ENV_FILE=${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-stage.env}
 VALUES=$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID"
-SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT"
+SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD"
 
 try() { ( "$@" ) 2>/dev/null || true; }
 prev() { [ -f "$ENV_FILE" ] || return 0; ( set +eu; . "$ENV_FILE" >/dev/null 2>&1; printf '%s' "${!1:-}" ); }
@@ -44,8 +44,9 @@ build() {
   KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$REPO_DIR/.work/kc-hub}")
   KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$REPO_DIR/.work/kc-dev}")
   mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
-  local tmp count=0 missing=0
+  local count=0 missing=0
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-tb-stage.XXXXXX")
+  trap 'rm -f "$tmp"' EXIT
   put() {
     local name=$1 value=$2 source=$3 q
     q=$(printf '%s' "$value" | sed "s/'/'\\\\''/g")
@@ -109,7 +110,7 @@ build() {
   put LEGACY_PUB_SG "$sg" "aws elbv2 describe-load-balancers --profile mzla-legacy --names mailstrom-stage-pub SecurityGroups[0]"
   put LEGACY_PUB_SG_RULE_IDS "$([ -n "$sg" ] && try aws_legacy ec2 describe-security-group-rules --filters "Name=group-id,Values=$sg" --query 'SecurityGroupRules[?IsEgress==`false`].SecurityGroupRuleId' --output text | tr '\t' '\n' | sort | tr '\n' ' ' | sed 's/ $//')" "aws ec2 describe-security-group-rules --profile mzla-legacy group-id=LEGACY_PUB_SG, ingress"
   local clusters targets=""
-  clusters=$(try aws_legacy ecs list-clusters --query 'clusterArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' | grep '^accounts-stage' | sort)
+  clusters=$(try aws_legacy ecs list-clusters --query 'clusterArns[]' --output text | tr '\t' '\n' | sed 's|.*/||' | { grep '^accounts-stage' || true; } | sort)
   for c in $clusters; do targets="$targets $(try aws_legacy ecs list-services --cluster "$c" --query 'serviceArns[]' --output text | tr '\t' '\n' | sed "s|.*/||; s|^|$c/|" | sort | tr '\n' ' ')"; done
   targets=$(echo $targets)
   put LEGACY_ECS_TARGETS "$targets" "aws ecs list-clusters/list-services --profile mzla-legacy, clusters accounts-stage*"
@@ -208,7 +209,7 @@ check() {
     [ "$s" = active ] && [ -n "$z" ] && { [ -z "$CF_ZONE_ID" ] || [ "$z" = "$CF_ZONE_ID" ]; } && echo "active, zone visible${CF_ZONE_ID:+ and equal to CF_ZONE_ID}" || { echo "status=$s zone_visible=$([ -n "$z" ] && echo yes || echo no)"; return 1; }
   }
   agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && [ -n "$CF_ZONE_ID_DEVTM" ] && echo "active, three zone ids set" || { echo "status=$s"; return 1; }; }
-  count_eq() { local got=$1 want=$2 what=$3; [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
+  count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
     local out snap
     out=$("$MIG_DIR/snapshot-$1.sh" ${3:-} 2>&1) || { echo "snapshot-$1.sh failed: $(tail -1 <<<"$out")"; return 1; }
@@ -231,8 +232,8 @@ check() {
   done
   chk stalwart-legacy-healthz http200 "$OLD_STALWART_URL/healthz/live"
   chk stalwart-target-healthz http200 "$STALWART_URL/healthz/live"
-  chk rclone-lsd-legacy bash -c 'rclone lsd leg: | grep -q "$LEGACY_BLOB_BUCKET" && echo "bucket listed"'
-  chk rclone-lsd-target bash -c 'rclone lsd tgt: | grep -q "$TARGET_BLOB_BUCKET" && echo "bucket listed"'
+  chk rclone-lsd-legacy bash -c '[ -n "$LEGACY_BLOB_BUCKET" ] && rclone lsd leg: | awk -v b="$LEGACY_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
+  chk rclone-lsd-target bash -c '[ -n "$TARGET_BLOB_BUCKET" ] && rclone lsd tgt: | awk -v b="$TARGET_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
   chk legacy-sg count_eq "$(aws_legacy ec2 describe-security-groups --group-ids "$LEGACY_PUB_SG" --query 'length(SecurityGroups)' 2>/dev/null)" 1 security_groups
   chk legacy-sg-rule-ids count_eq "$(aws_legacy ec2 describe-security-group-rules --security-group-rule-ids $LEGACY_PUB_SG_RULE_IDS --query 'length(SecurityGroupRules)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_PUB_SG_RULE_IDS")" rules
   chk legacy-ecs-services count_eq "$(for t in $LEGACY_ECS_TARGETS; do aws_legacy ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[?status==`ACTIVE`].serviceName' --output text; done 2>/dev/null | grep -c .)" "$(wc -w <<<"$LEGACY_ECS_TARGETS")" active_services
