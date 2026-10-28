@@ -9,6 +9,7 @@ fail=0; n=0; scaled=()
 while read -r ns kind name saved; do
   [ -n "$name" ] || continue
   current=$(kstage -n "$ns" get "$kind/$name" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo missing)
+  [ "$APPLY" = 1 ] && [ "$current" = "$saved" ] && scaled+=("$ns $kind $name $saved")
   [ "$current" = "$saved" ] && continue
   n=$((n + 1))
   printf 'SCALE %s %s/%s %s -> %s\n' "$ns" "$kind" "$name" "$current" "$saved"

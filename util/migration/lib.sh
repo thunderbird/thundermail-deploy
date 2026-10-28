@@ -38,6 +38,12 @@ legacy_loopback() {
   ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
   echo "OLD_STALWART_URL is loopback through the SSM tunnel of $(id -un)"
 }
+env_path_ok() {
+  local f=$1 d
+  d=$(dirname "$1")
+  [ ! -L "$d" ] && [ -O "$d" ] && [ -z "$(find "$d" -maxdepth 0 -perm /022)" ] || return 1
+  [ ! -e "$f" ] || { [ ! -L "$f" ] && [ -O "$f" ] && [ -z "$(find "$f" -maxdepth 0 -perm /022)" ]; }
+}
 load_operator_env() {
   local f=$1 name val
   [ -e "$f" ] || return 0

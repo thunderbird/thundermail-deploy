@@ -218,7 +218,7 @@ c_env_pr() {
 }
 c_recipients() {
   local dir; dir=$(ev SECRET_DIR)
-  [ -n "$dir" ] && [ -s "$dir/app-password-users.csv" ] && echo "$(($(grep -c . "$dir/app-password-users.csv") - 1)) recipient row(s) in \$SECRET_DIR/app-password-users.csv" || { echo "no app-password-users.csv in SECRET_DIR (#1547 part 2)"; return 1; }
+  [ -n "$dir" ] && [ "$(grep -c . "$dir/app-password-users.csv" 2>/dev/null || echo 0)" -gt 1 ] && echo "$(($(grep -c . "$dir/app-password-users.csv") - 1)) recipient row(s) in \$SECRET_DIR/app-password-users.csv" || { echo "no recipient rows in SECRET_DIR/app-password-users.csv (#1547 part 2)"; return 1; }
 }
 c_git_transport() {
   local bad="" r

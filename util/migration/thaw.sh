@@ -42,6 +42,7 @@ THAW_PR=$(gh pr create -R "$PI_REPO" --draft --base main --head thaw-tb-stage \
   || gh pr view thaw-tb-stage -R "$PI_REPO" --json url,state -q 'select(.state == "OPEN") | .url')
 : "${THAW_PR:?no open thaw PR for thaw-tb-stage}"
 
+env_path_ok "$ENV_FILE" || die "refusing to append to $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others"
 printf 'FREEZE_SHA=%s\nTHAW_PR=%s\n' "$FREEZE_SHA" "$THAW_PR" >> "$ENV_FILE"
 echo "FREEZE_SHA=$FREEZE_SHA"
 echo "THAW_PR=$THAW_PR"

@@ -29,11 +29,14 @@ k8s_secret() { kstage -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 
 direct() { sed 's/-pooler//'; }
 cf_zone() { [ -n "${CF_TOKEN:-}" ] || return 0; curl -sS -m 30 -K <(bearer "$CF_TOKEN") "$CF_API/zones?name=$1" | jq -r '.result[0].id // empty'; }
 pr_by_head() { gh pr list -R "thunderbird/$1" --state open --json number,headRefName --jq "[.[] | select(.headRefName | test(\"(^|/)$2\$\"))] | if length == 1 then .[0].number else empty end"; }
-neon_get() { curl -sS -m 60 -K <(bearer "$NEON_KEY") "$NEON_API/$1"; }
+neon_get() { curl -sS -m 60 -K <(bearer "${KEY:-$NEON_KEY}") "$NEON_API/$1"; }
 neon_lookup() {
-  local ep=${1%%.*} pid bid
-  [ -n "${NEON_KEY:-}" ] || return 0
-  for pid in $NEON_PROJECTS; do
+  local ep=${2%%.*} pid bid KEY pids
+  KEY=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$1")
+  KEY=${KEY:-${NEON_KEY:-}}
+  [ -n "$KEY" ] || return 0
+  pids=$(op "NEON_PROJECT_$1")
+  for pid in ${pids:-$NEON_PROJECTS}; do
     [ -n "${NEON_EP_CACHE[$pid]:-}" ] || NEON_EP_CACHE[$pid]=$(try neon_get "projects/$pid/endpoints" | jq -c '[.endpoints[]? | {id, branch_id}]')
     bid=$(jq -r --arg ep "$ep" '.[] | select(.id == $ep) | .branch_id' <<<"${NEON_EP_CACHE[$pid]:-[]}")
     if [ -n "$bid" ]; then
@@ -48,6 +51,7 @@ build() {
   KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
   KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
   mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
+  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   local count=0 missing=0
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-tb-stage.XXXXXX")
   trap 'rm -f "$tmp"' EXIT
@@ -95,12 +99,12 @@ build() {
   declare -A NEON_EP_CACHE=()
   [ -n "$NEON_KEY" ] && NEON_PROJECTS=$(try neon_get "projects?limit=400${org:+&org_id=$org}" | jq -r '.projects[]?.id' | tr '\n' ' ')
   local r
-  r=$(neon_lookup "$(jq -r '.host // empty' <<<"${lpg:-{\}}" | direct)")
+  r=$(neon_lookup STALWART_LEGACY "$(jq -r '.host // empty' <<<"${lpg:-{\}}" | direct)")
   put NEON_PROJECT_STALWART_LEGACY "$(op NEON_PROJECT_STALWART_LEGACY)$([ -n "$(op NEON_PROJECT_STALWART_LEGACY)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_LEGACY in the environment, else Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
   put NEON_LEGACY_STALWART_BRANCH "$(cut -f2 <<<"$r")" "Neon API: branch of that endpoint"
-  r=$(neon_lookup "$(try sm_legacy accounts/stage/keycloak-database-host | direct)")
+  r=$(neon_lookup KC "$(try sm_legacy accounts/stage/keycloak-database-host | direct)")
   put NEON_PROJECT_KC "$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
-  r=$(neon_lookup "$(try sm_legacy accounts/stage/database-host | direct)")
+  r=$(neon_lookup ACCOUNTS "$(try sm_legacy accounts/stage/database-host | direct)")
   put NEON_PROJECT_ACCOUNTS "$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
 
   put LEGACY_BLOB_BUCKET "$(try aws_legacy s3api list-buckets --query "Buckets[?contains(Name,'stage') && ends_with(Name,'-stalwart-s3-store')].Name | [0]" --output text | grep -v '^None$' || true)" "aws s3api list-buckets --profile mzla-legacy (name *stage*-stalwart-s3-store)"
@@ -199,6 +203,7 @@ build() {
 }
 
 check() {
+  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   [ -f "$ENV_FILE" ] || die "$ENV_FILE missing: run build-cutover-env.sh first"
   set -a; . "$ENV_FILE"; set +a
   . "$MIG_DIR/timing.sh"
