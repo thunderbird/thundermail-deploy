@@ -13,4 +13,4 @@ for _ in $(seq 1 30); do curl -sf -o /dev/null "http://localhost:$PORT/realms/ma
 token=$(curl -sS -m 30 -K <(printf 'data = "grant_type=client_credentials&client_id=%s&client_secret=%s"\n' "$CID" "$CSEC") "http://localhost:$PORT/realms/master/protocol/openid-connect/token" | jq -re '.access_token')
 out=$EVIDENCE_DIR/smtp-before-$TS.json
 curl -sS -m 30 -K <(printf 'header = "Authorization: Bearer %s"\n' "$token") "http://localhost:$PORT/admin/realms/$REALM" | jq '{smtpServer: (.smtpServer | del(.password))}' > "$out"
-printf 'realm=%s host=%s from=%s user=%s\n%s\n' "$REALM" "$(jq -r '.smtpServer.host // "unset"' "$out")" "$(jq -r '.smtpServer.from // "unset"' "$out")" "$(jq -r '.smtpServer.user // "unset"' "$out")" "$out"
+printf 'realm=%s host=%s from=%s envelopeFrom=%s user=%s\n%s\n' "$REALM" "$(jq -r '.smtpServer.host // "unset"' "$out")" "$(jq -r '.smtpServer.from // "unset"' "$out")" "$(jq -r '.smtpServer.envelopeFrom // "unset"' "$out")" "$(jq -r '.smtpServer.user // "unset"' "$out")" "$out"
