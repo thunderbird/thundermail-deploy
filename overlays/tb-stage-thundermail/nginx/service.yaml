@@ -18,8 +18,8 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0124358e1543bbab8, subnet-05eb3744fb2621593"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=tb-stage,project=thundermail"
     service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0485ef03e0bfe74c9" # stalwart-nginx-lb-thundermail
-    # PROXY protocol on every target group. Health checks use PROXY-aware pod port 8081, which is not a Service port.
-    service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: "*"
+    # Client IP preservation on every target group, no PROXY protocol. Health checks use pod port 8081, which is not a Service port.
+    service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "preserve_client_ip.enabled=true,proxy_protocol_v2.enabled=false"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8081"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/"

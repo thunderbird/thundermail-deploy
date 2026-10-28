@@ -6,6 +6,9 @@ metadata:
   namespace: thundermail
 spec:
   template:
+    metadata:
+      annotations:
+        thunderbird.net/nginx-config-rev: "pp2-off-1"
     spec:
       containers:
         - name: nginx
