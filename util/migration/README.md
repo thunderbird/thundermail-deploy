@@ -68,7 +68,9 @@ the keying for the real hosts.
   it never execs into a Keycloak pod.
 - `dump-check.sh [principals.json]` compares the legacy server's principal total per type with
   the dump and exits 1 on any difference (`migrate_v016.py dump` skips failed reads and still
-  exits 0); W4 runs it before `convert`. It and `--check` send the legacy admin password only to
+  exits 0); W4 runs it before `convert`. A type filter the server ignores (it returns the overall
+  total) and `tenant` unreadable on both sides are not compared; the matched per-type counts and
+  the dump size must both equal the overall total. It and `--check` send the legacy admin password only to
   a loopback `OLD_STALWART_URL` owned by this user's session-manager-plugin.
 - `restore-target-db.sh` refuses to run unless the target host equals the tb-stage overlay
   host (direct form), differs from the legacy host, and `current_database()` is `neondb`.
@@ -147,6 +149,13 @@ the keying for the real hosts.
   in the legacy bucket (the 0.16 web-admin bundle, written at pod start): it records their keys
   as a baseline, stages `rclone delete --exclude-from <baseline keys>` so a restore keeps them,
   and its `rclone check` is `--one-way` (every legacy object present and equal on the target).
+- W5 snapshots `BlockedIp AllowedIp Domain Security Http MtaQueueQuota Calendar AddressBook WebHook
+  BlobStore InMemoryStore` plus the kinds they reference (`AcmeProvider Directory Tenant DnsServer
+  Role`), so its restore reapplies those too. After `apply_unmigrated.py --apply` and the nginx
+  un-ban (`stalwart-cli delete BlockedIp --ids <id>`, id from `stalwart-cli query BlockedIp --where
+  address=<ip> --json`) it runs `stalwart-cli create action/ReloadSettings` and
+  `action/ReloadBlockedIps`, then reads back: `apply_unmigrated.py` dry run 0 changes, no nginx pod
+  IP in `BlockedIp`.
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,

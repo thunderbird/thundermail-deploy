@@ -37,7 +37,8 @@ snap_settings() {
     "$(shq "${KH[@]}" create -f "$PROMOTION_RESTORE")" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>} --dry-run" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>}" \
-    "stalwart-cli create action/ReloadSettings" > "$RESTORE" || return 1
+    "stalwart-cli create action/ReloadSettings" \
+    "stalwart-cli create action/ReloadBlockedIps" > "$RESTORE" || return 1
   mark_restore
 }
 
@@ -127,24 +128,47 @@ unmigrated_apply() {
   [ "$VALUE" = 0 ] || { echo "second dry run still reports $VALUE change(s)"; return 1; }
 }
 
+nginx_ips() { "${KS[@]}" -n thundermail get pod -l app=stalwart-nginx -o jsonpath='{.items[*].status.podIP}'; }
+banned_ids() { stalwart-cli query BlockedIp --where "address=$1" --json | jq -r '.id' | paste -sd, -; }
+
 unban_nginx() {
-  local ips ip banned
-  printf '  + stalwart-cli query BlockedIp, then stalwart-cli delete BlockedIp/<ip> for each nginx pod IP listed\n'
+  local ips ip ids
+  printf '  + stalwart-cli query BlockedIp --where address=<ip> --json, then stalwart-cli delete BlockedIp --ids <id> for each nginx pod IP listed\n'
   [ "$APPLY" = 1 ] || live stalwart-cli || return 0
-  ips=$("${KS[@]}" -n thundermail get pod -l app=stalwart-nginx -o jsonpath='{.items[*].status.podIP}') || return 1
-  banned=$(stalwart-cli query BlockedIp) || return 1
+  ips=$(nginx_ips) || return 1
   VALUE=0
   for ip in $ips; do
-    grep -qwF "$ip" <<<"$banned" || continue
+    ids=$(banned_ids "$ip") || return 1
+    [ -n "$ids" ] || continue
     VALUE=$((VALUE + 1))
-    run stalwart-cli delete "BlockedIp/$ip" || return 1
+    run stalwart-cli delete BlockedIp --ids "$ids" || return 1
   done
-  echo "BlockedIp entries=$(grep -c . <<<"$banned" || true) nginx pod IPs banned=$VALUE"
+  echo "BlockedIp entries=$(stalwart-cli query BlockedIp --json | grep -c . || true) nginx pod IPs banned=$VALUE"
 }
 
 reload() {
-  run stalwart-cli create action/ReloadSettings || return 1
-  run stalwart-cli create action/ReloadBlockedIps
+  local a out
+  for a in ReloadSettings ReloadBlockedIps; do
+    printf '  + stalwart-cli create action/%s\n' "$a"
+    [ "$APPLY" = 1 ] || continue
+    out=$(stalwart-cli create "action/$a") || return 1
+    printf '%s\n' "$out"
+    grep -q '^Created Action ' <<<"$out" || { echo "action/$a: no Created Action reply"; return 1; }
+  done
+}
+
+readback() {
+  local ips ip ids n=0
+  [ "$APPLY" = 1 ] || live apply_unmigrated.py "$S/settings.json" "$S/principals.json" stalwart-cli || return 0
+  unmigrated_plan || return 1
+  VALUE=$(( ${BLOCKED:-0} + CATCHALL + OTHER ))
+  ips=$(nginx_ips) || return 1
+  for ip in $ips; do
+    ids=$(banned_ids "$ip") || return 1
+    [ -z "$ids" ] || n=$((n + 1))
+  done
+  echo "read-back: unmigrated changes=$VALUE nginx pod IPs banned=$n"
+  [ "$APPLY" = 0 ] || { [ "$VALUE" = 0 ] && [ "$n" = 0 ]; }
 }
 
 accounts_check() {
@@ -183,6 +207,7 @@ go_gate
 step unmigrated-apply changes unmigrated_apply
 step unban-nginx banned unban_nginx
 step reload "" reload
+step readback changes readback
 step accounts-stalwart-check http_code accounts_check
 printf 'manual: create and delete one app password for %s through Accounts (manage.py shell in deploy/accounts-web), check both Stalwart calls 2xx in the accounts-web log, then create one more and store it with: bash %s --apply (reads it from stdin, checks a JMAP session, appends TEST_SENDER_APP_PASSWORD to %s)\n' "$TEST_USER" "$MIG_DIR/window/test-sender-password.sh" "$ENV_FILE"
 printf '  + %s | grep -cE %s\n' "$(shq "${KS[@]}" -n accounts logs deploy/accounts-web --since=10m)" "'app.?password'"

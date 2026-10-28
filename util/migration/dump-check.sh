@@ -13,13 +13,27 @@ cred() {
   printf 'user = "%s"\n' "${v//\"/\\\"}"
 }
 legacy_loopback >/dev/null || die "$(legacy_loopback)"
+total() { curl -sk -m 30 -K <(cred) "${OLD_STALWART_URL%/}/api/principal?${1:+types=$1&}limit=1&page=1" | jq -er '.data.total | numbers' 2>/dev/null; }
+all=$(total) || die "dump-check: the legacy principal total is unreadable"
 bad=0
+known=0
 printf '%-12s %8s %8s\n' TYPE SERVER DUMP
 for t in $TYPES; do
-  server=$(curl -sk -m 30 -K <(cred) "${OLD_STALWART_URL%/}/api/principal?types=$t&limit=1&page=1" | jq -er '.data.total | numbers' 2>/dev/null) || server=error
+  server=$(total "$t") || server=error
   dump=$(jq --arg t "$t" '[.[] | select(.type == $t)] | length' "$PRINCIPALS")
-  printf '%-12s %8s %8s\n' "$t" "$server" "$dump"
-  [ "$server" = "$dump" ] || bad=$((bad + 1))
+  note=""
+  if [ "$server" = "$dump" ]; then
+    known=$((known + server))
+  elif [ "$t" = tenant ] && [ "$server" = error ] && [ "$dump" = 0 ]; then
+    note="unreadable on both sides"
+  elif [ "$server" = "$all" ]; then
+    note="filter ignored, overall total"
+  else
+    bad=$((bad + 1))
+  fi
+  printf '%-12s %8s %8s%s\n' "$t" "$server" "$dump" "${note:+ $note}"
 done
-[ "$bad" = 0 ] || die "dump-check: $bad type(s) differ between the server and $PRINCIPALS; do not convert this dump"
+[ "$known" = "$all" ] || { echo "matched per-type counts sum to $known, the server total is $all"; bad=$((bad + 1)); }
+[ "$(jq length "$PRINCIPALS")" = "$all" ] || { echo "the dump holds $(jq length "$PRINCIPALS") principals, the server total is $all"; bad=$((bad + 1)); }
+[ "$bad" = 0 ] || die "dump-check: $bad check(s) failed between the server and $PRINCIPALS; do not convert this dump"
 echo "dump-check: every principal type matches ($(jq length "$PRINCIPALS") principals)"
