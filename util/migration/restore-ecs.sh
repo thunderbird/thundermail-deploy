@@ -3,6 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 SNAP=${1:-}
 [ -f "$SNAP" ] || die "usage: restore-ecs.sh ecs-before-<ts>.json [--apply]"
+jq -e '(.services | type == "array" and length > 0 and all(.[]; .cluster and .serviceName and (.desiredCount | type == "number"))) and (.scalable | type == "array")' "$SNAP" >/dev/null || die "$SNAP is not an ECS snapshot"
 run() { printf '  aws --profile %s --region %s %s\n' "$LEGACY_AWS_PROFILE" "$AWS_REGION" "$*"; [ "$APPLY" = 1 ] || return 0; aws_legacy "$@" >/dev/null || fail=$((fail + 1)); }
 fail=0
 while IFS=$'\t' read -r cluster svc desired; do

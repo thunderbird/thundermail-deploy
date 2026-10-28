@@ -12,6 +12,7 @@ db=$(pod psql -h "$STALWART_TARGET_PG_HOST" -U "$STALWART_TARGET_PG_USER" -d "$S
 [ "$db" = neondb ] || die "current_database() returned $db"
 [ "$DUMP" = --assert-only ] && { printf 'assertions passed: host=%s db=%s (no dump checked)\n' "$STALWART_TARGET_PG_HOST" "$db"; exit 0; }
 pod sh -c "test -s '$DUMP'" || die "$DUMP missing or empty in the runner"
+pod pg_restore -l "$DUMP" >/dev/null || die "$DUMP is not a readable pg_dump archive"
 printf 'assertions passed: host=%s db=%s dump_bytes=%s\n' "$STALWART_TARGET_PG_HOST" "$db" "$(pod sh -c "ls -l '$DUMP' | awk '{print \$5}'")"
 printf 'would run via pod:\n  psql -h %s -U %s -d %s -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"\n  pg_restore -j4 --no-owner --no-privileges -h %s -U %s -d %s %s\n' "$STALWART_TARGET_PG_HOST" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$STALWART_TARGET_PG_HOST" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$DUMP"
 [ "$APPLY" = 1 ] || { echo 'mode=dry-run'; exit 0; }

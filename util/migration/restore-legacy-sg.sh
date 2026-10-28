@@ -3,6 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 SNAP=${1:-}
 [ -f "$SNAP" ] || die "usage: restore-legacy-sg.sh legacy-sg-before-<ts>.json [--apply]"
+jq -e '(.group.GroupId | type == "string") and (.rules | type == "array" and length > 0)' "$SNAP" >/dev/null || die "$SNAP is not a security group snapshot"
 SG=$(jq -r '.group.GroupId' "$SNAP")
 key='"\(.IpProtocol)|\(.FromPort // -1)|\(.ToPort // -1)|\(.CidrIpv4 // .CidrIpv6 // .ReferencedGroupInfo.GroupId // .PrefixListId // "")"'
 current=$(aws_legacy ec2 describe-security-group-rules --filters "Name=group-id,Values=$SG" --query 'SecurityGroupRules[?IsEgress==`false`]' | jq -r ".[] | $key")

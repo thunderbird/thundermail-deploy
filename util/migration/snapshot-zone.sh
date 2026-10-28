@@ -26,4 +26,4 @@ jq -r 'map(select(.type | IN("A","AAAA","CNAME","MX","TXT","SRV","TLSA","CAA","N
   ans=$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$name&type=$type" | jq -c '[.Answer[]? | select(.type != 46) | .data] | sort')
   printf '%s\t%s\t%s\n' "$name" "$type" "${ans:-[]}" >> "$doh"
 done
-printf 'zone=%s name=%s records=%s doh_lines=%s\n%s\n%s\n' "$ZONE" "$zone_name" "$count" "$(wc -l < "$doh")" "$out" "$doh"
+printf 'zone=%s name=%s records=%s doh_lines=%s\n%s\n%s\n' "$ZONE" "$zone_name" "$count" "$(wc -l < "$doh")" "$doh" "$out"

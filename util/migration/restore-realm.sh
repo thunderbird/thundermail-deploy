@@ -3,6 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 SNAP=${1:-}
 [ -f "$SNAP" ] || die "usage: restore-realm.sh realm-before-<ts>.json [KEYCLOAK_URL] [--apply]"
+jq -e '(.realm | type == "string") and (.clients | type == "array" and length > 0) and (.master | type == "object")' "$SNAP" >/dev/null || die "$SNAP is not a realm snapshot"
 URL=${2:-$(jq -r '.url' "$SNAP")}
 REALM=$(jq -r '.realm' "$SNAP")
 CID=${KC_ADMIN_CLIENT_ID:-${KC_LEGACY_ADMIN_CLIENT_ID:-}}

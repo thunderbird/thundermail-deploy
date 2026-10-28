@@ -10,9 +10,9 @@ newkeys=$(jq -r 'keys|join(",")' "$FILE")
 printf 'secret=%s current_sha=%s new_sha=%s new_keys=%s\n' "$ID" "$cur" "$new" "$newkeys"
 if [ "$cur" = "$new" ]; then echo 'unchanged: nothing to put'; exit 0; fi
 if [ "$APPLY" = 1 ]; then
-  jq -c . "$FILE" > "$FILE.compact"
-  vid=$(aws_stage secretsmanager put-secret-value --secret-id "$ID" --secret-string "file://$FILE.compact" --query VersionId --output text)
-  rm -f "$FILE.compact"
+  tmp=$(mktemp "$(dirname "$FILE")/.put.XXXXXX"); trap 'rm -f "$tmp"' EXIT
+  jq -c . "$FILE" > "$tmp"
+  vid=$(aws_stage secretsmanager put-secret-value --secret-id "$ID" --secret-string "file://$tmp" --query VersionId --output text)
   printf 'mode=apply new_version=%s\n' "$vid"
 else
   echo 'mode=dry-run would put-secret-value (whole JSON via file://)'

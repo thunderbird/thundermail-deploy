@@ -16,7 +16,7 @@ CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_AC
 SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT"
 
 try() { ( "$@" ) 2>/dev/null || true; }
-prev() { [ -f "$ENV_FILE" ] && grep -E "^$1=" "$ENV_FILE" | tail -1 | sed -E "s/^$1=//; s/^'(.*)'\$/\\1/; s/^\"(.*)\"\$/\\1/" || true; }
+prev() { [ -f "$ENV_FILE" ] || return 0; ( set +eu; . "$ENV_FILE" >/dev/null 2>&1; printf '%s' "${!1:-}" ); }
 op() { printf '%s' "${!1:-$(prev "$1")}"; }
 from_file() { [ -f "$1" ] && sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" | head -1 | sed "s/^['\"]//; s/['\"]\$//" || true; }
 bearer() { printf 'header = "Authorization: Bearer %s"\n' "$1"; }
@@ -158,6 +158,7 @@ build() {
     [ -f "${!v}" ] || { printf '%-30s file missing\n' "$v"; missing=$((missing + 1)); }
   done
   put EVIDENCE_DIR "$EVIDENCE_DIR" "evidence directory"
+  local tsv; tsv=$(op TIMING_TSV); put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-tb-stage.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-tb-stage.tsv"
   put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"
   for side in LEG:mzla-legacy TGT:mzla-tb-stage; do
     local p=${side%%:*}
@@ -168,7 +169,7 @@ build() {
     put "RCLONE_CONFIG_${p}_PROFILE" "${side##*:}" rclone
   done
   for name in $CARRY; do
-    local v; v=$(prev "$name")
+    local v; v=$(op "$name")
     [ -n "$v" ] || continue
     printf '# carried over from the previous env file\n%s=%s\n' "$name" "'$(printf '%s' "$v" | sed "s/'/'\\\\''/g")'" >> "$tmp"
     printf '%-30s len=%s (carried)\n' "$name" "${#v}"
@@ -247,10 +248,10 @@ check() {
   chk cf-token-agent agent_token
   chk restore-legacy-sg-dry-run pair legacy-sg legacy-sg
   chk restore-ecs-dry-run pair ecs ecs
-  chk restore-replicas-dry-run bash -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
+  chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
   chk restore-zone-dry-run pair zone zone "$CF_ZONE_ID"
   chk restore-realm-dry-run pair realm realm "$KC_LEGACY_URL" "$KC_LEGACY_URL"
-  chk restore-secret-version-dry-run bash -c '"$0"/snapshot-secret-versions.sh $1 >/dev/null && read -r id v < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && "$0"/restore-secret-version.sh "$id" "$v" --dry-run | tail -1' "$MIG_DIR" "$secret_ids"
+  chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/snapshot-secret-versions.sh $1 >/dev/null && read -r id v < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && "$0"/restore-secret-version.sh "$id" "$v" --dry-run | tail -1' "$MIG_DIR" "$secret_ids"
   chk restore-target-db-dry-run target_db
   local end; end=$(date -u +%FT%TZ)
   printf 'env-check\t%s\t%s\tfailures\t%s\n' "$start" "$end" "$fails" >> "$TIMING_TSV"

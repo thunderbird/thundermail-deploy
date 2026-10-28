@@ -7,6 +7,7 @@ ZONE=""
 [ "${2:-}" = --zone ] && ZONE=${3:-}
 [ -n "$ZONE" ] || ZONE=$(basename "$SNAP" | sed -n 's/^zone-before-\([0-9a-f]\{32\}\)-.*/\1/p')
 [ -n "$ZONE" ] || die "zone id not in the file name; pass --zone ZONE_ID"
+jq -e 'type == "array" and length > 0 and all(.[]; has("id") and has("name") and has("type"))' "$SNAP" >/dev/null || die "$SNAP is not a zone snapshot"
 need CF_API_TOKEN_AGENT
 protected='(.name | test("^_externaldns\\.")) or (.name | test("\\.dkim\\."))'
 cur=$(mktemp); trap 'rm -f "$cur"' EXIT
@@ -32,7 +33,7 @@ plan=$(jq -n --slurpfile snap "$SNAP" --slurpfile curx <(jq -s '.' "$cur") "
     }")
 body() { jq -c 'del(.id) | (if .data != null then del(.content) | del(.priority) else del(.data) end) | with_entries(select(.value != null))' <<<"$1"; }
 fail=0
-for op in create update delete; do
+for op in delete update create; do
   while IFS= read -r rec; do
     [ -n "$rec" ] || continue
     name=$(jq -r .name <<<"$rec"); type=$(jq -r .type <<<"$rec"); id=$(jq -r .id <<<"$rec")

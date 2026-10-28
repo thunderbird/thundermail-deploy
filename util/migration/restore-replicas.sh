@@ -3,6 +3,8 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 SNAP=${1:-}
 [ -f "$SNAP" ] || die "usage: restore-replicas.sh replicas-before-<ts>.txt [--apply]"
+grep -Eq '^[a-z0-9-]+ (Deployment|StatefulSet) [a-z0-9-]+ [0-9]+$' "$SNAP" || die "$SNAP has no replica lines"
+grep -Ev '^$|^[a-z0-9-]+ (Deployment|StatefulSet) [a-z0-9-]+ [0-9]+$' "$SNAP" && die "$SNAP has malformed lines"
 fail=0; n=0
 while read -r ns kind name saved; do
   [ -n "$name" ] || continue
