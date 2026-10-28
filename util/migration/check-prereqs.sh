@@ -6,7 +6,7 @@ usage() {
   cat <<USAGE
 usage: check-prereqs.sh [--for KEY]
 
-Prints HAVE or NEED for every tool and credential the tb-stage cutover uses.
+Prints HAVE or NEED for every tool and credential the tb-stage cutover uses; SKIP marks an optional row left unset.
 KEY limits the rows to one task (T1 T2 T3 T5..T11 T10m T10a T13 T14 W1..W8 P1..P3 V1); T0 prints every row.
 Values are never printed; exit status is the number of NEED rows, or 64 for a usage error.
 USAGE
@@ -221,8 +221,8 @@ c_env_pr() {
   case "$st" in OPEN|MERGED) echo "$2=#$n $st in $1" ;; *) echo "$2=#$n is ${st:-unknown} in $1, not open or merged"; return 1 ;; esac
 }
 c_recipients() {
-  local dir; dir=$(ev SECRET_DIR)
-  [ -n "$dir" ] && [ "$(grep -c . "$dir/app-password-users.csv" 2>/dev/null || echo 0)" -gt 1 ] && echo "$(($(grep -c . "$dir/app-password-users.csv") - 1)) recipient row(s) in \$SECRET_DIR/app-password-users.csv" || { echo "no recipient rows in SECRET_DIR/app-password-users.csv (#1547 part 2)"; return 1; }
+  local f; f=$(ev NOTICE_RECIPIENTS_CSV)
+  [ "$(grep -c . "$f" 2>/dev/null || echo 0)" -gt 1 ] && echo "$(($(grep -c . "$f") - 1)) recipient row(s) in NOTICE_RECIPIENTS_CSV" || { echo "no recipient rows in NOTICE_RECIPIENTS_CSV (#1547 part 2)"; return 1; }
 }
 c_git_transport() {
   local bad="" r
@@ -240,6 +240,10 @@ row() {
   local detail status
   if detail=$("$@" 2>/dev/null); then status=HAVE; HAVE=$((HAVE + 1)); else status=NEED; NEED=$((NEED + 1)); fi
   printf '%-4s  %-28s  %s\n' "$status" "$item" "${detail:-check failed}"
+}
+skip() {
+  if [ -n "$FOR" ]; then case " $1 " in *" $FOR "*) ;; *) return 0 ;; esac; fi
+  printf '%-4s  %-28s  %s\n' SKIP "$2" "$3"
 }
 
 printf '%-4s  %-28s  %s\n' STATUS ITEM DETAIL
@@ -268,7 +272,7 @@ row "T8" t8-pr-and-revert c_pr_pair accounts-deploy T8_PR T8_REVERT_PR
 row "W7" spf-final-txt c_spf_final
 row "T14 W1" freeze-pr c_env_pr platform-infrastructure FREEZE_PR
 row "T14 W7" flip-pr c_env_pr thundermail-deploy FLIP_PR
-row "T14" notice-recipients-csv c_recipients
+if [ -n "$(ev NOTICE_RECIPIENTS_CSV)" ]; then row "T14" notice-recipients-csv c_recipients; else skip "T14" notice-recipients-csv "optional: NOTICE_RECIPIENTS_CSV unset, window notices skipped"; fi
 row "T7 T8 W1 W8" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
 row "W7 P3" test-mailbox-external c_test_mailbox
 row "W5 W6 W7 P3" test-user-stage c_test_user
