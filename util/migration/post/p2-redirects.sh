@@ -40,6 +40,7 @@ if [ "$ROLLBACK" = 1 ]; then
   else todo=$(jq -sc 'add | group_by(.id) | map(map(select(.proxied == false)) | first | select(. != null)) | .[]' "${files[@]}"); fi
   rsid=$(jq -r '.result.id // empty' "$before")
   dels=$(jq -c '.[] | select((.ref // "") | startswith("p2_")) | {id, ref}' <<<"$existing")
+  [ -z "$dels" ] || [ ${#files[@]} -gt 0 ] || die "live p2_ rules found but no $EVIDENCE_DIR/tbpro-p2-records-before-*.json: copy the saved records here or unproxy the two records by hand before deleting the rules"
   [ -z "$todo" ] || jq -r --arg base "$RECS_DIR" '"PATCH \($base)/\(.id) {\"proxied\":false,\"ttl\":\(.ttl)} (\(.name))"' <<<"$todo"
   [ -z "$dels" ] || jq -r --arg base "$CF_API/zones/$ZONE/rulesets/$rsid/rules" '"DELETE \($base)/\(.id) (\(.ref))"' <<<"$dels"
   if [ "$APPLY" = 1 ]; then
