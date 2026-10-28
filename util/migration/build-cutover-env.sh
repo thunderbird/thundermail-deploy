@@ -15,7 +15,7 @@ load_operator_env "$OPERATOR_ENV"
 VALUES=$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID"
-OPERATOR_VARS="FREEZE_PR T6_PR FLIP_PR APPOINTMENT_PR SPF_APEX_TXT SPF_MAIL_TXT SPF_FINAL_TXT TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER SUPPORT_CHANNEL"
+OPERATOR_VARS="FREEZE_PR T6_PR FLIP_PR APPOINTMENT_PR SPF_FINAL_TXT TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER SUPPORT_CHANNEL"
 SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD"
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -168,8 +168,6 @@ build() {
   put TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
   put TEST_USER "$(op TEST_USER)" "operator: migrated stage mailbox the operator owns"
   put TEST_SENDER "$(op TEST_USER)" "same as TEST_USER"
-  put SPF_APEX_TXT "$(op SPF_APEX_TXT)" "operator: apex SPF text decided in the SPF spike"
-  put SPF_MAIL_TXT "$(op SPF_MAIL_TXT)" "operator: mail. SPF text decided in the SPF spike"
   put SPF_FINAL_TXT "$(op SPF_FINAL_TXT)" "operator: spf. TXT from the #1535 decision (SPF_FINAL_TXT in the environment)"
   put SUPPORT_CHANNEL "$(op SUPPORT_CHANNEL)" "operator: support announcement channel"
   for v in KUBECONFIG_STAGE KUBECONFIG_HUB KUBECONFIG_DEV; do
@@ -231,7 +229,7 @@ check() {
     [ "$s" = active ] && [ -n "$z" ] && { [ -z "$CF_ZONE_ID" ] || [ "$z" = "$CF_ZONE_ID" ]; } && echo "active, zone visible${CF_ZONE_ID:+ and equal to CF_ZONE_ID}" || { echo "status=$s zone_visible=$([ -n "$z" ] && echo yes || echo no)"; return 1; }
   }
   agent_token() { local s; s=$(curl -s -m 20 -K <(bearer "$CF_API_TOKEN_AGENT") "$CF_API/user/tokens/verify" | jq -r '.result.status // "error"'); [ "$s" = active ] && [ -n "$CF_ZONE_ID" ] && [ -n "$CF_ZONE_ID_TBPRO" ] && echo "active, stage and tb.pro zone ids set" || { echo "status=$s"; return 1; }; }
-  spf_final() { case "$SPF_FINAL_TXT" in "v=spf1 "*) echo "v=spf1 record, len=${#SPF_FINAL_TXT}" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 (len=${#SPF_FINAL_TXT})"; return 1 ;; esac; }
+  spf_final() { if [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ]; then echo "equals the #1535 text, len=${#SPF_FINAL_TXT}"; else echo "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT' (len=${#SPF_FINAL_TXT})"; return 1; fi; }
   pr_pair() {
     local repo=thunderbird/$1 pr=$2 rev=$3 head base
     [ -n "$pr" ] && [ -n "$rev" ] || { echo "PR numbers empty"; return 1; }

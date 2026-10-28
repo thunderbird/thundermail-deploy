@@ -3,7 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 [ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
 need TARGET_NLB_DNS CF_ZONE_ID
-pending SPF_APEX_TXT SPF_FINAL_TXT TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
+pending TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
 Z=stage-thundermail.com
 M=mail.$Z
 TABLE=$EVIDENCE_DIR/w7-verify-$(mode)-$TS.txt
@@ -18,7 +18,7 @@ dq() {
     sed 's/" "//g; s/^"//; s/"$//'
 }
 spf_of() { dq "$1" TXT | grep '^v=spf1' || true; }
-one_spf() { local n; n=$(spf_of "$1" | grep -c . || true); [ "$n" = 1 ] || { echo "$1 has $n v=spf1 TXT"; return 1; }; [ -z "${2:-}" ] || [ "$(spf_of "$1")" = "$2" ] || { echo "$1 v=spf1 is '$(spf_of "$1")'"; return 1; }; }
+one_spf() { local n; n=$(spf_of "$1" | grep -c . || true); [ "$n" = 1 ] || { echo "$1 has $n v=spf1 TXT"; return 1; }; [ -z "${2:-}" ] || [ "$(spf_of "$1")" = "$2" ] || { echo "$1 v=spf1 is '$(spf_of "$1")'"; return 1; }; echo "$1: one v=spf1${2:+, equal to the expected text}"; }
 
 chain() {
   local name=$1 depth=$2 inc
@@ -43,6 +43,16 @@ jmap_443() {
   echo "_jmap._tcp port 443 only"
 }
 
+spf_ttl() {
+  local ttl doh
+  [ -n "${CF_API_TOKEN_AGENT:-}" ] || { echo "CF_API_TOKEN_AGENT empty: TTL not read"; return 1; }
+  ttl=$(cf_api "$CF_API/zones/$CF_ZONE_ID/dns_records?type=TXT&name=spf.$Z" | jq -r '[.result[] | select(.content | ltrimstr("\"") | startswith("v=spf1")) | .ttl] | join(",")')
+  doh=$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=spf.$Z&type=TXT" | jq -r '[.Answer[]? | select(.type == 16) | .TTL] | max // empty')
+  [ "$ttl" = 300 ] || { echo "spf.$Z ttl in Cloudflare is ${ttl:-none}, want 300"; return 1; }
+  if [ -z "$doh" ] || [ "$doh" -gt 300 ]; then echo "spf.$Z DoH TTL ${doh:-none} above 300"; return 1; fi
+  echo "spf.$Z ttl 300 (DoH $doh)"
+}
+
 dkim() {
   local names n=0 name
   [ -n "${CF_API_TOKEN_AGENT:-}" ] || { echo "CF_API_TOKEN_AGENT empty: selectors not listed"; return 1; }
@@ -52,9 +62,21 @@ dkim() {
   echo "$n selector(s) resolve with v=DKIM1"
 }
 
+doh_before() { find "$EVIDENCE_DIR" -maxdepth 1 -name "zone-doh-before-$CF_ZONE_ID-*.txt" -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-; }
+
+apex_same() {
+  local before want
+  before=$(doh_before)
+  [ -s "$before" ] || { echo "no zone-doh-before file for the zone"; return 1; }
+  want=$(awk -F'\t' -v z="$Z" '$1 == z && $2 == "TXT" {print $3}' "$before" | jq -r '.[] | gsub("\" \""; "") | ltrimstr("\"") | rtrimstr("\"") | select(startswith("v=spf1"))')
+  [ "$(grep -c . <<<"$want")" = 1 ] || { echo "$(basename "$before") does not hold exactly one apex v=spf1"; return 1; }
+  one_spf "$Z" "$want" || return 1
+  echo "$Z v=spf1 unchanged from $(basename "$before")"
+}
+
 acme_same() {
   local before line name type ans
-  before=$(find "$EVIDENCE_DIR" -maxdepth 1 -name "zone-doh-before-$CF_ZONE_ID-*.txt" -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+  before=$(doh_before)
   [ -s "$before" ] || { echo "no zone-doh-before file for the zone"; return 1; }
   while IFS=$'\t' read -r name type ans; do
     line=$(dq "$name" "$type" | sort | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -112,8 +134,9 @@ submission() {
 
 dns() {
   chk mx has "$Z" MX "10 $M."
-  chk spf-apex one_spf "$Z" "$SPF_APEX_TXT"
-  chk spf-host one_spf "spf.$Z" "$SPF_FINAL_TXT"
+  chk spf-apex apex_same
+  chk spf-host one_spf "spf.$Z" "$SPF_DECIDED_TXT"
+  chk spf-host-ttl spf_ttl
   chk spf-chain-apex chain "$Z" 0
   chk spf-chain-host chain "spf.$Z" 0
   chk dmarc has "_dmarc.$Z" TXT 'p=reject'

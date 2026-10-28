@@ -3,7 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 [ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
 need CF_ZONE_ID TARGET_NLB_DNS KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KARGO_WAREHOUSE_CONFIGS KUBECONFIG_STAGE KUBECONFIG_HUB
-pending FLIP_PR SPF_APEX_TXT SPF_FINAL_TXT
+pending FLIP_PR SPF_FINAL_TXT
 TMD=thunderbird/thundermail-deploy
 PR_B=148
 ZONE_NAME=stage-thundermail.com
@@ -52,8 +52,7 @@ snap_zone() {
 
 spf_edits() {
   cf delete "autoconfig.$ZONE_NAME" CNAME || return 1
-  cf upsert "$ZONE_NAME" TXT "$SPF_APEX_TXT" || return 1
-  cf upsert "spf.$ZONE_NAME" TXT "$SPF_FINAL_TXT"
+  cf upsert "spf.$ZONE_NAME" TXT "$SPF_FINAL_TXT" 300
 }
 
 es_ready() { [ "$("${KS[@]}" -n thundermail get externalsecret stalwart-cloudflare-api-token -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ]; }
@@ -91,7 +90,7 @@ cname_live() { [ "$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1
 
 mail_cname() {
   local start
-  cf upsert "mail.$ZONE_NAME" CNAME "$TARGET_NLB_DNS" || return 1
+  cf upsert "mail.$ZONE_NAME" CNAME "$TARGET_NLB_DNS" 300 || return 1
   cf delete "_imap._tcp.$ZONE_NAME" SRV || return 1
   cf delete "_submission._tcp.$ZONE_NAME" SRV || return 1
   printf '  + wait 900s for DoH mail.%s CNAME = %s, then the dns-cutover row (start = the merge-148 row)\n' "$ZONE_NAME" "$TARGET_NLB_DNS"
@@ -122,7 +121,7 @@ prereqs
 helpers snapshot-zone.sh restore-zone.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
 NEXT=$(next_step)
 if [ "$APPLY" = 1 ]; then
-  for v in SPF_APEX_TXT SPF_FINAL_TXT; do case "${!v}" in "v=spf1 "*) ;; *) stop "$v does not begin with 'v=spf1 ' (#1535 decision)" ;; esac; done
+  [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ] || stop "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT'"
 fi
 [ "$APPLY" = 0 ] || [ "$NEXT" != 6 ] || { echo "W7 steps 1-4 and verification are done for this cut"; finish; exit 0; }
 [ "$APPLY" = 0 ] || [ "$NEXT" != 1 ] || step snap-zone records snap_zone

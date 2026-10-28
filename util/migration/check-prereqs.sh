@@ -35,6 +35,7 @@ KC_DEV=${KUBECONFIG_DEV:-$WORK_DIR/kc-dev}
 VENV_PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
 REGION=${AWS_REGION:-eu-central-1}
 CF=https://api.cloudflare.com/client/v4
+. "$(dirname "${BASH_SOURCE[0]}")/spf-decided.sh"
 
 HAVE=0
 NEED=0
@@ -228,7 +229,7 @@ c_git_transport() {
   for r in "$@"; do git ls-remote --exit-code "https://github.com/thunderbird/$r.git" HEAD >/dev/null 2>&1 || bad="$bad $r"; done
   [ -z "$bad" ] && echo "git ls-remote over https works for $*" || { echo "git ls-remote failed:$bad (run gh auth setup-git)"; return 1; }
 }
-c_spf_final() { case "$(ev SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
+c_spf_final() { if [ "$(ev SPF_FINAL_TXT)" = "$SPF_DECIDED_TXT" ]; then echo "SPF_FINAL_TXT equals the #1535 text in the env file"; else echo "SPF_FINAL_TXT in $ENV_FILE is not the #1535 text '$SPF_DECIDED_TXT'"; return 1; fi; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
 c_venv() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import requests, urllib3' 2>/dev/null && echo "$VENV_PY imports ok" || { echo "venv missing: $VENV_PY"; return 1; }; }
