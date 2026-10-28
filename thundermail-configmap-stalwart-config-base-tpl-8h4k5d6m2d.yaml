@@ -208,8 +208,7 @@ data:
     object: NetworkListener
     matchOn:
       - protocol
-      - useTls
-      - tlsImplicit
+      - bind
     value:
       listen-smtp-starttls:
         name: smtp-starttls
@@ -225,15 +224,14 @@ data:
     object: NetworkListener
     matchOn:
       - protocol
-      - useTls
-      - tlsImplicit
+      - bind
     value:
       listen-smtp:
         name: smtp-plain
         bind:
           '[::]:25': true
         protocol: smtp
-        useTls: false
+        useTls: true
         tlsImplicit: false
         overrideProxyTrustedNetworks:
           '__INTERNAL_IP_CIDR__': true
@@ -458,5 +456,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-6ddtm6hdth
+  name: stalwart-config-base-tpl-8h4k5d6m2d
   namespace: thundermail
