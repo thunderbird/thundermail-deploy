@@ -28,3 +28,10 @@ jobs:
 
       - name: Build all Kustomize overlays
         run: ./util/kustomize-build-all.sh
+
+      - name: Build Stalwart configuration overlays
+        run: |
+          for overlay in overlays/*/stalwart-configs; do
+            kustomize build "$overlay" > /dev/null
+          done
+          ! grep -rEn '\$\{[A-Z0-9_]+\}' overlays/*/stalwart-configs

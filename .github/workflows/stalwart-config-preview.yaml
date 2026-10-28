@@ -110,6 +110,13 @@ jobs:
             ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
 
+      - name: Check target configuration
+        env:
+          OVERLAY_PATH: ${{ matrix.target.overlayPath }}
+        run: |
+          kustomize build "${OVERLAY_PATH}" > /dev/null
+          ! grep -rEn '\$\{[A-Z0-9_]+\}' "${OVERLAY_PATH}"
+
       - name: Update target preview branch
         env:
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
