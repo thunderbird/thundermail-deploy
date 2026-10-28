@@ -179,6 +179,7 @@ merge_pr() {
   gh pr merge "$pr" -R "$repo" --merge
 }
 
+stalwart_pods() { "${KS[@]}" -n thundermail get pods -l app=stalwart -o json | jq -r '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "ReplicaSet" and (.name | startswith("stalwart-")))) | "pod/" + .metadata.name'; }
 listener() { ss -ltnpH "sport = :$1" 2>/dev/null; }
 owned_by() { local l; l=$(listener "$1"); [ -n "$l" ] && ! grep -vq "users:((\"$2\"" <<<"$l"; }
 

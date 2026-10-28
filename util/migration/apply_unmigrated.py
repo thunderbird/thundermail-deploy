@@ -194,6 +194,7 @@ def main():
     ap.add_argument("--expect-hostname", required=True,
                     help="the target's defaultHostname; the script stops if STALWART_URL points at a different server")
     ap.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
+    ap.add_argument("--dry-run", action="store_true", help="the default; accepted for symmetry with the shell helpers")
     a = ap.parse_args()
     only = parse_only(a.only)
     if os.environ.get("OLD_STALWART_URL") and os.environ["OLD_STALWART_URL"].rstrip("/") == os.environ["STALWART_URL"].rstrip("/"):

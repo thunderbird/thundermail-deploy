@@ -38,10 +38,10 @@ open_promotions() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get promotions -o js
 freeze() {
   local open
   merge_pr "$PI" "$FREEZE_PR" || return 1
-  printf '  + bash %s, then reload %s for FREEZE_SHA and THAW_PR\n' "$THAW" "$ENV_FILE"
+  printf '  + bash %s --apply, then reload %s for FREEZE_SHA and THAW_PR\n' "$THAW" "$ENV_FILE"
   printf '  + wait 400s each: app-of-apps sync revision contains FREEZE_SHA; %s selfHeal false; %s autoPromotionEnabled false\n' "$ARGO_APPS" "$KARGO_STAGE_ACCOUNTS"
   [ "$APPLY" = 1 ] || return 0
-  bash "$THAW" || { echo "thaw.sh failed"; return 1; }
+  bash "$THAW" --apply || { echo "thaw.sh failed"; return 1; }
   set -a; eval "$(< "$ENV_FILE")"; set +a
   if [ -z "${FREEZE_SHA:-}" ] || [ -z "${THAW_PR:-}" ]; then echo "thaw.sh did not append FREEZE_SHA and THAW_PR"; return 1; fi
   until_ok 400 synced_to "$FREEZE_SHA" || { echo "tb-stage-app-of-apps did not sync a revision containing $FREEZE_SHA"; return 1; }
@@ -52,7 +52,7 @@ freeze() {
   echo "four apps selfHeal false, auto-promotion false, no open Promotion"
 }
 
-pods() { "${KS[@]}" get pods -n thundermail -l app=stalwart -o name; "${KS[@]}" get pods -n accounts -o name; "${KS[@]}" get pods -n keycloak-customer -o name; }
+pods() { stalwart_pods; "${KS[@]}" get pods -n accounts -o name; "${KS[@]}" get pods -n keycloak-customer -o name; }
 none_left() { [ -z "$(pods)" ]; }
 replicas_zero() {
   "${KS[@]}" get deploy,sts -n thundermail -o jsonpath='{range .items[*]}{.metadata.name} {.spec.replicas}{"\n"}{end}' | awk '$1 == "stalwart" && $2 != 0 {bad = 1} END {exit bad}' &&

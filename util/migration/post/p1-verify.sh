@@ -42,14 +42,14 @@ absent() {
 }
 
 echo "## frontend bundle on https://$APPT_HOST"
-APPT_RES=$(resolve_arg "$APPT_HOST")
-curl -s $APPT_RES "https://$APPT_HOST/" -o "$TMP/index.html"
+APPT_RES=$(resolve_arg "$APPT_HOST") || fail=1
+curl -s $APPT_RES "https://$APPT_HOST/" -o "$TMP/index.html" || true
 mapfile -t ASSETS < <(grep -oE '(src|href)="[^"]+\.js"' "$TMP/index.html" | sed -E 's/^[a-z]+="//; s/"$//' | sort -u)
 echo "assets: ${#ASSETS[@]}"
 : > "$TMP/bundle.js"
 for a in "${ASSETS[@]}"; do
   case "$a" in https://*) url=$a ;; /*) url="https://$APPT_HOST$a" ;; *) url="https://$APPT_HOST/$a" ;; esac
-  curl -s $APPT_RES "$url" >> "$TMP/bundle.js"
+  curl -s $APPT_RES "$url" >> "$TMP/bundle.js" || true
 done
 contains "oidc root (new)" "$TMP/bundle.js" "https://$AUTH_HOST/realms/tbpro/"
 contains "dashboard url (new)" "$TMP/bundle.js" "https://$ACCOUNTS_HOST/dashboard"
@@ -58,7 +58,7 @@ absent "old auth host" "$TMP/bundle.js" "$OLD_AUTH_HOST"
 absent "old accounts host" "$TMP/bundle.js" "$OLD_ACCOUNTS_HOST"
 
 echo "## login flow"
-AUTH_RES=$(resolve_arg "$AUTH_HOST")
+AUTH_RES=$(resolve_arg "$AUTH_HOST") || fail=1
 DISC="https://$AUTH_HOST/realms/tbpro/.well-known/openid-configuration"
 check "discovery GET" "$(curl -s $AUTH_RES -o "$TMP/disc.json" -w '%{http_code}' "$DISC")" 200
 ISSUER=$(python3 -I -c 'import sys,json;print(json.load(open(sys.argv[1])).get("issuer",""))' "$TMP/disc.json" 2>/dev/null || true)
@@ -80,7 +80,7 @@ fi
 if [ -n "${P1_CALDAV_USER:-}" ] && [ -n "${P1_CALDAV_APP_PASSWORD:-}" ]; then
   SRV=$(doh "_caldavs._tcp.$CALDAV_HOST" SRV | awk 'NF >= 4 {print $4":"$3}' | head -1 | sed 's/\.:/:/')
   if [ -n "$SRV" ]; then CD_HOST=${SRV%%:*}; CD_PORT=${SRV##*:}; else CD_HOST=$CALDAV_HOST; CD_PORT=443; fi
-  CD_RES=$(resolve_arg "$CD_HOST" "$CD_PORT")
+  CD_RES=$(resolve_arg "$CD_HOST" "$CD_PORT") || fail=1
   printf 'user = "%s:%s"\n' "$P1_CALDAV_USER" "$P1_CALDAV_APP_PASSWORD" > "$TMP/caldav.cfg"
   check "caldav PROPFIND $CD_HOST:$CD_PORT" "$(curl -s $CD_RES -K "$TMP/caldav.cfg" -L -o /dev/null -w '%{http_code}' -X PROPFIND -H 'Depth: 0' "https://$CD_HOST:$CD_PORT/.well-known/caldav")" '207|200|301|302'
 else

@@ -34,7 +34,14 @@ legacy_loopback() {
   hp=${hp%%/*}
   case "${hp%:*}" in 127.0.0.1|localhost|'[::1]') ;; *) echo "OLD_STALWART_URL host ${hp%:*} is not loopback: credentials not sent"; return 1 ;; esac
   l=$(ss -ltnpH "sport = :${hp##*:}" 2>/dev/null)
-  [ -n "$l" ] && ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
+  [ -n "$l" ] || { echo "nothing listens on :${hp##*:}: start the SSM port-forward; credentials not sent"; return 1; }
+  ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
   echo "OLD_STALWART_URL is loopback through the SSM tunnel of $(id -un)"
+}
+shared_zone_id() {
+  local tok
+  tok=$(aws_stage secretsmanager get-secret-value --secret-id mzla/tb-stage/cloudflare-external-dns --query SecretString --output text 2>/dev/null | jq -r '.apiToken // empty') || return 1
+  [ -n "$tok" ] || return 1
+  curl -sS -m 30 -K <(printf 'header = "Authorization: Bearer %s"\n' "$tok") "$CF_API/zones?name=$1" | jq -re '.result[0].id // empty'
 }
 latest() { ls -1t "$1" 2>/dev/null | head -1; }

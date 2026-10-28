@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+[ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
 need CF_ZONE_ID TARGET_NLB_DNS KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KARGO_WAREHOUSE_CONFIGS KUBECONFIG_STAGE KUBECONFIG_HUB
 pending FLIP_PR SPF_APEX_TXT SPF_FINAL_TXT
 TMD=thunderbird/thundermail-deploy
@@ -24,7 +25,8 @@ snap_zone() {
   out=$(bash "$MIG_DIR/snapshot-zone.sh" "$CF_ZONE_ID") || return 1
   printf '%s\n' "$out"
   snap=$(tail -1 <<<"$out")
-  cf_api "$CF_API/zones/$CF_ZONE_ID/dns_records/export" > "$EVIDENCE_DIR/zone-bind-$CF_ZONE_ID-$TS.txt" || return 1
+  cf_api --fail-with-body "$CF_API/zones/$CF_ZONE_ID/dns_records/export" > "$EVIDENCE_DIR/zone-bind-$CF_ZONE_ID-$TS.txt" || { echo "BIND export failed: $(head -c 300 "$EVIDENCE_DIR/zone-bind-$CF_ZONE_ID-$TS.txt")"; return 1; }
+  [ -s "$EVIDENCE_DIR/zone-bind-$CF_ZONE_ID-$TS.txt" ] || { echo "BIND export is empty"; return 1; }
   VALUE=$(jq length "$snap")
   FREIGHT_MANUAL=$("${KH[@]}" -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o jsonpath='{.status.freightHistory[0].items.*.name}') || return 1
   [ -n "$FREIGHT_MANUAL" ] || { echo "no Freight on $KARGO_STAGE_CONFIGS to roll back to"; return 1; }

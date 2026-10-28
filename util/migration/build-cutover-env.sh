@@ -147,12 +147,16 @@ build() {
   put AWS_REGION "$AWS_REGION" "eu-central-1"
   CF_TOKEN=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
   put CF_API_TOKEN_AGENT "$CF_TOKEN" "\$HOME/.cloudflare.env CF_API_TOKEN_AGENT"
-  put CF_ZONE_ID "$(try cf_zone stage-thundermail.com)" "GET /zones?name=stage-thundermail.com"
+  local zid; zid=$(try cf_zone stage-thundermail.com)
+  [ -n "$zid" ] || zid=$(try shared_zone_id stage-thundermail.com)
+  put CF_ZONE_ID "$zid" "GET /zones?name=stage-thundermail.com with CF_API_TOKEN_AGENT, else with the shared external-dns token (read-only)"
   put CF_ZONE_ID_TBPRO "$(try cf_zone tb.pro)" "GET /zones?name=tb.pro"
   put CF_ZONE_ID_DEVTM "$(try cf_zone dev-thundermail.com)" "GET /zones?name=dev-thundermail.com"
   put PADDLE_API_KEY "$(from_file "$HOME/.paddle.env" PADDLE_API_KEY)" "\$HOME/.paddle.env PADDLE_API_KEY"
   put ACCOUNTS_WEBHOOK_URL https://accounts.stage-thundermail.com/api/v1/telemetry/stalwart/webhook/ "tb-stage Accounts telemetry webhook"
-  put TARGET_NLB_DNS "$(try aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)" "aws elbv2 describe-load-balancers --profile mzla-tb-stage --names stalwart-nginx-thundermail"
+  local nlb; nlb=$(try kstage -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+  [ -n "$nlb" ] || nlb=$(try aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)
+  put TARGET_NLB_DNS "$nlb" "kubectl -n thundermail get svc nginx .status.loadBalancer.ingress[0].hostname, resolved live on every build (else aws elbv2 --names stalwart-nginx-thundermail)"
   put TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox; must be TEST_USER's Keycloak email (the backup address)"
   put TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
   put TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
@@ -229,6 +233,12 @@ check() {
     base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName')
     [ -n "$head" ] && [ "$base" = "$head" ] && echo "#$pr open, revert #$rev open on its head" || { echo "#$pr head=${head:-not open}, revert #$rev base=${base:-not open}"; return 1; }
   }
+  nlb_live() {
+    local h st
+    h=$(kstage -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+    st=$([ -n "$h" ] && aws_stage elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$h'].State.Code | [0]" --output text 2>/dev/null)
+    [ -n "$h" ] && [ "$h" = "${TARGET_NLB_DNS:-}" ] && [ "$st" = active ] && echo "TARGET_NLB_DNS matches the live nginx Service, NLB active" || { echo "env=${TARGET_NLB_DNS:-empty} live=${h:-none} state=${st:-none}: rebuild the env file"; return 1; }
+  }
   count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
     local out snap
@@ -262,7 +272,7 @@ check() {
   chk legacy-asg-targets count_eq "$(aws_legacy application-autoscaling describe-scalable-targets --service-namespace ecs --resource-ids $LEGACY_ASG_RESOURCE_IDS --query 'length(ScalableTargets)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_ASG_RESOURCE_IDS")" scalable_targets
   chk legacy-mgmt-instance count_eq "$(aws_legacy ec2 describe-instances --instance-ids "$LEGACY_MGMT_INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)" running state
   chk legacy-pub-lb count_eq "$(aws_legacy elbv2 describe-load-balancers --load-balancer-arns "$LEGACY_PUB_LB_ARN" --query 'length(LoadBalancers)' 2>/dev/null)" 1 load_balancers
-  chk target-nlb count_eq "$(aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null)" "$TARGET_NLB_DNS" dns
+  chk target-nlb nlb_live
   chk argo-apps count_eq "$(khub -n argocd get application $ARGO_APPS -o name 2>/dev/null | grep -c .)" "$(wc -w <<<"$ARGO_APPS")" applications
   chk kargo-stage-accounts khub -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o name
   chk kargo-stage-configs khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
@@ -277,7 +287,7 @@ check() {
   chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-2*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
   chk restore-zone-dry-run pair zone zone "$CF_ZONE_ID"
   chk restore-realm-dry-run pair realm realm "$KC_LEGACY_URL" "$KC_LEGACY_URL"
-  chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/snapshot-secret-versions.sh $1 >/dev/null && read -r id v < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && "$0"/restore-secret-version.sh "$id" "$v" --dry-run | tail -1' "$MIG_DIR" "$secret_ids"
+  chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/restore-secret-version.sh --check $1 >/dev/null && "$0"/snapshot-secret-versions.sh $1 >/dev/null && n=0 && while read -r id v; do "$0"/restore-secret-version.sh "$id" "$v" --dry-run >/dev/null && n=$((n + 1)) || exit 1; done < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && echo "secrets=$n checked, list and dry-run ok"' "$MIG_DIR" "$secret_ids"
   chk restore-target-db-dry-run target_db
   local end; end=$(date -u +%FT%TZ)
   printf 'env-check\t%s\t%s\tfailures\t%s\n' "$start" "$end" "$fails" >> "$TIMING_TSV"

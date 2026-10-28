@@ -7,17 +7,18 @@ usage() {
 usage: check-prereqs.sh [--for KEY]
 
 Prints HAVE or NEED for every tool and credential the tb-stage cutover uses.
-KEY limits the rows to one task (T1 T2 T3 T5..T11 T10m T10a T13 T14 W1..W8 P1..P3 V1).
+KEY limits the rows to one task (T1 T2 T3 T5..T11 T10m T10a T13 T14 W1..W8 P1..P3 V1); T0 prints every row.
 Values are never printed; exit status is the number of NEED rows, or 64 for a usage error.
 USAGE
 }
 
-KEYS="T1 T2 T3 T5 T6 T7 T8 T9 T10 T10m T10a T11 T13 T14 W1 W2 W3 W4 W5 W6 W7 W8 P1 P2 P3 V1"
+KEYS="T0 T1 T2 T3 T5 T6 T7 T8 T9 T10 T10m T10a T11 T13 T14 W1 W2 W3 W4 W5 W6 W7 W8 P1 P2 P3 V1"
 FOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --for)
       [ $# -ge 2 ] || { echo "--for needs a task key" >&2; usage >&2; exit 64; }
+      [ "$2" != T0 ] || { FOR=""; shift 2; continue; }
       case " $KEYS " in *" $2 "*) FOR=$2 ;; *) echo "unknown task key: $2 (one of $KEYS)" >&2; exit 64 ;; esac
       shift 2 ;;
     -h|--help) usage; exit 0 ;;

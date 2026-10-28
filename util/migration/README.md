@@ -11,7 +11,7 @@ set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.s
 ## Conventions
 
 - `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
-  NEED count. It never prints a value.
+  NEED count (`--for T0` prints every row). It never prints a value.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
@@ -91,6 +91,8 @@ the keying for the real hosts.
 - `thaw.sh` (run after the freeze PR merges with a merge commit) reverts the merged
   freeze commit on a branch from `main`, opens the draft thaw PR on platform-infrastructure
   and appends `FREEZE_SHA` and `THAW_PR` to the env file. Needs `FREEZE_PR` and `PI_DIR`.
+  Dry run by default (prints the git and gh commands); `--apply` writes. It refuses to run
+  until `FREEZE_PR` is merged with a merge commit.
 - `post/p1-verify.sh` checks the Appointment stage reconnection: new OIDC and Accounts
   hosts in the frontend bundle, OIDC discovery and login page, API codes, and the CalDAV
   connect when `P1_OIDC_ACCESS_TOKEN` or `P1_CALDAV_USER`/`P1_CALDAV_APP_PASSWORD` are set; a skipped check makes it exit 2 (INCOMPLETE).
@@ -139,6 +141,10 @@ the keying for the real hosts.
   rolls back automatically. Exit 2 means a NEED item is listed.
 - Restore files: `cut-legacy-restore.txt` for W2 and `w<n>-*-restore.txt` otherwise, written by
   `--apply` once per cut (a `restore-W<n>` row); dry runs write `*.dry-run.txt`.
+- W3 accepts objects Stalwart wrote into the target bucket before the copy when none of them is
+  in the legacy bucket (the 0.16 web-admin bundle, written at pod start): it records their keys
+  as a baseline, stages `rclone delete --exclude-from <baseline keys>` so a restore keeps them,
+  and its `rclone check` is `--one-way` (every legacy object present and equal on the target).
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
