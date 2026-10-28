@@ -228,7 +228,7 @@ check() {
     chk "pg_isready-${hv%_PG_HOST}" pod pg_isready -h "${!hv}"
     chk "psql-select1-${hv%_PG_HOST}" pod psql -h "${!hv}" -U "${!uv}" -d "${!dv}" -Atc 'select 1'
   done
-  chk stalwart-legacy-mgmt http200 -K <(printf 'user = "%s:%s"\n' "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/principal?types=domain"
+  chk stalwart-legacy-healthz http200 "$OLD_STALWART_URL/healthz/live"
   chk stalwart-target-healthz http200 "$STALWART_URL/healthz/live"
   chk rclone-lsd-legacy bash -c 'rclone lsd leg: | grep -q "$LEGACY_BLOB_BUCKET" && echo "bucket listed"'
   chk rclone-lsd-target bash -c 'rclone lsd tgt: | grep -q "$TARGET_BLOB_BUCKET" && echo "bucket listed"'

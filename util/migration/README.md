@@ -59,3 +59,9 @@ the keying for the real hosts.
 - `migrate_v016.py` is the upstream release copy (stalwartlabs/stalwart v0.16.26,
   `resources/scripts/migrate_v016.py`, sha256 `ebc7c2cc8b3d9378476523ee5fd76c39b1bc0e788a890ff17b507b03c0757458`).
   Install its dependencies with `pip install -r util/migration/requirements.txt`.
+- `window/thaw.sh` (run after the freeze PR merges with a merge commit) reverts the merged
+  freeze commit on a branch from `main`, opens the draft thaw PR on platform-infrastructure
+  and appends `FREEZE_SHA` and `THAW_PR` to the env file. Needs `FREEZE_PR` and `PI_DIR`.
+- `post/p1-verify.sh` checks the Appointment stage reconnection: new OIDC and Accounts
+  hosts in the frontend bundle, OIDC discovery and login page, API codes, and the CalDAV
+  connect when `P1_OIDC_ACCESS_TOKEN` or `P1_CALDAV_USER`/`P1_CALDAV_APP_PASSWORD` are set.
