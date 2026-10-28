@@ -12,26 +12,28 @@ RESET_URL="https://$AUTH_HOST/realms/$REALM/login-actions/reset-credentials"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-doh() { curl -s -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data][0] // empty'; }
+doh() { curl -s -m 20 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data][0] // empty'; }
 
 imap() {
-  IMAP_HOST=$TEST_MAILBOX_IMAP_HOST IMAP_USER=$TEST_MAILBOX_IMAP_USER IMAP_PASSWORD=$TEST_MAILBOX_IMAP_PASSWORD python3 -I - "$@" <<'PY'
-import email, email.utils, imaplib, os, sys, time
-m = imaplib.IMAP4_SSL(os.environ["IMAP_HOST"], 993)
+  IMAP_HOST=$TEST_MAILBOX_IMAP_HOST IMAP_USER=$TEST_MAILBOX_IMAP_USER IMAP_PASSWORD=$TEST_MAILBOX_IMAP_PASSWORD RCPT=$TEST_MAILBOX timeout $(( WAIT + 120 )) python3 -I - "$@" <<'PY'
+import email, email.utils, imaplib, os, ssl, sys, time
+m = imaplib.IMAP4_SSL(os.environ["IMAP_HOST"], 993, ssl_context=ssl.create_default_context(), timeout=30)
 m.login(os.environ["IMAP_USER"], os.environ["IMAP_PASSWORD"])
 if sys.argv[1] == "uidnext":
     print(m.status("INBOX", "(UIDNEXT)")[1][0].decode().split("UIDNEXT ")[1].rstrip(")"))
     sys.exit(0)
 since, domain, deadline = int(sys.argv[2]), sys.argv[3], time.time() + int(sys.argv[4])
+rcpt = os.environ["RCPT"].lower()
 while time.time() < deadline:
     m.select("INBOX", readonly=True)
     for uid in m.uid("search", None, f"UID {since}:*")[1][0].split():
         if int(uid) < since:
             continue
-        raw = m.uid("fetch", uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")[1][0][1]
+        raw = m.uid("fetch", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])")[1][0][1]
         h = email.message_from_bytes(raw)
         addr = email.utils.parseaddr(h.get("From", ""))[1]
-        if "password" not in h.get("Subject", "").lower():
+        to = [a.lower() for _, a in email.utils.getaddresses(h.get_all("To", []))]
+        if rcpt not in to or "password" not in h.get("Subject", "").lower():
             continue
         print(f"uid={uid.decode()} date={h.get('Date')} from={addr} subject={h.get('Subject')}")
         sys.exit(0 if addr.lower().endswith("@" + domain) else 3)
@@ -45,7 +47,7 @@ ip=$(doh "$AUTH_HOST")
 [ -n "$ip" ] || die "FAIL dns $AUTH_HOST has no A record"
 RES="--resolve $AUTH_HOST:443:$ip"
 
-code=$(curl -s $RES -c "$TMP/jar" -b "$TMP/jar" -L -o "$TMP/form.html" -w '%{http_code}' "$RESET_URL")
+code=$(curl -s -m 30 $RES -c "$TMP/jar" -b "$TMP/jar" -L -o "$TMP/form.html" -w '%{http_code}' "$RESET_URL")
 [ "$code" = 200 ] || die "FAIL reset-credentials GET HTTP $code"
 action=$(grep -oE "(action=\"|formAction: ')[^\"']*login-actions/reset-credentials[^\"']*" "$TMP/form.html" | head -1 | sed -E "s/^(action=\"|formAction: ')//; s/&amp;/\&/g")
 [ -n "$action" ] || die "FAIL reset-credentials form has no action"
@@ -60,7 +62,7 @@ if [ "$APPLY" != 1 ]; then
 fi
 
 start=$(date -u +%FT%TZ)
-code=$(curl -s $RES -c "$TMP/jar" -b "$TMP/jar" -o /dev/null -w '%{http_code}' --data-urlencode "username=$TEST_USER" "$action")
+code=$(curl -s -m 30 $RES -c "$TMP/jar" -b "$TMP/jar" -o /dev/null -w '%{http_code}' --data-urlencode "username=$TEST_USER" "$action")
 [[ "$code" =~ ^(200|302)$ ]] || die "FAIL reset-credentials POST HTTP $code"
 echo "PASS reset requested for $TEST_USER"
 
