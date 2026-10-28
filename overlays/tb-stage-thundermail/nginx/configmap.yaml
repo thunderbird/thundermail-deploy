@@ -55,7 +55,7 @@ data:
       server {
         listen 25 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 10m;
         proxy_pass stalwart-smtp;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -64,7 +64,7 @@ data:
       server {
         listen 465 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 10m;
         proxy_pass stalwart-smtps;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -73,7 +73,7 @@ data:
       server {
         listen 587 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 10m;
         proxy_pass stalwart-starttls;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -83,7 +83,7 @@ data:
       server {
         listen 993 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 10m;
         proxy_pass stalwart-imaps;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -92,7 +92,7 @@ data:
       server {
         listen 4190 proxy_protocol;
         proxy_connect_timeout 1s;
-        proxy_timeout 3s;
+        proxy_timeout 10m;
         proxy_pass stalwart-managesieve;
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
@@ -156,6 +156,8 @@ data:
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.stage-thundermail.com;
           proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_ssl_server_name on;
           proxy_ssl_name mail.stage-thundermail.com;
         }
       }
