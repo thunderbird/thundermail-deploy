@@ -4,6 +4,7 @@ set -euo pipefail
 need ARGO_APPS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_STAGE KUBECONFIG_HUB PI_DIR
 pending THAW_PR REPLICAS_BEFORE
 PI=thunderbird/platform-infrastructure
+ACC=thunderbird/thunderbird-accounts
 PROMOTION=$EVIDENCE_DIR/promotion-accounts-$TS.yaml
 
 snap() {
@@ -87,6 +88,31 @@ thaw() {
   "${KH[@]}" -n argocd get application "${apps[@]}" -o jsonpath='{range .items[*]}{.metadata.name} {.spec.syncPolicy.automated.selfHeal} {.status.sync.status} {.status.health.status}{"\n"}{end}'
 }
 
+wf_state() { gh api "repos/$ACC/actions/workflows/merge.yml" --jq .state; }
+
+accounts_ci_off() {
+  local st who
+  printf '  + gh workflow disable merge.yml -R %s (deploy-stage puts the legacy ECS desired_count back to 1); row accounts-merge-yml: state after, who; re-enable only after the thunderbird-accounts desired_count 0 PR merges\n' "$ACC"
+  st=$(wf_state) || return 1
+  VALUE=$st
+  echo "merge.yml state now: $st"
+  [ "$APPLY" = 1 ] || return 0
+  [ "$st" = disabled_manually ] || gh workflow disable merge.yml -R "$ACC" || return 1
+  who=$(gh api user --jq .login) || return 1
+  VALUE=$(wf_state) || return 1
+  mark accounts-merge-yml state "$VALUE by $who"
+  [ "$VALUE" = disabled_manually ]
+}
+
+accounts_ci_verify() {
+  VALUE=$(wf_state) || return 1
+  if [ "$VALUE" != disabled_manually ]; then
+    [ "$APPLY" = 1 ] || { echo "merge.yml is $VALUE before the apply; the apply expects disabled_manually"; return 0; }
+    echo "$ACC merge.yml is $VALUE, want disabled_manually"; return 1
+  fi
+  echo "$ACC merge.yml disabled_manually; gh workflow enable merge.yml -R $ACC only after the desired_count 0 PR merges"
+}
+
 last_promo() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath='{.status.lastPromotion.name}'; }
 promoted() { [ "$(last_promo)" != "$PROMO_BEFORE" ]; }
 stage_get() { "${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o jsonpath="$1"; }
@@ -120,7 +146,9 @@ step scale-up "" scale_up
 step cleanup "" cleanup
 step freight-race "" freight_race
 go_gate
+step accounts-ci-off state accounts_ci_off
 step thaw "" thaw
 step kargo-verify "" kargo_verify
+step accounts-ci-verify state accounts_ci_verify
 printf 'after #1577 signs off: rm -rf %s %s\n' "$SECRET_DIR" "$ENV_FILE"
 finish

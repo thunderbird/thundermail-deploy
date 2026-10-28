@@ -9,6 +9,10 @@ PR_B=148
 ZONE_NAME=stage-thundermail.com
 MANUAL_PROMOTION=$EVIDENCE_DIR/promotion-configs-manual$SUF-$TS.yaml
 PROMOTION=$EVIDENCE_DIR/promotion-configs-flip-$TS.yaml
+WK_PATHS="caldav carddav jmap autoconfig"
+WK_REF=w7_apex_well_known
+REDIRECT_EP=$CF_API/zones/$CF_ZONE_ID/rulesets/phases/http_request_dynamic_redirect/entrypoint
+REDIRECT_BEFORE=$EVIDENCE_DIR/redirect-before-$CF_ZONE_ID-$TS.json
 
 next_step() { local n; for n in 1 2 3 4 5; do [ -n "$(after_cut "w7-step$n")" ] || { echo "$n"; return; }; done; echo 6; }
 
@@ -44,7 +48,7 @@ snap_zone() {
     "3 while tb-stage Keycloak is up: bash $MIG_DIR/restore-realm.sh ${realm:-<realm-before snapshot>} https://auth.stage-thundermail.com --dry-run, then --apply" \
     "4 $(shq "${KS[@]}" -n keycloak-customer scale sts/keycloak-customer --replicas=0); $(shq "${KS[@]}" -n accounts scale deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --replicas=0); $(shq "${KS[@]}" -n thundermail scale deploy/stalwart --replicas=0)" \
     "5 legacy ECS: the restore-ecs.sh lines in $EVIDENCE_DIR/cut-legacy-restore.txt (Keycloak first, then Accounts)" \
-    "6 bash $MIG_DIR/restore-zone.sh $snap --dry-run, then --apply" \
+    "6 bash $MIG_DIR/restore-zone.sh $snap --dry-run, then --apply; after step 4 also line R (restore-redirect.sh)" \
     "7 revert the FLIP_PR and PR $PR_B merge commits on TMD main (git revert -m 1 on a branch from main, merge commit); stay frozen (thaw PR unmerged) until Argo CD has synced the revert" \
     "8 revert the #1542 and #1543 repoints (pre-opened revert PRs, main -> env/tb-stage), restore-secret-version.sh, force-sync" > "$RESTORE" || return 1
   mark_restore
@@ -100,6 +104,45 @@ mail_cname() {
   row dns-cutover "${start:-unknown}" "$(date -u +%FT%TZ)" target "$TARGET_NLB_DNS"
 }
 
+wk_expr() {
+  local p set="" sub=""
+  for p in $WK_PATHS; do set="$set \"/.well-known/$p\""; sub="$sub or http.request.uri.path wildcard \"/.well-known/$p/*\""; done
+  printf '(http.host eq "%s" and (http.request.uri.path in {%s}%s))' "$ZONE_NAME" "${set# }" "$sub"
+}
+
+wk_live() {
+  local ip p got
+  ip=$(doh "$ZONE_NAME")
+  [ -n "$ip" ] || { echo "no A record for $ZONE_NAME"; return 1; }
+  for p in $WK_PATHS; do
+    got=$(curl -s -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' --resolve "$ZONE_NAME:443:$ip" "https://$ZONE_NAME/.well-known/$p?w7=$TS")
+    [ "$got" = "302 https://mail.$ZONE_NAME/.well-known/$p?w7=$TS" ] || { echo "/.well-known/$p: $got"; return 1; }
+  done
+}
+
+apex_redirect() {
+  local cur body r
+  printf '  + snapshot the http_request_dynamic_redirect entrypoint of %s (without %s) to %s, append line R to %s\n' "$ZONE_NAME" "$WK_REF" "$REDIRECT_BEFORE" "$RESTORE"
+  printf '  + PUT the entrypoint: snapshot rules + %s, 302 to concat("https://mail.%s", path), query kept, when %s\n' "$WK_REF" "$ZONE_NAME" "$(wk_expr)"
+  printf '  + wait 120s for curl https://%s/.well-known/{%s}?w7=TS -> 302 https://mail.%s/.well-known/<same>?w7=TS\n' "$ZONE_NAME" "${WK_PATHS// /,}" "$ZONE_NAME"
+  if [ "$APPLY" = 0 ]; then
+    [ -z "${CF_API_TOKEN_AGENT:-}" ] || printf '    plan: current entrypoint %s\n' "$(cf_api "$REDIRECT_EP" | jq -c 'if .success then [.result.rules[]? | .ref // .id] else [.errors[]?.message] end')"
+    return 0
+  fi
+  cur=$(cf_api "$REDIRECT_EP") || return 1
+  if jq -e '.success' <<<"$cur" >/dev/null; then jq --arg ref "$WK_REF" '{rules: [.result.rules[]? | select(.ref != $ref) | del(.id, .version, .last_updated)]}' <<<"$cur" > "$REDIRECT_BEFORE"
+  elif jq -e '[.errors[]?.code] | index(10003)' <<<"$cur" >/dev/null; then echo '{"rules": []}' > "$REDIRECT_BEFORE"
+  else echo "redirect entrypoint read failed: $(jq -c '.errors' <<<"$cur")"; return 1; fi
+  printf 'R bash %s %s --dry-run, then --apply (apex /.well-known redirect)\n' "$MIG_DIR/restore-redirect.sh" "$REDIRECT_BEFORE" >> "$RESTORE"
+  body=$(jq -c --arg ref "$WK_REF" --arg e "$(wk_expr)" --arg t "concat(\"https://mail.$ZONE_NAME\", http.request.uri.path)" '{rules: (.rules + [{ref: $ref, description: "W7 apex /.well-known to mail.", expression: $e, action: "redirect", action_parameters: {from_value: {status_code: 302, target_url: {expression: $t}, preserve_query_string: true}}, enabled: true}])}' "$REDIRECT_BEFORE")
+  r=$(cf_api -X PUT "$REDIRECT_EP" --data "$body") || return 1
+  jq -e '.success' <<<"$r" >/dev/null || { echo "redirect PUT failed: $(jq -c '.errors' <<<"$r")"; return 1; }
+  until_ok 120 wk_live >/dev/null || { echo "apex redirect not live after 120s: $(wk_live)"; return 1; }
+  echo "apex /.well-known/{${WK_PATHS// /,}} 302 to https://mail.$ZONE_NAME/.well-known/<same>, query kept"
+}
+
+mail_flip() { mail_cname && apex_redirect; }
+
 verify() {
   local args=(--dry-run)
   [ "$APPLY" = 0 ] || args=(--apply)
@@ -118,7 +161,7 @@ gated() {
 }
 
 prereqs
-helpers snapshot-zone.sh restore-zone.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
+helpers snapshot-zone.sh restore-zone.sh restore-redirect.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
 NEXT=$(next_step)
 if [ "$APPLY" = 1 ]; then
   [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ] || stop "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT'"
@@ -129,7 +172,7 @@ fi
 gated 1 spf-edits spf_edits
 gated 2 merge-148 merge_b
 gated 3 flip-promote flip
-gated 4 mail-cname mail_cname
+gated 4 mail-cname mail_flip
 [ "$APPLY" = 0 ] || [ "$NEXT" = 4 ] || [ "$NEXT" = 5 ] || { finish; exit 0; }
 step w7-verify "" verify
 [ "$APPLY" = 0 ] || mark w7-step5 status w7-verify

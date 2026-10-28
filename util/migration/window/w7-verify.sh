@@ -86,15 +86,15 @@ acme_same() {
 }
 
 well_known() {
-  local ip p loc bad=""
+  local ip p got bad=""
   ip=$(doh "$Z")
   [ -n "$ip" ] || { echo "no A record for $Z"; return 1; }
   for p in caldav carddav jmap autoconfig; do
-    loc=$(curl -s -m 15 -o /dev/null -w '%{redirect_url}' --resolve "$Z:443:$ip" "https://$Z/.well-known/$p")
-    case "$loc" in https://mail.thundermail.com/*) bad="$bad $p" ;; esac
+    got=$(curl -s -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' --resolve "$Z:443:$ip" "https://$Z/.well-known/$p?w7=$TS")
+    [ "$got" = "302 https://$M/.well-known/$p?w7=$TS" ] || bad="$bad $p"
   done
-  [ -z "$bad" ] || { echo "/.well-known/{${bad# }} on $Z still redirects to production mail.thundermail.com"; return 1; }
-  echo "no /.well-known redirect from $Z to production"
+  [ -z "$bad" ] || { echo "/.well-known/{${bad# }} on $Z do not 302 to https://$M/.well-known/<same>?query"; return 1; }
+  echo "/.well-known/* on $Z 302 to https://$M with the query"
 }
 
 tls() {

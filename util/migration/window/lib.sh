@@ -167,19 +167,42 @@ setenv_secret() {
   export "$1=$2"
 }
 
+greptile_5() {
+  local last
+  last=$(gh api --paginate "repos/$1/issues/$2/comments" --jq ".[] | select(.user.login == \"greptile-apps[bot]\") | [.updated_at, (.body | contains(\"Confidence Score: 5/5\")), (.body | contains(\"/commit/$3\"))] | @tsv" | sort | tail -1)
+  [ "$(cut -f2- <<<"$last")" = $'true\ttrue' ]
+}
+
 merge_pr() {
-  local repo=$1 pr=$2 st
-  printf '  + gh pr ready %s -R %s when draft; require an approval when the branch needs one; gh pr merge %s -R %s --merge\n' "$pr" "$repo" "$pr" "$repo"
-  [ "$APPLY" = 1 ] || return 0
-  st=$(gh pr view "$pr" -R "$repo" --json state,isDraft,reviewDecision -q '"\(.state) \(.isDraft) \(.reviewDecision)"') || return 1
-  case "$st" in
-    MERGED*) echo "$repo#$pr is already merged"; return 0 ;;
-    OPEN*) ;;
-    *) echo "$repo#$pr is $st"; return 1 ;;
+  local repo=$1 pr=$2 st state draft decision head admin=()
+  printf '  + gh pr ready %s -R %s when draft; require an approval when the branch needs one (ADMIN_MERGE=1: --admin after green checks and Greptile 5/5 on the head); gh pr merge %s -R %s --merge\n' "$pr" "$repo" "$pr" "$repo"
+  [ "$APPLY" = 1 ] || case "$pr" in ''|*[!0-9]*) return 0 ;; esac
+  st=$(gh pr view "$pr" -R "$repo" --json state,isDraft,reviewDecision,headRefOid -q '"\(.state) \(.isDraft) \(if (.reviewDecision // "") == "" then "NONE" else .reviewDecision end) \(.headRefOid)"') || { [ "$APPLY" = 0 ] || return 1; echo "  (gh pr view $repo#$pr failed: state not read)"; return 0; }
+  read -r state draft decision head <<<"$st"
+  case "$state" in
+    MERGED) echo "$repo#$pr is already merged"; return 0 ;;
+    OPEN) ;;
+    *) echo "$repo#$pr is $state"; return 1 ;;
   esac
-  case "$st" in *" REVIEW_REQUIRED"|*" CHANGES_REQUESTED") echo "$repo#$pr needs an approving review before the merge (collect it before the window)"; return 1 ;; esac
-  case "$st" in *" true "*) gh pr ready "$pr" -R "$repo" || return 1 ;; esac
-  gh pr merge "$pr" -R "$repo" --merge
+  case "$decision" in
+    CHANGES_REQUESTED) st="needs an approving review before the merge (changes requested)" ;;
+    REVIEW_REQUIRED)
+      if [ "${ADMIN_MERGE:-0}" != 1 ]; then st="needs an approving review before the merge (collect it before the window, or ADMIN_MERGE=1)"
+      elif ! gh pr checks "$pr" -R "$repo" >/dev/null 2>&1; then st="checks are not all green on $head: no admin merge"
+      elif ! greptile_5 "$repo" "$pr" "$head"; then st="has no Greptile 5/5 on $head: no admin merge"
+      else st=""; admin=(--admin); echo "$repo#$pr: admin merge (operator decision 2026-10-28), checks green and Greptile 5/5 on $head"; fi ;;
+    *) st="" ;;
+  esac
+  if [ -n "$st" ]; then
+    echo "$repo#$pr $st"
+    [ "$APPLY" = 1 ] && return 1
+    NEEDS=$((NEEDS + 1))
+    return 0
+  fi
+  if [ "$APPLY" = 0 ]; then echo "  would ${admin:+admin-}merge $repo#$pr at $head"; return 0; fi
+  [ "$draft" = false ] || gh pr ready "$pr" -R "$repo" || return 1
+  [ -z "${admin[*]}" ] || mark admin-merge pr "$repo#$pr $head"
+  gh pr merge "$pr" -R "$repo" --merge --match-head-commit "$head" ${admin[@]+"${admin[@]}"}
 }
 
 stalwart_pods() { "${KS[@]}" -n thundermail get pods -l app=stalwart -o json | jq -r '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "ReplicaSet" and (.name | startswith("stalwart-")))) | "pod/" + .metadata.name'; }
