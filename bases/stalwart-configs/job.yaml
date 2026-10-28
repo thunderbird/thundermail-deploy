@@ -33,7 +33,8 @@ spec:
                 'load("/etc/stalwart-values/values.yaml") as $values
                 | select(
                   .object != "DnsServer"
-                  or ($values.dnsManagement // "Manual") == "Automatic"
+                  or (.["@type"] == "upsert")
+                  == (($values.dnsManagement // "Manual") == "Automatic")
                 )
                 | select(.object != "WebHook" or $values.webhookURL != null)
                 | (
