@@ -11,6 +11,7 @@ NS=(-n thundermail)
 POD=("${KS[@]}" "${NS[@]}" exec -i runner -c postgres --)
 PROBE="if [ ! -s /work/target-before.dump ]; then echo missing; elif [ -n \"\$(find /work/target-before.dump -mmin -720)\" ]; then echo fresh; else echo stale; fi"
 PRINCIPAL_WARN='WARN (failed to fetch|skipping principal type)'
+TENANT_SKIP="WARN skipping principal type 'tenant': .*'Enterprise feature'"
 DROP_RE='^warning: (dropping|renaming) (User|Group) '
 DROP_BASELINE=$SECRET_DIR/convert-dropped-baseline.txt
 
@@ -124,15 +125,20 @@ queue_drain() {
   [ "$APPLY" = 0 ] || [ "$VALUE" = 0 ] || { echo "queue not drained: wait or flush, record it, then rerun"; return 1; }
 }
 
+skips() { grep -E "$PRINCIPAL_WARN" "$1" | grep -vcE "$TENANT_SKIP" || true; }
+
 dump() {
   local n
   [ "$APPLY" = 0 ] || legacy_tunnel || return 1
   printf '  + bash %s %s (per-type principal totals: server vs dump)\n' "$MIG_DIR/dump-check.sh" "$S/principals.json"
   run_to "$S/dump.log" "$PY" "$MIG_DIR/migrate_v016.py" dump --url "$OLD_STALWART_URL" --username "$OLD_STALWART_USER" --password "$OLD_STALWART_PASSWORD" --settings "$S/settings.json" --principals "$S/principals.json" || { echo "dump failed; see $S/dump.log"; return 1; }
-  [ "$APPLY" = 1 ] || return 0
+  if [ "$APPLY" = 0 ]; then
+    [ ! -s "$S/dump.log" ] || echo "existing $S/dump.log: $(skips "$S/dump.log") principal type(s) not fetched or skipped besides the community-edition tenant skip"
+    return 0
+  fi
   for n in settings.json principals.json; do [ -s "$S/$n" ] || { echo "dump wrote no $n"; return 1; }; done
-  n=$(grep -cE "$PRINCIPAL_WARN" "$S/dump.log" || true)
-  [ "$n" = 0 ] || { echo "dump.log reports $n principal(s) not fetched or skipped; see $S/dump.log"; return 1; }
+  n=$(skips "$S/dump.log")
+  [ "$n" = 0 ] || { echo "dump.log reports $n principal(s) not fetched or skipped besides the community-edition tenant skip; see $S/dump.log"; return 1; }
   bash "$MIG_DIR/dump-check.sh" "$S/principals.json" || { echo "dump-check.sh: the dump does not match the server's principal totals"; return 1; }
 }
 

@@ -37,6 +37,7 @@ RESTORE=$EVIDENCE_DIR/$W-restore$SUF.txt
 LOG=$EVIDENCE_DIR/$W-$(mode)-$TS.log
 NEEDS=0
 PF=""
+PF_OK=0
 exec > >(exec setsid tee -a "$LOG") 2>&1
 trap 'stop "command failed at line $LINENO"' ERR
 trap 'stop "interrupted by signal"' INT TERM HUP
@@ -136,6 +137,8 @@ live() {
   done
 }
 
+live_stalwart() { [ "$PF_OK" = 1 ] || { printf '  (live read skipped: no port-forward of %s)\n' "$(id -un)"; return 1; }; live "$@"; }
+
 pending() {
   local v
   for v in "$@"; do
@@ -199,6 +202,7 @@ port_forward() {
     owned_by "$port" kubectl || { echo "a listener on :$port is not a kubectl owned by $(id -un): credentials not sent"; return 1; }
     curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "kubectl listener on :$port does not answer"; return 1; }
     echo "reusing the kubectl port-forward on $STALWART_URL"
+    PF_OK=1
     return 0
   fi
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart --field-selector=status.phase=Running -o name | head -1)
@@ -207,6 +211,7 @@ port_forward() {
   PF=$!
   until_ok 30 curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "port-forward to $pod did not answer"; return 1; }
   echo "port-forward $pod -> $STALWART_URL"
+  PF_OK=1
 }
 
 cfg_trees() {
