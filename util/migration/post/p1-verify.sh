@@ -43,13 +43,13 @@ absent() {
 
 echo "## frontend bundle on https://$APPT_HOST"
 APPT_RES=$(resolve_arg "$APPT_HOST") || fail=1
-curl -s $APPT_RES "https://$APPT_HOST/" -o "$TMP/index.html" || true
+curl -sf $APPT_RES "https://$APPT_HOST/" -o "$TMP/index.html" || { echo "FAIL page download https://$APPT_HOST/"; fail=1; }
 mapfile -t ASSETS < <(grep -oE '(src|href)="[^"]+\.js"' "$TMP/index.html" | sed -E 's/^[a-z]+="//; s/"$//' | sort -u)
 echo "assets: ${#ASSETS[@]}"
 : > "$TMP/bundle.js"
 for a in "${ASSETS[@]}"; do
   case "$a" in https://*) url=$a ;; /*) url="https://$APPT_HOST$a" ;; *) url="https://$APPT_HOST/$a" ;; esac
-  curl -s $APPT_RES "$url" >> "$TMP/bundle.js" || true
+  curl -sf $APPT_RES "$url" >> "$TMP/bundle.js" || { echo "FAIL bundle download $url"; fail=1; }
 done
 contains "oidc root (new)" "$TMP/bundle.js" "https://$AUTH_HOST/realms/tbpro/"
 contains "dashboard url (new)" "$TMP/bundle.js" "https://$ACCOUNTS_HOST/dashboard"
