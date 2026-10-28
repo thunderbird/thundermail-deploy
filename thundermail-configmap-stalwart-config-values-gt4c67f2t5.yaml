@@ -17,10 +17,27 @@ data:
     stalwartPgHost: ep-empty-pond-b9gr26c1-pooler.c-7.eu-central-1.aws.neon.tech
     stalwartPgDatabase: neondb
     stalwartPgAdminUsername: neondb_owner
+    dnsManagement: Manual
+    dnsPublishSpf: false
+    authBanRateCount: 5000
+    scanBanRateCount: 30
+    addressBookName: Thundermail Address Book
+    allowedIPs:
+      ipallow-legacy-1:
+        address: 10.11.0.0/16
+        reason: Migrated from v0.15
+      ipallow-legacy-2:
+        address: 18.96.47.152/29
+        reason: Migrated from v0.15
+    webhookURL: https://accounts.stage-thundermail.com/api/v1/telemetry/stalwart/webhook/
+    webhookEvents:
+      message-ingest.ham: true
+      message-ingest.spam: true
+      queue.authenticated-message-queued: true
 immutable: true
 kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-h56dc2ft9b
+  name: stalwart-config-values-gt4c67f2t5
   namespace: thundermail

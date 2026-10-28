@@ -35,7 +35,7 @@ data:
           publishRecords:
             dkim: true
             tlsa: true
-            spf: true
+            spf: __DNS_PUBLISH_SPF__
             mx: true
             dmarc: true
             srv: true
@@ -49,6 +49,12 @@ data:
         subAddressing:
           '@type': Enabled
         allowRelaying: false
+    ---
+    '@type': reconcile
+    object: DnsServer
+    matchOn:
+      - description
+    value: {}
     ---
     '@type': upsert
     object: Directory
@@ -109,8 +115,13 @@ data:
     '@type': update
     object: AddressBook
     value:
-      defaultDisplayName: 'Thundermail Contacts'
+      defaultDisplayName: __ADDRESS_BOOK_NAME__
       vCardVersion: v3
+    ---
+    '@type': update
+    object: Calendar
+    value:
+      defaultDisplayName: 'Thundermail Calendar'
     ---
     '@type': upsert
     object: NetworkListener
@@ -236,6 +247,7 @@ data:
     object: Http
     value:
       useXForwarded: true
+      usePermissiveCors: true
     ---
     '@type': update
     object: BlobStore
@@ -322,10 +334,27 @@ data:
         else: "'Thundermail ESMTP at your service'"
       hostname:
         match: {}
-        else: "system('hostname')"
+        else: "'mail.__DOMAIN_FQDN__'"
       script:
         match: {}
         else: 'false'
+    ---
+    '@type': update
+    object: MtaSts
+    value:
+      mxHosts:
+        'mail.__DOMAIN_FQDN__': true
+    ---
+    '@type': upsert
+    object: MtaQueueQuota
+    matchOn:
+      - description
+    value:
+      queue-quota-global:
+        enable: true
+        description: Global queue quota
+        messages: 10001
+        size: 10737418240
     ---
     '@type': upsert
     object: MtaInboundThrottle
@@ -384,7 +413,7 @@ data:
         period: 86400000 # 24 hours
       abuseBanPeriod: null
       authBanRate:
-        count: 500
+        count: __AUTH_BAN_RATE_COUNT__
         period: 86400000 # 24 hours
       authBanPeriod: null
       loiterBanRate:
@@ -405,13 +434,29 @@ data:
         '*wordpress*': true
         '*drupal*': true
       scanBanRate:
-        count: 1000
+        count: __SCAN_BAN_RATE_COUNT__
         period: 86400000 # 24 hours
       scanBanPeriod: null
+    ---
+    '@type': upsert
+    object: WebHook
+    matchOn:
+      - url
+    value:
+      webhook-posthog:
+        url: __WEBHOOK_URL__
+        enable: true
+        events: __WEBHOOK_EVENTS__
+        eventsPolicy: include
+        lossy: false
+        allowInvalidCerts: false
+        signatureKey:
+          '@type': Value
+          secret: __WEBHOOK_SECRET__
 immutable: true
 kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-dfg2h8976b
+  name: stalwart-config-base-tpl-6ddtm6hdth
   namespace: thundermail

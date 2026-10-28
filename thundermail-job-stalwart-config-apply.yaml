@@ -40,10 +40,19 @@ spec:
         - /bin/sh
         - -ec
         - |
+          yq -e \
+            '(.dnsManagement // "Manual") | test("^(Manual|Automatic)$")' \
+            /etc/stalwart-values/values.yaml > /dev/null
           yq eval-all \
             --output-format=json \
             --indent=0 \
             'load("/etc/stalwart-values/values.yaml") as $values
+            | select(
+              .object != "DnsServer"
+              or (.["@type"] == "upsert")
+              == (($values.dnsManagement // "Manual") == "Automatic")
+            )
+            | select(.object != "WebHook" or $values.webhookURL != null)
             | (
               .. | select(tag == "!!map")
             ) |= with_entries(
@@ -81,12 +90,57 @@ spec:
             ) = $values.tlsCertificateSANs
             |
             (
-              .. | select(. == "__CLOUDFLARE_API_TOKEN__")
-            ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
+              .. | select(. == "__AUTH_BAN_RATE_COUNT__")
+            ) = $values.authBanRateCount
+            |
+            (
+              .. | select(. == "__SCAN_BAN_RATE_COUNT__")
+            ) = $values.scanBanRateCount
+            |
+            (
+              .. | select(. == "__ADDRESS_BOOK_NAME__")
+            ) = $values.addressBookName
+            |
+            (
+              select(.object == "AllowedIp") | .value
+            ) *= ($values.allowedIPs // {})
+            |
+            (
+              select(
+                .object == "Domain"
+                and ($values.dnsManagement // "Manual") != "Automatic"
+              )
+              | .value[].dnsManagement
+            ) = {"@type": "Manual"}
+            |
+            (
+              .. | select(. == "__DNS_PUBLISH_SPF__")
+            ) = $values.dnsPublishSpf
+            |
+            with(
+              select(($values.dnsManagement // "Manual") == "Automatic");
+              (
+                .. | select(. == "__CLOUDFLARE_API_TOKEN__")
+              ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
+            )
+            |
+            with(
+              select(.object == "WebHook");
+              (.. | select(. == "__WEBHOOK_URL__")) = $values.webhookURL
+              | (.. | select(. == "__WEBHOOK_EVENTS__")) = $values.webhookEvents
+              | (
+                .. | select(. == "__WEBHOOK_SECRET__")
+              ) = load_str("/etc/stalwart-webhook/STALWART_WEBHOOK_SECRET")
+            )
             |
             .' \
             /etc/stalwart-config-template/stalwart-config-base.yaml \
             > /work/stalwart-config.ndjson
+          if grep -Eq '__[A-Z0-9_]+__|\$\{[A-Z0-9_]+\}' /work/stalwart-config.ndjson
+          then
+            echo "unrendered placeholder" >&2
+            exit 1
+          fi
         image: mikefarah/yq:4.45.1
         name: render-config
         volumeMounts:
@@ -103,6 +157,9 @@ spec:
           readOnly: true
         - mountPath: /etc/cloudflare
           name: cloudflare-api-token
+          readOnly: true
+        - mountPath: /etc/stalwart-webhook
+          name: stalwart-webhook-secret
           readOnly: true
       - args:
         - --insecure
@@ -175,10 +232,10 @@ spec:
       restartPolicy: Never
       volumes:
       - configMap:
-          name: stalwart-config-base-tpl-dfg2h8976b
+          name: stalwart-config-base-tpl-6ddtm6hdth
         name: stalwart-config-template
       - configMap:
-          name: stalwart-config-values-h56dc2ft9b
+          name: stalwart-config-values-gt4c67f2t5
         name: stalwart-values
       - name: ssl-certificate
         secret:
@@ -193,6 +250,14 @@ spec:
           items:
           - key: STALWART_CLOUDFLARE_API_TOKEN
             path: STALWART_CLOUDFLARE_API_TOKEN
+          optional: true
           secretName: stalwart-cloudflare-api-token
       - emptyDir: {}
         name: rendered
+      - name: stalwart-webhook-secret
+        secret:
+          items:
+          - key: STALWART_WEBHOOK_SECRET
+            path: STALWART_WEBHOOK_SECRET
+          optional: true
+          secretName: stalwart-webhook-secret
