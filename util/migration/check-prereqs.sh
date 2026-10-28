@@ -12,10 +12,14 @@ Values are never printed; exit status is the number of NEED rows.
 USAGE
 }
 
+KEYS="T1 T2 T5 T6 T9 T10 T11 T13 T14 W1 W2 W3 W4 W5 W6 W7 W8 P1 P2 P3"
 FOR=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --for) FOR=${2:-}; shift 2 ;;
+    --for)
+      [ $# -ge 2 ] || { echo "--for needs a task key" >&2; usage >&2; exit 2; }
+      case " $KEYS " in *" $2 "*) FOR=$2 ;; *) echo "unknown task key: $2 (one of $KEYS)" >&2; exit 2 ;; esac
+      shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -37,8 +41,8 @@ NEED=0
 sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --output json 2>/dev/null | jq -r '.SecretString'; }
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
-envfile_has() { [ -f "$ENV_FILE" ] && grep -Eq "^$1=.+" "$ENV_FILE"; }
-from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | head -1 | sed "s/^['\"]//; s/['\"]\$//"; }
+from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//"; }
+envfile_has() { [ -f "$ENV_FILE" ] && [ -n "$(from_file "$ENV_FILE" "$1")" ]; }
 bearer() { printf 'header = "Authorization: Bearer %s"\n' "$1"; }
 cf_status() { curl -s -m 20 -K <(bearer "$1") "$CF/user/tokens/verify" | jq -r '.result.status // "error"'; }
 can_i() { kubectl --kubeconfig "$1" auth can-i "$2" "$3" -n "$4" 2>/dev/null | grep -qx yes; }
@@ -86,11 +90,11 @@ c_kc_admin_legacy() {
   [ "$code" = 200 ] && echo "token endpoint 200" || { echo "token endpoint $code"; return 1; }
 }
 c_stalwart_legacy() {
-  local pw code
-  pw=$(sm mzla-legacy mailstrom/stage/stalwart.postboot.fallback_admin_password)
-  [ -n "$pw" ] || { echo "SM fallback_admin_password unreadable"; return 1; }
-  code=$(curl -sk -m 10 -o /dev/null -w '%{http_code}' -K <(printf 'user = "admin:%s"\n' "$pw") "https://localhost:18080/api/principal?types=domain" 2>/dev/null)
-  [ "$code" = 200 ] && echo "mgmt API 200 over the SSM tunnel" || { echo "mgmt API $code (SSM tunnel to localhost:18080 down?)"; return 1; }
+  local live code
+  [ -n "$(sm mzla-legacy mailstrom/stage/stalwart.postboot.fallback_admin_password)" ] || { echo "SM fallback_admin_password unreadable"; return 1; }
+  live=$(curl -sk -m 10 -o /dev/null -w '%{http_code}' "https://localhost:18080/healthz/live" 2>/dev/null)
+  code=$(curl -sk -m 10 -o /dev/null -w '%{http_code}' "https://localhost:18080/api/principal?types=domain" 2>/dev/null)
+  [ "$live" = 200 ] && [ "$code" = 401 ] && echo "tunnel answers (healthz 200, unauthenticated API 401); password readable, not sent" || { echo "healthz $live, API $code (SSM tunnel to localhost:18080 down?)"; return 1; }
 }
 c_stalwart_recovery() { [ -f "$KC_STAGE" ] && kubectl --kubeconfig "$KC_STAGE" -n thundermail get secret stalwart-recovery-admin -o json 2>/dev/null | jq -e '.data|has("STALWART_USER") and has("STALWART_PASSWORD")' >/dev/null && echo "k8s secret keys present"; }
 c_target_db() { [ -f "$KC_STAGE" ] && kubectl --kubeconfig "$KC_STAGE" -n thundermail get secret stalwart-postgresql-admin-password -o json 2>/dev/null | jq -e '.data|has("STALWART_POSTGRESQL_ADMIN_PASSWORD")' >/dev/null && echo "k8s secret key present"; }
