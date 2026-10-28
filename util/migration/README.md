@@ -96,3 +96,19 @@ the keying for the real hosts.
   successful rollback it moves that cycle's records files to `tbpro-p2-rolled-back-<ts>/`.
 - `post/p2-verify.sh` expects `301 https://<target>/login/?p2=1` from each tb.pro host (DoH
   plus `curl --resolve`, `TRIES` attempts 10 s apart) and exits 1 otherwise.
+
+## Window scripts
+
+`window/w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`, `w5-promote.sh` and
+`w6-verify.sh` run one in-window step each, after the env file is sourced.
+
+- `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,
+  and prints every write as the exact command; it never runs `kubectl exec`. Timing rows get a
+  `dryrun-` prefix. `--apply` runs the writes.
+- W2 writes only with `--apply --go '<operator words>'`; W5 stops after the
+  `apply_unmigrated.py` dry run and continues with `--apply --go`; W4 needs `--go` to run
+  `DROP SCHEMA` a second time. The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
+- Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check prints
+  `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands
+  (`cut-legacy-restore.txt` for W2, `w<n>-*-restore.txt` otherwise) and exits 1. Nothing
+  rolls back automatically. Exit 2 means a NEED item is listed.
