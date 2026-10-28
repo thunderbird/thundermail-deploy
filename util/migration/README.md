@@ -73,3 +73,11 @@ the keying for the real hosts.
 - `post/p1-verify.sh` checks the Appointment stage reconnection: new OIDC and Accounts
   hosts in the frontend bundle, OIDC discovery and login page, API codes, and the CalDAV
   connect when `P1_OIDC_ACCESS_TOKEN` or `P1_CALDAV_USER`/`P1_CALDAV_APP_PASSWORD` are set; a skipped check makes it exit 2 (INCOMPLETE).
+- `post/p3-verify.sh [--apply]` checks the `tbpro` reset-credentials form and an IMAP login to
+  `TEST_MAILBOX`; with `--apply` it requests a reset for `TEST_USER`, waits for the mail
+  (headers only) and fails unless `From` is on `auth-stage.tb.pro` and the DKIM `d=` or
+  Return-Path is `amazonses.com`. Exit 3 = wrong `From`, 5 = not relayed by SES, 4 = no mail.
+  Appends the `p3-smtp` timing row. `TEST_MAILBOX` must be `TEST_USER`'s Keycloak `email`
+  (Accounts sets it to the backup address); Keycloak sends the reset there, so a mismatch
+  shows up as exit 4, not as an SMTP fault.
+- `snapshot-smtp.sh` prints `host`, `from`, `envelopeFrom` and `user` of the realm `smtpServer`.

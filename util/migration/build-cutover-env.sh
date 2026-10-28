@@ -153,7 +153,7 @@ build() {
   put PADDLE_API_KEY "$(from_file "$HOME/.paddle.env" PADDLE_API_KEY)" "\$HOME/.paddle.env PADDLE_API_KEY"
   put ACCOUNTS_WEBHOOK_URL https://accounts.stage-thundermail.com/api/v1/telemetry/stalwart/webhook/ "tb-stage Accounts telemetry webhook"
   put TARGET_NLB_DNS "$(try aws_stage elbv2 describe-load-balancers --names stalwart-nginx-thundermail --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)" "aws elbv2 describe-load-balancers --profile mzla-tb-stage --names stalwart-nginx-thundermail"
-  put TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox"
+  put TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox; must be TEST_USER's Keycloak email (the backup address)"
   put TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
   put TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
   put TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
