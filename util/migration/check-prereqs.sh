@@ -138,7 +138,7 @@ c_paddle() {
 c_test_mailbox() {
   envfile_has TEST_MAILBOX && envfile_has TEST_MAILBOX_IMAP_HOST && envfile_has TEST_MAILBOX_IMAP_USER && envfile_has TEST_MAILBOX_IMAP_PASSWORD || { echo "TEST_MAILBOX* not in $ENV_FILE"; return 1; }
   local h n; h=$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_HOST)
-  n=$(printf 'a LOGIN %s %s\r\na LOGOUT\r\n' "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_USER)" "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_PASSWORD)" | timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$h" -servername "$h" -connect "$h:993" 2>/dev/null | grep -c '^a OK')
+  n=$(printf 'a LOGIN "%s" "%s"\r\nb LOGOUT\r\n' "$(cq "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_USER)")" "$(cq "$(from_file "$ENV_FILE" TEST_MAILBOX_IMAP_PASSWORD)")" | timeout 20 openssl s_client -quiet -verify_return_error -verify_hostname "$h" -servername "$h" -connect "$h:993" 2>/dev/null | grep -c '^a OK')
   [ "$n" = 1 ] && echo "IMAP LOGIN ok" || { echo "IMAP LOGIN failed"; return 1; }
 }
 c_test_user() {
