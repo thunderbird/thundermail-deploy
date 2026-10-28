@@ -93,7 +93,7 @@ delivery() {
 }
 
 submission() {
-  timeout 60 swaks --to "$TEST_MAILBOX" --from "$TEST_SENDER" --server "$NLB_IP:587" --tls --tls-sni "$M" --auth PLAIN --auth-user "$TEST_SENDER" --auth-password "$TEST_SENDER_APP_PASSWORD" --header "Subject: $SUBJECT-out" >/dev/null 2>&1 || { echo "authenticated submission failed"; return 1; }
+  timeout 60 swaks --to "$TEST_MAILBOX" --from "$TEST_SENDER" --server "$NLB_IP:587" --tls --tls-sni "$M" --tls-verify --tls-verify-target "$M" --auth PLAIN --auth-user "$TEST_SENDER" --auth-password "$TEST_SENDER_APP_PASSWORD" --header "Subject: $SUBJECT-out" >/dev/null 2>&1 || { echo "authenticated submission failed"; return 1; }
   echo "250 for $TEST_MAILBOX; check SPF and DKIM pass in its received headers"
 }
 

@@ -67,12 +67,13 @@ env_sync() {
 one() { [ "$("${KS[@]}" -n "$NS" get deploy accounts-web -o jsonpath='{.spec.replicas}')" = 1 ]; }
 
 repoint() {
-  local pending
+  local pending plan
   printf '  + wait 120s for deploy/accounts-web replicas 1, rollout status 600s for web, celery, flower, then showmigrations --plan unapplied = 0\n'
   [ "$APPLY" = 1 ] || return 0
   until_ok 120 one || { echo "deploy/accounts-web is not at 1 replica"; return 1; }
   "${KS[@]}" -n "$NS" rollout status deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --timeout=600s || return 1
-  pending=$("${KS[@]}" -n "$NS" exec deploy/accounts-web -- ./manage.py showmigrations --plan | grep -c '\[ \]' || true)
+  plan=$("${KS[@]}" -n "$NS" exec deploy/accounts-web -- ./manage.py showmigrations --plan) || { echo "showmigrations failed"; return 1; }
+  pending=$(grep -c '\[ \]' <<<"$plan" || true)
   echo "unapplied migrations: $pending; sign in at https://accounts.stage-thundermail.com and record the first-signin row"
   [ "$pending" = 0 ]
 }

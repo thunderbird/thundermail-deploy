@@ -15,13 +15,13 @@ decisions() {
 
 snap() {
   local out
+  if restore_staged; then echo "restore already staged for this cut, REPLICAS_BEFORE kept: ${REPLICAS_BEFORE:-unset}"; return 0; fi
   out=$(bash "$MIG_DIR/snapshot-gitops.sh") || return 1
   printf '%s\n' "$out"
   REPLICAS_BEFORE=$(tail -1 <<<"$out")
   [ -s "$REPLICAS_BEFORE" ] || { echo "snapshot-gitops.sh wrote no replicas file"; return 1; }
   VALUE=$(grep -c . "$REPLICAS_BEFORE")
   setenv REPLICAS_BEFORE "$REPLICAS_BEFORE" || return 1
-  if restore_staged; then echo "restore already staged for this cut: $RESTORE"; return 0; fi
   printf '%s\n' \
     "gh pr merge \"\$THAW_PR\" -R $PI --merge" \
     "bash $MIG_DIR/restore-replicas.sh $REPLICAS_BEFORE --dry-run" \

@@ -9,7 +9,7 @@ ZONE_NAME=stage-thundermail.com
 MANUAL_PROMOTION=$EVIDENCE_DIR/promotion-configs-manual$SUF-$TS.yaml
 PROMOTION=$EVIDENCE_DIR/promotion-configs-flip-$TS.yaml
 
-next_step() { local n; for n in 1 2 3 4; do [ -n "$(after_cut "w7-step$n")" ] || { echo "$n"; return; }; done; echo 5; }
+next_step() { local n; for n in 1 2 3 4 5; do [ -n "$(after_cut "w7-step$n")" ] || { echo "$n"; return; }; done; echo 6; }
 
 cf() {
   if [ "$APPLY" = 1 ]; then run bash "$MIG_DIR/cf-record.sh" "$CF_ZONE_ID" "$@" --apply; return; fi
@@ -118,13 +118,14 @@ gated() {
 prereqs
 helpers snapshot-zone.sh restore-zone.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
 NEXT=$(next_step)
-[ "$APPLY" = 0 ] || [ "$NEXT" != 5 ] || { echo "W7 steps 1-4 are done for this cut"; finish; exit 0; }
+[ "$APPLY" = 0 ] || [ "$NEXT" != 6 ] || { echo "W7 steps 1-4 and verification are done for this cut"; finish; exit 0; }
 [ "$APPLY" = 0 ] || [ "$NEXT" != 1 ] || step snap-zone records snap_zone
 [ "$APPLY" = 1 ] || step snap-zone records snap_zone
 gated 1 spf-edits spf_edits
 gated 2 merge-148 merge_b
 gated 3 flip-promote flip
 gated 4 mail-cname mail_cname
-[ "$APPLY" = 0 ] || [ "$NEXT" = 4 ] || { finish; exit 0; }
+[ "$APPLY" = 0 ] || [ "$NEXT" = 4 ] || [ "$NEXT" = 5 ] || { finish; exit 0; }
 step w7-verify "" verify
+[ "$APPLY" = 0 ] || mark w7-step5 status w7-verify
 finish
