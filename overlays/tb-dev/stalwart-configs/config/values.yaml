@@ -14,3 +14,6 @@ oidcIssuerURL: https://auth.main.dev-thundermail.com/realms/tbpro
 stalwartPgHost: ep-lingering-rice-b282u2zh-pooler.c-6.eu-central-1.aws.neon.tech
 stalwartPgDatabase: neondb
 stalwartPgAdminUsername: neondb_owner
+dnsManagement: Automatic
+dnsPublishSpf: true
+authBanRateCount: 500

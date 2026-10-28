@@ -32,7 +32,7 @@ value:
       publishRecords:
         dkim: true
         tlsa: true
-        spf: true
+        spf: __DNS_PUBLISH_SPF__
         mx: true
         dmarc: true
         srv: true
@@ -46,6 +46,11 @@ value:
     subAddressing:
       '@type': Enabled
     allowRelaying: false
+---
+'@type': destroy
+object: DnsServer
+value:
+  description: 'Cloudflare DNS provider for __DOMAIN_FQDN__ zone'
 ---
 '@type': upsert
 object: Directory
@@ -108,6 +113,11 @@ object: AddressBook
 value:
   defaultDisplayName: 'Thundermail Contacts'
   vCardVersion: v3
+---
+'@type': update
+object: Calendar
+value:
+  defaultDisplayName: 'Thundermail Calendar'
 ---
 '@type': upsert
 object: NetworkListener
@@ -233,6 +243,7 @@ value:
 object: Http
 value:
   useXForwarded: true
+  usePermissiveCors: true
 ---
 '@type': update
 object: BlobStore
@@ -319,10 +330,27 @@ value:
     else: "'Thundermail ESMTP at your service'"
   hostname:
     match: {}
-    else: "system('hostname')"
+    else: "'mail.__DOMAIN_FQDN__'"
   script:
     match: {}
     else: 'false'
+---
+'@type': update
+object: MtaSts
+value:
+  mxHosts:
+    'mail.__DOMAIN_FQDN__': true
+---
+'@type': upsert
+object: MtaQueueQuota
+matchOn:
+  - description
+value:
+  queue-quota-global:
+    enable: true
+    description: Global queue quota
+    messages: 10001
+    size: 10737418240
 ---
 '@type': upsert
 object: MtaInboundThrottle
@@ -381,7 +409,7 @@ value:
     period: 86400000 # 24 hours
   abuseBanPeriod: null
   authBanRate:
-    count: 500
+    count: __AUTH_BAN_RATE_COUNT__
     period: 86400000 # 24 hours
   authBanPeriod: null
   loiterBanRate:
@@ -405,3 +433,19 @@ value:
     count: 1000
     period: 86400000 # 24 hours
   scanBanPeriod: null
+---
+'@type': upsert
+object: WebHook
+matchOn:
+  - url
+value:
+  webhook-posthog:
+    url: __WEBHOOK_URL__
+    enable: true
+    events: __WEBHOOK_EVENTS__
+    eventsPolicy: include
+    lossy: false
+    allowInvalidCerts: false
+    signatureKey:
+      '@type': Value
+      secret: __WEBHOOK_SECRET__

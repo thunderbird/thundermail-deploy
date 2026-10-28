@@ -28,6 +28,12 @@ spec:
                 --output-format=json \
                 --indent=0 \
                 'load("/etc/stalwart-values/values.yaml") as $values
+                | select(
+                  .object != "DnsServer"
+                  or (.["@type"] == "upsert")
+                  == (($values.dnsManagement // "Manual") == "Automatic")
+                )
+                | select(.object != "WebHook" or $values.webhookURL != null)
                 | (
                   .. | select(tag == "!!map")
                 ) |= with_entries(
@@ -65,8 +71,40 @@ spec:
                 ) = $values.tlsCertificateSANs
                 |
                 (
-                  .. | select(. == "__CLOUDFLARE_API_TOKEN__")
-                ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
+                  .. | select(. == "__AUTH_BAN_RATE_COUNT__")
+                ) = $values.authBanRateCount
+                |
+                (
+                  select(.object == "AllowedIp") | .value
+                ) *= ($values.allowedIPs // {})
+                |
+                (
+                  select(
+                    .object == "Domain"
+                    and ($values.dnsManagement // "Manual") != "Automatic"
+                  )
+                  | .value[].dnsManagement
+                ) = {"@type": "Manual"}
+                |
+                (
+                  .. | select(. == "__DNS_PUBLISH_SPF__")
+                ) = $values.dnsPublishSpf
+                |
+                with(
+                  select(($values.dnsManagement // "Manual") == "Automatic");
+                  (
+                    .. | select(. == "__CLOUDFLARE_API_TOKEN__")
+                  ) = load_str("/etc/cloudflare/STALWART_CLOUDFLARE_API_TOKEN")
+                )
+                |
+                with(
+                  select(.object == "WebHook");
+                  (.. | select(. == "__WEBHOOK_URL__")) = $values.webhookURL
+                  | (.. | select(. == "__WEBHOOK_EVENTS__")) = $values.webhookEvents
+                  | (
+                    .. | select(. == "__WEBHOOK_SECRET__")
+                  ) = load_str("/etc/stalwart-webhook/STALWART_WEBHOOK_SECRET")
+                )
                 |
                 .' \
                 /etc/stalwart-config-template/stalwart-config-base.yaml \
@@ -85,6 +123,9 @@ spec:
               readOnly: true
             - name: cloudflare-api-token
               mountPath: /etc/cloudflare
+              readOnly: true
+            - name: stalwart-webhook-secret
+              mountPath: /etc/stalwart-webhook
               readOnly: true
         - name: validate
           image: ghcr.io/stalwartlabs/cli:1.0.13 # Default, override with Kustomization as needed
@@ -197,3 +238,10 @@ spec:
                 path: STALWART_CLOUDFLARE_API_TOKEN
         - name: rendered
           emptyDir: {}
+        - name: stalwart-webhook-secret
+          secret:
+            secretName: stalwart-webhook-secret
+            optional: true
+            items:
+              - key: STALWART_WEBHOOK_SECRET
+                path: STALWART_WEBHOOK_SECRET
