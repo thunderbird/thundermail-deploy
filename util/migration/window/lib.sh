@@ -5,11 +5,13 @@ if [ -f "$ENV_FILE" ]; then set -a; eval "$(< "$ENV_FILE")"; set +a; fi
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS
 GO=""
+POS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --go) [ -n "${2:-}" ] || die "--go needs the operator's words"; GO=$2; shift 2 ;;
     -h|--help) echo "usage: $(basename "$0") [--dry-run | --apply [--go 'operator words']]"; exit 0 ;;
-    *) die "unknown argument: $1" ;;
+    -*) die "unknown argument: $1" ;;
+    *) [ "${ALLOW_POS:-0}" = 1 ] || die "unknown argument: $1"; POS+=("$1"); shift ;;
   esac
 done
 W=$(basename "$0" .sh)
