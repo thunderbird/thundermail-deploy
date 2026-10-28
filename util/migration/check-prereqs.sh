@@ -41,7 +41,7 @@ NEED=0
 sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --output json 2>/dev/null | jq -r '.SecretString'; }
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
-from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//"; }
+from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//; s/'\\\\''/'/g"; }
 envfile_has() { [ -f "$ENV_FILE" ] && [ -n "$(from_file "$ENV_FILE" "$1")" ]; }
 cq() { case $1 in *[$'\n\r']*) return 1 ;; esac; local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
 bearer() { local v; v=$(cq "$1") || return 1; printf 'header = "Authorization: Bearer %s"\n' "$v"; }
