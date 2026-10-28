@@ -81,3 +81,18 @@ the keying for the real hosts.
   (Accounts sets it to the backup address); Keycloak sends the reset there, so a mismatch
   shows up as exit 4, not as an SMTP fault.
 - `snapshot-smtp.sh` prints `host`, `from`, `envelopeFrom` and `user` of the realm `smtpServer`.
+- `post/p2-redirects.sh [ZONE_ID]` (default `CF_ZONE_ID_TBPRO`, must be tb.pro) puts the
+  two 301 rules (`accounts-stage.tb.pro/*` and `auth-stage.tb.pro/*` to the same path on the
+  stage-thundermail.com hosts) first in the tb.pro `http_request_dynamic_redirect` entrypoint,
+  then sets the two records proxied. It writes only its own rules (POST, or PATCH when the ref
+  exists, with `position.before ""`; PUT only when the entrypoint does not exist yet), so other
+  rules are never rewritten. It saves the current entrypoint to
+  `$EVIDENCE_DIR/tbpro-rules-before-*.json` and, with `--apply`, the records to
+  `tbpro-p2-records-before-*.json`; it prints every call. Writes need `--apply`. It runs with the
+  P2 token: `CF_API_TOKEN_AGENT` swapped for a tb.pro-only token with `expires_on`
+  (`check-prereqs.sh --for P2` checks both), revoked after `post/p2-verify.sh` passes.
+  Rollback is `post/p2-redirects.sh --rollback [--apply]`: it unproxies the saved records first
+  (restoring their TTL), then deletes every entrypoint rule whose ref starts with `p2_`. After a
+  successful rollback it moves that cycle's records files to `tbpro-p2-rolled-back-<ts>/`.
+- `post/p2-verify.sh` expects `301 https://<target>/login/?p2=1` from each tb.pro host (DoH
+  plus `curl --resolve`, `TRIES` attempts 10 s apart) and exits 1 otherwise.
