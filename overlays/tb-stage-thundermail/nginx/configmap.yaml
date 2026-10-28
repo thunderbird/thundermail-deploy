@@ -156,6 +156,7 @@ data:
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.stage-thundermail.com;
           proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
           proxy_ssl_server_name on;
           proxy_ssl_name mail.stage-thundermail.com;
         }
