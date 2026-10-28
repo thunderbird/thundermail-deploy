@@ -73,3 +73,6 @@ the keying for the real hosts.
 - `post/p1-verify.sh` checks the Appointment stage reconnection: new OIDC and Accounts
   hosts in the frontend bundle, OIDC discovery and login page, API codes, and the CalDAV
   connect when `P1_OIDC_ACCESS_TOKEN` or `P1_CALDAV_USER`/`P1_CALDAV_APP_PASSWORD` are set; a skipped check makes it exit 2 (INCOMPLETE).
+- `post/p3-verify.sh [--apply]` checks the `tbpro` reset-credentials form and an IMAP login to
+  `TEST_MAILBOX`; with `--apply` it requests a reset for `TEST_USER`, waits for the mail
+  (headers only) and fails unless `From` is on `auth-stage.tb.pro`. Appends the `p3-smtp` timing row.
