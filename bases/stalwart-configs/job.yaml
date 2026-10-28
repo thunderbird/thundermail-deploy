@@ -24,14 +24,16 @@ spec:
             - /bin/sh
             - -ec
             - |
+              yq -e \
+                '(.dnsManagement // "Manual") | test("^(Manual|Automatic)$")' \
+                /etc/stalwart-values/values.yaml > /dev/null
               yq eval-all \
                 --output-format=json \
                 --indent=0 \
                 'load("/etc/stalwart-values/values.yaml") as $values
                 | select(
                   .object != "DnsServer"
-                  or (.["@type"] == "upsert")
-                  == (($values.dnsManagement // "Manual") == "Automatic")
+                  or ($values.dnsManagement // "Manual") == "Automatic"
                 )
                 | select(.object != "WebHook" or $values.webhookURL != null)
                 | (
@@ -75,6 +77,14 @@ spec:
                 ) = $values.authBanRateCount
                 |
                 (
+                  .. | select(. == "__SCAN_BAN_RATE_COUNT__")
+                ) = $values.scanBanRateCount
+                |
+                (
+                  .. | select(. == "__ADDRESS_BOOK_NAME__")
+                ) = $values.addressBookName
+                |
+                (
                   select(.object == "AllowedIp") | .value
                 ) *= ($values.allowedIPs // {})
                 |
@@ -109,6 +119,11 @@ spec:
                 .' \
                 /etc/stalwart-config-template/stalwart-config-base.yaml \
                 > /work/stalwart-config.ndjson
+              if grep -Eq '__[A-Z0-9_]+__|\$\{[A-Z0-9_]+\}' /work/stalwart-config.ndjson
+              then
+                echo "unrendered placeholder" >&2
+                exit 1
+              fi
           volumeMounts:
             - name: stalwart-config-template
               mountPath: /etc/stalwart-config-template
