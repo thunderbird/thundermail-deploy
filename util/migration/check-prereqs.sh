@@ -130,7 +130,7 @@ c_cf_agent() {
   zones=$(curl -s -m 20 -K <(bearer "$tok") "$CF/zones?per_page=50" | jq -r '[.result[].name] | sort | join(",")')
   case ",$zones," in *,stage-thundermail.com,*) ;; *) echo "zones visible: ${zones:-none} (needs stage-thundermail.com and tb.pro)"; return 1 ;; esac
   case ",$zones," in *,tb.pro,*) ;; *) echo "zones visible: ${zones:-none} (needs stage-thundermail.com and tb.pro)"; return 1 ;; esac
-  echo "active, stage-thundermail.com and tb.pro visible$(case ",$zones," in *,dev-thundermail.com,*) echo ", dev-thundermail.com too" ;; esac)"
+  echo "active, stage-thundermail.com and tb.pro visible"
 }
 c_cf_agent_p2() {
   mode600 "$HOME/.cloudflare.env" || { echo "$HOME/.cloudflare.env missing or not mode 600"; return 1; }
