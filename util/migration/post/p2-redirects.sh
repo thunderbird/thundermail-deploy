@@ -56,6 +56,11 @@ if [ "$ROLLBACK" = 1 ]; then
         ok "$r" || { echo "DELETE $(jq -r .ref <<<"$rule") failed: $(errs "$r")"; fail=$((fail + 1)); }
       done <<<"$dels"
     fi
+    if [ "$fail" = 0 ] && [ ${#files[@]} -gt 0 ]; then
+      mkdir -p "$EVIDENCE_DIR/tbpro-p2-rolled-back-$TS"
+      mv "${files[@]}" "$EVIDENCE_DIR/tbpro-p2-rolled-back-$TS/"
+      echo "moved ${#files[@]} records file(s) to $EVIDENCE_DIR/tbpro-p2-rolled-back-$TS"
+    fi
   fi
   printf 'mode=%s rollback zone=%s unproxy=%s rules_deleted=%s failed=%s before=%s\n' "$(mode)" "$ZONE" "$(lines "$todo")" "$(lines "$dels")" "$fail" "$before"
   [ "$fail" = 0 ]
