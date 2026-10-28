@@ -13,8 +13,20 @@ Usage:
 import argparse, csv, json, os, sys
 
 
+def secret_list(v):
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return v
+    if isinstance(v, dict):
+        if isinstance(v.get("stringList"), list):
+            return v["stringList"]
+        return [v["string"]] if isinstance(v.get("string"), str) else []
+    return [v]
+
+
 def has_totp(principal):
-    return any(isinstance(s, str) and s.startswith("otpauth://") for s in principal.get("secrets") or [])
+    return any(isinstance(s, str) and s.startswith("otpauth://") for s in secret_list(principal.get("secrets")))
 
 
 def main():

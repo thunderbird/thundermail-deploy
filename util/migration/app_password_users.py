@@ -23,10 +23,22 @@ Usage:
 import argparse, csv, json, os, sys
 
 
+def secret_list(v):
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return v
+    if isinstance(v, dict):
+        if isinstance(v.get("stringList"), list):
+            return v["stringList"]
+        return [v["string"]] if isinstance(v.get("string"), str) else []
+    return [v]
+
+
 def app_passwords(principal):
     """Names of the v0.15 app passwords. Stored as `$app$<name>$<hash>`; the hash is never read."""
     names = []
-    for s in principal.get("secrets") or []:
+    for s in secret_list(principal.get("secrets")):
         if isinstance(s, str) and s.startswith("$app$"):
             name, _, _ = s[len("$app$"):].partition("$")
             names.append(name or "(unnamed)")

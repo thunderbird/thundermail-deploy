@@ -105,6 +105,11 @@ def plan(s):
         out.append(("MtaSts", "update", upd, "MTA-STS"))
 
     quotas = sorted({k.split(".")[2] for k in s if k.startswith("queue.quota.")})
+    scoped = sorted(q for q in quotas if {k.split(".", 3)[3] for k in s if k.startswith(f"queue.quota.{q}.")} - {"enable", "messages", "size"})
+    if scoped or len(quotas) > 1:
+        why = f"scoped ({', '.join(scoped)})" if scoped else f"{len(quotas)} quotas share one global rule"
+        out.append(("MtaQueueQuota", "refuse", {}, f"queue quotas {', '.join(quotas)}: {why}; recreate them by hand"))
+        quotas = []
     for q in quotas:
         p = f"queue.quota.{q}."
         upd = {"enable": truthy(s.get(p + "enable", "true"))}
@@ -217,6 +222,9 @@ def main():
     if host != a.expect_hostname:
         sys.exit(f"target hostname is {host!r}, expected {a.expect_hostname!r}: wrong server, nothing written")
     failures = 0
+    refused = [label for obj, kind, payload, label in steps if kind == "refuse"]
+    if refused:
+        sys.exit("cannot carry over safely, nothing written: " + "; ".join(refused) + " (or pass --skip MtaQueueQuota)")
 
     existing = {o: {x["address"] for x in j.all(o)} for o in ("BlockedIp", "AllowedIp")}
     hooks = {x["url"] for x in j.all("WebHook")}

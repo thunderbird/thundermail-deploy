@@ -41,5 +41,23 @@ class Only(unittest.TestCase):
             au.parse_only(["BlockedIps"])
 
 
+class Quotas(unittest.TestCase):
+    def test_one_unscoped_quota_updates_the_global_rule(self):
+        steps = au.plan({"queue.quota.all.messages": "100", "queue.quota.all.size": "1000"})
+        self.assertEqual([(o, k) for o, k, _, _ in steps], [("MtaQueueQuota", "update-global")])
+
+    def test_scoped_quota_is_refused(self):
+        steps = au.plan({"queue.quota.sender.key.0": "sender", "queue.quota.sender.messages": "10"})
+        self.assertEqual([(o, k) for o, k, _, _ in steps], [("MtaQueueQuota", "refuse")])
+
+    def test_several_quotas_are_refused(self):
+        steps = au.plan({"queue.quota.a.messages": "1", "queue.quota.b.messages": "2"})
+        self.assertEqual([(o, k) for o, k, _, _ in steps], [("MtaQueueQuota", "refuse")])
+
+    def test_skip_drops_the_refusal(self):
+        steps = au.plan({"queue.quota.sender.match": "x", "server.blocked-ip.192.0.2.1": ""})
+        self.assertEqual(sorted({st[0] for st in steps if au.wanted(st[0], set(), ["MtaQueueQuota"])}), ["BlockedIp"])
+
+
 if __name__ == "__main__":
     unittest.main()
