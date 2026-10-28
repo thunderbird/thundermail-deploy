@@ -7,17 +7,21 @@ web_image() { kstage -n accounts get deploy accounts-web -o jsonpath='{.spec.tem
 if [ "${1:-}" = --capture ]; then
   out=$EVIDENCE_DIR/django-plan-$TS
   if [ "$DRY" = 1 ]; then
-    printf 'dry-run: kubectl -n accounts exec deploy/accounts-web -- ./manage.py showmigrations --plan --no-color > %s.txt\n' "$out"
+    printf 'dry-run: wait for the deploy/accounts-web rollout, exec a Running pod on the deployment image: ./manage.py showmigrations --plan --no-color > %s.txt\n' "$out"
     printf 'dry-run: deploy/accounts-web container accounts image > %s.image\n' "$out"
     exit 0
   fi
+  kstage -n accounts rollout status deploy/accounts-web --timeout=120s >/dev/null || die "deploy/accounts-web rollout is not complete"
   image=$(web_image)
   [ -n "$image" ] || die "no accounts container image on deploy/accounts-web"
-  plan=$(kstage -n accounts exec deploy/accounts-web -c accounts -- ./manage.py showmigrations --plan --no-color | sed -n 's/^\[[ X]\] *\([^ ]*\).*/\1/p' | sort -u)
+  sel=$(kstage -n accounts get deploy accounts-web -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+  pod=$(kstage -n accounts get pods -l "$sel" -o json | jq -r --arg img "$image" '[.items[] | select(.status.phase == "Running" and .metadata.deletionTimestamp == null) | select(any(.spec.containers[]; .name == "accounts" and .image == $img))][0].metadata.name // empty')
+  [ -n "$pod" ] || die "no Running accounts-web pod runs $image"
+  plan=$(kstage -n accounts exec "$pod" -c accounts -- ./manage.py showmigrations --plan --no-color | sed -n 's/^\[[ X]\] *\([^ ]*\).*/\1/p' | sort -u)
   [ -n "$plan" ] || die "showmigrations returned no migrations"
   printf '%s\n' "$plan" > "$out.txt"
   printf '%s\n' "$image" > "$out.image"
-  printf 'captured migrations=%s image=%s\n%s.txt\n' "$(grep -c . "$out.txt")" "$image" "$out"
+  printf 'captured migrations=%s image=%s pod=%s\n%s.txt\n' "$(grep -c . "$out.txt")" "$image" "$pod" "$out"
   exit 0
 fi
 need ACCOUNTS_LEGACY_PG_HOST ACCOUNTS_LEGACY_PG_USER ACCOUNTS_LEGACY_PG_NAME
