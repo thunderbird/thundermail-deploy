@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - ../../../bases/stalwart-configs
   - security-group-policy.yaml
-  - stalwart-webhook-secret.yaml
 
 namespace: thundermail
 

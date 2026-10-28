@@ -32,7 +32,7 @@ value:
       publishRecords:
         dkim: true
         tlsa: true
-        spf: __DNS_PUBLISH_SPF__
+        spf: true
         mx: true
         dmarc: true
         srv: true
@@ -46,12 +46,6 @@ value:
     subAddressing:
       '@type': Enabled
     allowRelaying: false
----
-'@type': reconcile
-object: DnsServer
-matchOn:
-  - description
-value: {}
 ---
 '@type': upsert
 object: Directory
@@ -112,13 +106,8 @@ value:
 '@type': update
 object: AddressBook
 value:
-  defaultDisplayName: __ADDRESS_BOOK_NAME__
+  defaultDisplayName: 'Thundermail Contacts'
   vCardVersion: v3
----
-'@type': update
-object: Calendar
-value:
-  defaultDisplayName: 'Thundermail Calendar'
 ---
 '@type': upsert
 object: NetworkListener
@@ -244,7 +233,6 @@ value:
 object: Http
 value:
   useXForwarded: true
-  usePermissiveCors: true
 ---
 '@type': update
 object: BlobStore
@@ -331,27 +319,10 @@ value:
     else: "'Thundermail ESMTP at your service'"
   hostname:
     match: {}
-    else: "'mail.__DOMAIN_FQDN__'"
+    else: "system('hostname')"
   script:
     match: {}
     else: 'false'
----
-'@type': update
-object: MtaSts
-value:
-  mxHosts:
-    'mail.__DOMAIN_FQDN__': true
----
-'@type': upsert
-object: MtaQueueQuota
-matchOn:
-  - description
-value:
-  queue-quota-global:
-    enable: true
-    description: Global queue quota
-    messages: 10001
-    size: 10737418240
 ---
 '@type': upsert
 object: MtaInboundThrottle
@@ -410,7 +381,7 @@ value:
     period: 86400000 # 24 hours
   abuseBanPeriod: null
   authBanRate:
-    count: __AUTH_BAN_RATE_COUNT__
+    count: 500
     period: 86400000 # 24 hours
   authBanPeriod: null
   loiterBanRate:
@@ -431,22 +402,6 @@ value:
     '*wordpress*': true
     '*drupal*': true
   scanBanRate:
-    count: __SCAN_BAN_RATE_COUNT__
+    count: 1000
     period: 86400000 # 24 hours
   scanBanPeriod: null
----
-'@type': upsert
-object: WebHook
-matchOn:
-  - url
-value:
-  webhook-posthog:
-    url: __WEBHOOK_URL__
-    enable: true
-    events: __WEBHOOK_EVENTS__
-    eventsPolicy: include
-    lossy: false
-    allowInvalidCerts: false
-    signatureKey:
-      '@type': Value
-      secret: __WEBHOOK_SECRET__
