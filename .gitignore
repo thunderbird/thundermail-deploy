@@ -10,3 +10,15 @@ Thumbs.db
 
 # cutover scratch (kubeconfigs, snapshots)
 .work/
+
+# cutover tooling artifacts (util/migration)
+cutover-tb-stage.env
+cut-legacy-restore.txt
+*.dump
+settings.json
+principals.json
+export.json
+unmigrated.txt
+apply.log
+convert.stderr
+verify-*/
