@@ -7,7 +7,7 @@
         "quota-reset": {
           "@type": "StoreMaintenance",
           "maintenanceType": "resetUserQuotas",
-          "status": {"@type": "Pending", "createdAt": "__NOW__", "due": "__NOW__"}
+          "status": {"@type": "Pending", "due": "__NOW__"}
         }
       }
     }, "0"]
