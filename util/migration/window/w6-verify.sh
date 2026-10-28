@@ -5,7 +5,7 @@ need STALWART_URL STALWART_USER STALWART_PASSWORD TARGET_NLB_DNS LEGACY_BLOB_BUC
 pending TEST_USER TEST_SENDER_APP_PASSWORD
 MAIL_HOST=mail.stage-thundermail.com
 VERIFY_OUT=$EVIDENCE_DIR/verify-$TS
-DEFAULT_WARN='got the default set'
+EXPECTED_WARN=$MIG_DIR/verify/expected-warn.txt
 UNEXPECTED_WARN=0
 printf 'n/a: read-only step; %s stays as evidence\n' "$VERIFY_OUT" > "$RESTORE"
 
@@ -17,8 +17,8 @@ suite() {
   VERIFY_OUT=${out##* out=}
   f=$VERIFY_OUT/run_all.txt
   VALUE=$(grep -c '^  FAIL  ' "$f" || true)
-  UNEXPECTED_WARN=$(grep '^  WARN  ' "$f" | grep -vc "$DEFAULT_WARN" || true)
-  printf 'run_all %s PASS=%s WARN=%s (outside the default set: %s) FAIL=%s (%s)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$f" || true)" "$(grep -c '^  WARN  ' "$f" || true)" "$UNEXPECTED_WARN" "$VALUE" "$f"
+  UNEXPECTED_WARN=$(grep '^  WARN  ' "$f" | grep -vcFf <(grep -v '^[[:space:]]*$' "$EXPECTED_WARN") || true)
+  printf 'run_all %s PASS=%s WARN=%s (not in expected-warn.txt: %s) FAIL=%s (%s)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$f" || true)" "$(grep -c '^  WARN  ' "$f" || true)" "$UNEXPECTED_WARN" "$VALUE" "$f"
   echo "counts:"
   grep -E '^  (PASS|WARN)  .*[0-9]' "$f" | sed -E "s/'[^']*'/<x>/g; s/\"[^\"]*\"/<x>/g; s/[^ ]+@[^ ]+/<addr>/g" || true
   [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ] && [ "$UNEXPECTED_WARN" = 0 ]; }
@@ -53,9 +53,9 @@ folders() {
 }
 
 prereqs
-helpers verify/run_all.sh verify/stage.env
+helpers verify/run_all.sh verify/stage.env verify/expected-warn.txt
 if [ "$APPLY" = 1 ]; then port_forward || stop "no port-forward to Stalwart"; else port_forward || echo "no port-forward to Stalwart: target checks will fail"; fi
-if live verify/stage.env verify/run_all.sh; then
+if live verify/stage.env verify/run_all.sh verify/expected-warn.txt; then
   step verify fails suite
   again "$(sn verify)" unexpected_warns "$UNEXPECTED_WARN" || stop "could not write the verify unexpected_warns row"
 fi
