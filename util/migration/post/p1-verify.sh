@@ -78,7 +78,7 @@ else
   echo "SKIP caldav/oidc/auth: set P1_OIDC_ACCESS_TOKEN (browser login token for a stage test user)"; skipped=$((skipped+1))
 fi
 if [ -n "${P1_CALDAV_USER:-}" ] && [ -n "${P1_CALDAV_APP_PASSWORD:-}" ]; then
-  SRV=$(doh "_caldavs._tcp.$CALDAV_HOST" SRV | awk '{print $4":"$3}' | head -1 | sed 's/\.:/:/')
+  SRV=$(doh "_caldavs._tcp.$CALDAV_HOST" SRV | awk 'NF >= 4 {print $4":"$3}' | head -1 | sed 's/\.:/:/')
   if [ -n "$SRV" ]; then CD_HOST=${SRV%%:*}; CD_PORT=${SRV##*:}; else CD_HOST=$CALDAV_HOST; CD_PORT=443; fi
   CD_RES=$(resolve_arg "$CD_HOST" "$CD_PORT")
   printf 'user = "%s:%s"\n' "$P1_CALDAV_USER" "$P1_CALDAV_APP_PASSWORD" > "$TMP/caldav.cfg"

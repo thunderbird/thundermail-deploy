@@ -10,9 +10,13 @@ FREEZE_SHA=$(gh pr view "$FREEZE_PR" -R "$PI_REPO" --json mergeCommit -q .mergeC
 test -n "$FREEZE_SHA"
 
 git -C "$PI_DIR" fetch origin main
-git -C "$PI_DIR" checkout -B thaw-tb-stage origin/main
-git -C "$PI_DIR" revert --no-edit -m 1 "$FREEZE_SHA"
-git -C "$PI_DIR" push -u origin thaw-tb-stage
+if git -C "$PI_DIR" fetch origin thaw-tb-stage 2>/dev/null; then
+  git -C "$PI_DIR" checkout -B thaw-tb-stage origin/thaw-tb-stage
+else
+  git -C "$PI_DIR" checkout -B thaw-tb-stage origin/main
+  git -C "$PI_DIR" revert --no-edit -m 1 "$FREEZE_SHA"
+  git -C "$PI_DIR" push -u origin thaw-tb-stage
+fi
 
 BODY="Reverts $FREEZE_SHA (freeze PR https://github.com/$PI_REPO/pull/$FREEZE_PR): tb-stage selfHeal and Kargo auto-promotion back on.
 
