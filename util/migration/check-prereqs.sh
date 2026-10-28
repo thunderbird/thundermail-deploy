@@ -161,10 +161,19 @@ c_push() {
 }
 c_atlantis_pg() {
   gh api repos/thunderbird/platform-grafana/contents/atlantis.yaml --jq .name >/dev/null 2>&1 || { echo "no atlantis.yaml on platform-grafana main"; return 1; }
-  local n; n=$(gh api "repos/thunderbird/platform-grafana/issues/comments?since=$(date -u -d '30 days ago' +%FT%TZ)&per_page=100" --jq '[.[] | select(.user.login == "mzla-atlantis[bot]")] | length' 2>/dev/null)
+  local n; n=$(gh api --paginate "repos/thunderbird/platform-grafana/issues/comments?since=$(date -u -d '30 days ago' +%FT%TZ)&per_page=100" --jq '.[] | select(.user.login == "mzla-atlantis[bot]") | .id' 2>/dev/null | grep -c .)
   [ "${n:-0}" -gt 0 ] && echo "atlantis.yaml present, mzla-atlantis[bot] commented $n time(s) in 30 days" || { echo "no mzla-atlantis[bot] comment on platform-grafana in 30 days"; return 1; }
 }
 c_appt_workflow() { [ "$(gh api repos/thunderbird/appointment/actions/workflows/deploy-staging.yml --jq .state 2>/dev/null)" = active ] && echo "deploy-staging.yml active" || { echo "deploy-staging.yml not active"; return 1; }; }
+c_pr_pair() {
+  local repo=thunderbird/$1 pr rev head base
+  pr=$(from_file "$ENV_FILE" "$2"); rev=$(from_file "$ENV_FILE" "$3")
+  [ -n "$pr" ] && [ -n "$rev" ] || { echo "$2/$3 not in $ENV_FILE"; return 1; }
+  head=$(gh pr view "$pr" -R "$repo" --json state,headRefName -q 'select(.state == "OPEN") | .headRefName' 2>/dev/null)
+  base=$(gh pr view "$rev" -R "$repo" --json state,baseRefName -q 'select(.state == "OPEN") | .baseRefName' 2>/dev/null)
+  [ -n "$head" ] && [ "$base" = "$head" ] && echo "$2=#$pr open, $3=#$rev open on its head" || { echo "$2=#$pr head=${head:-not open}, $3=#$rev base=${base:-not open}"; return 1; }
+}
+c_spf_final() { case "$(from_file "$ENV_FILE" SPF_FINAL_TXT)" in "v=spf1 "*) echo "SPF_FINAL_TXT is a v=spf1 record in the env file" ;; *) echo "SPF_FINAL_TXT empty or not v=spf1 in $ENV_FILE (#1535 decision)"; return 1 ;; esac; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
 c_venv() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import requests, urllib3' 2>/dev/null && echo "$VENV_PY imports ok" || { echo "venv missing: $VENV_PY"; return 1; }; }
@@ -197,6 +206,9 @@ row "T7 T8 T10 T11 T13 W4" legacy-db-passwords c_legacy_db
 row "T3 T6 W5" accounts-secret-bundle c_accounts_bundle
 row "T11 W8" accounts-e2e-user c_e2e_user
 row "P1 T10a" paddle-sandbox-key c_paddle
+row "T7" t7-pr-and-revert c_pr_pair keycloak-customer-deploy T7_PR T7_REVERT_PR
+row "T8" t8-pr-and-revert c_pr_pair accounts-deploy T8_PR T8_REVERT_PR
+row "W7" spf-final-txt c_spf_final
 row "W7 P3" test-mailbox-external c_test_mailbox
 row "W5 W6 W7 P3" test-user-stage c_test_user
 row "ALL" github-gh c_github
