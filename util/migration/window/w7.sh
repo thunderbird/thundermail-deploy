@@ -2,7 +2,7 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need CF_ZONE_ID TARGET_NLB_DNS KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KARGO_WAREHOUSE_CONFIGS KUBECONFIG_STAGE KUBECONFIG_HUB
-pending FLIP_PR SPF_APEX_TXT SPF_MAIL_TXT SPF_FINAL_TXT
+pending FLIP_PR SPF_APEX_TXT SPF_FINAL_TXT
 TMD=thunderbird/thundermail-deploy
 PR_B=148
 ZONE_NAME=stage-thundermail.com
@@ -51,7 +51,6 @@ snap_zone() {
 spf_edits() {
   cf delete "autoconfig.$ZONE_NAME" CNAME || return 1
   cf upsert "$ZONE_NAME" TXT "$SPF_APEX_TXT" || return 1
-  cf upsert "mail.$ZONE_NAME" TXT "$SPF_MAIL_TXT" || return 1
   cf upsert "spf.$ZONE_NAME" TXT "$SPF_FINAL_TXT"
 }
 

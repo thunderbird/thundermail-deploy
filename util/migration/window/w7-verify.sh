@@ -2,7 +2,7 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need TARGET_NLB_DNS CF_ZONE_ID
-pending SPF_APEX_TXT SPF_MAIL_TXT SPF_FINAL_TXT TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
+pending SPF_APEX_TXT SPF_FINAL_TXT TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
 Z=stage-thundermail.com
 M=mail.$Z
 TABLE=$EVIDENCE_DIR/w7-verify-$(mode)-$TS.txt
@@ -112,10 +112,8 @@ submission() {
 dns() {
   chk mx has "$Z" MX "10 $M."
   chk spf-apex one_spf "$Z" "$SPF_APEX_TXT"
-  chk spf-mail one_spf "$M" "$SPF_MAIL_TXT"
   chk spf-host one_spf "spf.$Z" "$SPF_FINAL_TXT"
   chk spf-chain-apex chain "$Z" 0
-  chk spf-chain-mail chain "$M" 0
   chk spf-chain-host chain "spf.$Z" 0
   chk dmarc has "_dmarc.$Z" TXT 'p=reject'
   chk mta-sts-txt has "_mta-sts.$Z" TXT 'v=STSv1'

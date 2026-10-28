@@ -78,7 +78,11 @@ repoint() {
   [ "$pending" = 0 ]
 }
 
-prereqs
+if [ "$(gh pr view "$T8_PR" -R "$REPO" --json state -q .state 2>/dev/null)" = MERGED ]; then
+  echo "T8_PR is merged: resuming after the merge, check-prereqs.sh skipped (its PR pair row expects the PR open)"
+else
+  prereqs
+fi
 helpers snapshot-secret-versions.sh gate-django-migrations.sh put-secret-version.sh restore-secret-version.sh
 step t8-start "" start
 step snap-secret-versions secrets snap

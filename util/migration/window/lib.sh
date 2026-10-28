@@ -3,7 +3,13 @@ ENV_FILE=${CUTOVER_ENV:-}
 if [ -z "$ENV_FILE" ]; then
   for ENV_FILE in /dev/shm/talos/cutover-tb-stage.env "$HOME/.local/state/talos/cutover-tb-stage.env"; do [ -f "$ENV_FILE" ] && break; done
 fi
-if [ -f "$ENV_FILE" ]; then set -a; eval "$(< "$ENV_FILE")"; set +a; fi
+if [ -f "$ENV_FILE" ]; then
+  if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm /022)" ]; then
+    echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others" >&2
+    exit 1
+  fi
+  set -a; eval "$(< "$ENV_FILE")"; set +a
+fi
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS

@@ -82,7 +82,11 @@ repoint() {
   [ "$issuer" = "https://$ISSUER_HOST/realms/tbpro" ]
 }
 
-prereqs
+if [ "$(gh pr view "$T7_PR" -R "$REPO" --json state -q .state 2>/dev/null)" = MERGED ]; then
+  echo "T7_PR is merged: resuming after the merge, check-prereqs.sh skipped (its PR pair row expects the PR open)"
+else
+  prereqs
+fi
 helpers snapshot-secret-versions.sh gate-keycloak-version.sh put-secret-version.sh restore-secret-version.sh restore-realm.sh
 step t7-start "" start
 step snap-secret-versions secrets snap

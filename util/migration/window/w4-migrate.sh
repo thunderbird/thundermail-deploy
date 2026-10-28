@@ -109,11 +109,13 @@ queue_drain() {
 dump() {
   local n
   [ "$APPLY" = 0 ] || legacy_tunnel || return 1
+  printf '  + bash %s %s (per-type principal totals: server vs dump)\n' "$MIG_DIR/dump-check.sh" "$S/principals.json"
   run_to "$S/dump.log" "$PY" "$MIG_DIR/migrate_v016.py" dump --url "$OLD_STALWART_URL" --username "$OLD_STALWART_USER" --password "$OLD_STALWART_PASSWORD" --settings "$S/settings.json" --principals "$S/principals.json" || { echo "dump failed; see $S/dump.log"; return 1; }
   [ "$APPLY" = 1 ] || return 0
   for n in settings.json principals.json; do [ -s "$S/$n" ] || { echo "dump wrote no $n"; return 1; }; done
   n=$(grep -cE "$PRINCIPAL_WARN" "$S/dump.log" || true)
   [ "$n" = 0 ] || { echo "dump.log reports $n principal(s) not fetched or skipped; see $S/dump.log"; return 1; }
+  bash "$MIG_DIR/dump-check.sh" "$S/principals.json" || { echo "dump-check.sh: the dump does not match the server's principal totals"; return 1; }
 }
 
 convert() {
@@ -221,7 +223,7 @@ leave_recovery() {
 }
 
 prereqs
-helpers migrate_v016.py retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/stage.env stalwart-cli rclone "$PY"
+helpers migrate_v016.py dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/stage.env stalwart-cli rclone "$PY"
 if [ "$APPLY" = 1 ] && [ -n "$(after_cut drop-schema)" ]; then
   [ -n "$GO" ] || stop "DROP SCHEMA already started for this cut: a second DROP needs the operator's confirmation (--go)"
   go_gate
