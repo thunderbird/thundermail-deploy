@@ -104,7 +104,7 @@ tls() {
 mta_sts() { curl -s -m 15 --resolve "mta-sts.$Z:443:$NLB_IP" "https://mta-sts.$Z/.well-known/mta-sts.txt" | grep -q '^mode: testing' || { echo "policy is not mode: testing"; return 1; }; echo "mode: testing from the new NLB"; }
 
 inbound() {
-  timeout 60 swaks --helo w7-check.local --to "$1" --from "$TEST_MAILBOX" --server "$NLB_IP:25" --tls-optional --tls-sni "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1"; return 0; }
+  timeout 60 swaks --helo w7-check.local --to "$1" --from "$TEST_MAILBOX" --server "$NLB_IP:25" --tls-optional-strict --tls-sni "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1"; return 0; }
   timeout 10 bash -c "exec 3<>/dev/tcp/$NLB_IP/25" 2>/dev/null || { echo "NEED port 25 egress from this host: send to $1 from the TEST_MAILBOX provider"; return 0; }
   echo "swaks to $1 was refused"; return 1
 }
@@ -168,7 +168,7 @@ probes() {
 }
 
 mail() {
-  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (subject %s), JMAP poll 300s, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
+  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (STARTTLS if offered, subject %s), JMAP poll 300s, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
   [ "$APPLY" = 1 ] || return 0
   chk inbound-test-user inbound "$TEST_USER"
   chk inbound-postmaster inbound "postmaster@$Z"
