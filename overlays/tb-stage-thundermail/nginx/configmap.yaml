@@ -15,6 +15,7 @@ data:
     #    https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-udp-load-balancer/
 
     load_module /usr/lib/nginx/modules/ngx_http_js_module.so;
+    load_module /usr/lib/nginx/modules/ngx_stream_js_module.so;
 
     user nginx;
     worker_processes auto;
@@ -23,6 +24,8 @@ data:
     pid /run/nginx.pid;
 
     stream {
+      js_import jmap from /etc/nginx/jmap.js;
+
       log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
           '"hostname": "$hostname", "proxy_protocol": {"addr": "$proxy_protocol_addr", "port": "$proxy_protocol_port", '
           '"server_addr": "$proxy_protocol_server_addr", "server_port": "$proxy_protocol_server_port"}, '
@@ -49,6 +52,10 @@ data:
 
       upstream stalwart-managesieve {
         server stalwart-mail:4190;
+      }
+
+      upstream stalwart-https {
+        server stalwart-https:443;
       }
 
       server {
@@ -96,6 +103,17 @@ data:
         proxy_protocol on;
         access_log /var/log/nginx/access.log json;
       }
+
+      server {
+        listen 127.0.0.1:8090;
+        proxy_connect_timeout 1s;
+        proxy_timeout 10m;
+        proxy_pass stalwart-https;
+        proxy_ssl on;
+        proxy_ssl_server_name on;
+        proxy_ssl_name mail.stage-thundermail.com;
+        js_filter jmap.wsFilter;
+      }
     }
 
     # HTTP traffic to Stalwart is always encrypted. We need to decrypt it here so we can determine
@@ -112,6 +130,12 @@ data:
 
     http {
       js_import jmap from /etc/nginx/jmap.js;
+
+      map $request_uri $stalwart_route {
+        "~^/jmap/ws(?:[/?#]|$)"                ws;
+        "~^/jmap(?:/(?:/[^?#]*)?)?(?:[?#]|$)"  api;
+        default                                "";
+      }
 
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
@@ -137,6 +161,8 @@ data:
         gzip on;
         gzip_types application/json;
 
+        client_max_body_size 50m;
+
         # Specifically block access to these routes
         location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
           return 404;
@@ -156,13 +182,41 @@ data:
 
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
+          if ($stalwart_route = api) {
+            rewrite ^ /.jmap-api last;
+          }
+          if ($stalwart_route = ws) {
+            rewrite ^ /.jmap-ws last;
+          }
+          proxy_pass https://stalwart-https;
+          proxy_set_header Host mail.stage-thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_ssl_server_name on;
+          proxy_ssl_name mail.stage-thundermail.com;
+        }
+
+        location = /.jmap-api {
+          internal;
           client_max_body_size 1m;
           client_body_buffer_size 1m;
-          js_content jmap.route;
+          js_content jmap.filter;
+        }
+
+        location = /.jmap-ws {
+          internal;
+          proxy_pass http://127.0.0.1:8090$request_uri;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection upgrade;
+          proxy_set_header Host mail.stage-thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_read_timeout 10m;
         }
 
         location @stalwart {
-          proxy_pass https://stalwart-https;
+          proxy_pass https://stalwart-https$request_uri;
           proxy_set_header Host mail.stage-thundermail.com;
           proxy_set_header X-Forwarded-For $remote_addr;
           proxy_set_header Forwarded "";
@@ -196,15 +250,11 @@ data:
       }
     }
   jmap.js: |
-    function route(r) {
-      const segments = r.variables.request_uri.split(/[?#]/)[0].split('/');
+    const POLICY_CLOSE = Buffer.from([0x88, 0x82, 0, 0, 0, 0, 0x03, 0xf0]);
+    const MAX_MESSAGE = 1048576;
 
-      if (segments[1] === 'jmap' && segments[2] === 'ws') {
-        r.return(404);
-        return;
-      }
-
-      if (r.method === 'POST' && segments[1] === 'jmap' && !segments[2] && !isUserRequest(r.requestText)) {
+    function filter(r) {
+      if (r.method === 'POST' && !isUserMessage(r.requestText)) {
         r.return(403);
         return;
       }
@@ -212,14 +262,108 @@ data:
       r.internalRedirect('@stalwart');
     }
 
-    function isUserRequest(body) {
+    function isUserMessage(text) {
       try {
-        const calls = JSON.parse(body).methodCalls;
-        return Array.isArray(calls) && calls.every((call) =>
-          Array.isArray(call) && typeof call[0] === 'string' && !call[0].startsWith('x:'));
+        const calls = JSON.parse(text).methodCalls;
+        return calls === undefined || (Array.isArray(calls) && calls.every((call) =>
+          Array.isArray(call) && typeof call[0] === 'string' && !call[0].startsWith('x:')));
       } catch (e) {
         return false;
       }
     }
 
-    export default { route };
+    function wsFilter(s) {
+      let pending = Buffer.alloc(0);
+      let upgraded = false;
+      let blocked = false;
+      let frames = [];
+      let payload = [];
+      let size = 0;
+
+      function block() {
+        blocked = true;
+        s.send(POLICY_CLOSE);
+      }
+
+      s.on('upstream', (data) => {
+        if (blocked) {
+          return;
+        }
+
+        pending = Buffer.concat([pending, data]);
+
+        if (!upgraded) {
+          const end = pending.indexOf('\r\n\r\n');
+          if (end < 0) {
+            return;
+          }
+          s.send(pending.subarray(0, end + 4));
+          pending = pending.subarray(end + 4);
+          upgraded = true;
+        }
+
+        while (pending.length >= 2) {
+          const first = pending[0];
+          const opcode = first & 0x0f;
+          const control = opcode >= 8;
+          let length = pending[1] & 0x7f;
+          let offset = 2;
+
+          if (length === 126) {
+            if (pending.length < 4) {
+              return;
+            }
+            length = pending.readUInt16BE(2);
+            offset = 4;
+          } else if (length === 127) {
+            if (pending.length < 10) {
+              return;
+            }
+            length = pending.readUInt32BE(2) * 0x100000000 + pending.readUInt32BE(6);
+            offset = 10;
+          }
+
+          const valid = (first & 0x70) === 0 && (pending[1] & 0x80) !== 0 && (control
+            ? opcode <= 10 && length <= 125 && (first & 0x80) !== 0
+            : opcode <= 2 && (opcode === 0) === (frames.length > 0) && size + length <= MAX_MESSAGE);
+          if (!valid) {
+            block();
+            return;
+          }
+
+          offset += 4;
+          if (pending.length < offset + length) {
+            return;
+          }
+
+          const frame = pending.subarray(0, offset + length);
+          pending = pending.subarray(offset + length);
+
+          if (control) {
+            s.send(frame);
+            continue;
+          }
+
+          const unmasked = Buffer.alloc(length);
+          for (let i = 0; i < length; i++) {
+            unmasked[i] = frame[offset + i] ^ frame[offset - 4 + (i % 4)];
+          }
+          frames.push(frame);
+          payload.push(unmasked);
+          size += length;
+
+          if (first & 0x80) {
+            if (!isUserMessage(Buffer.concat(payload).toString())) {
+              block();
+              return;
+            }
+            frames.forEach((f) => s.send(f));
+            frames = [];
+            payload = [];
+            size = 0;
+          }
+        }
+      });
+    }
+
+    export default { filter, wsFilter };
