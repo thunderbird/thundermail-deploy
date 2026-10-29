@@ -58,6 +58,8 @@ spec:
                   items:
                     - key: nginx.conf
                       path: nginx.conf
+                    - key: jmap.js
+                      path: jmap.js
               - secret:
                   name: ssl-certificate
                   items:

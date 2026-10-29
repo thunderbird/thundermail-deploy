@@ -14,6 +14,8 @@ data:
     # reverse proxy configuration for our purposes.
     #    https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-udp-load-balancer/
 
+    load_module /usr/lib/nginx/modules/ngx_http_js_module.so;
+
     user nginx;
     worker_processes auto;
 
@@ -104,6 +106,8 @@ data:
     events {}
 
     http {
+      js_import jmap from /etc/nginx/jmap.js;
+
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
         # internal sources.
@@ -147,6 +151,12 @@ data:
 
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
+          client_max_body_size 1m;
+          client_body_buffer_size 1m;
+          js_content jmap.route;
+        }
+
+        location @stalwart {
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.thundermail.com;
           proxy_ssl_name mail.thundermail.com;
@@ -166,3 +176,31 @@ data:
         }
       }
     }
+  jmap.js: |
+    function route(r) {
+      const segments = r.variables.request_uri.split(/[?#]/)[0].split('/');
+
+      if (segments[1] === 'jmap' && segments[2] === 'ws') {
+        r.return(404);
+        return;
+      }
+
+      if (r.method === 'POST' && segments[1] === 'jmap' && !segments[2] && !isUserRequest(r.requestText)) {
+        r.return(403);
+        return;
+      }
+
+      r.internalRedirect('@stalwart');
+    }
+
+    function isUserRequest(body) {
+      try {
+        const calls = JSON.parse(body).methodCalls;
+        return Array.isArray(calls) && calls.every((call) =>
+          Array.isArray(call) && typeof call[0] === 'string' && !call[0].startsWith('x:'));
+      } catch (e) {
+        return false;
+      }
+    }
+
+    export default { route };
