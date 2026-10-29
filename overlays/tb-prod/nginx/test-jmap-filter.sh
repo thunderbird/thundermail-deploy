@@ -174,6 +174,8 @@ case('user request', [frame(1, user)], echo)
 case('user request on /jmap/ws?basic=x', [frame(1, user)], echo, '/jmap/ws?basic=x')
 case('push enable', [frame(1, b'{"@type":"WebSocketPushEnable","dataTypes":null}')], echo)
 case('ping', [frame(9, b'hi')], lambda got: got[-1] == (10, b'hi'))
+padded = request(['Email/set', {'pad': 'a' * 2000}, '0'])
+case('user split into 1000 fragments', [frame(1, padded[:1], fin=False)] + [frame(0, padded[i:i + 1], fin=False) for i in range(1, 999)] + [frame(0, padded[999:])], echo)
 case('fragmented user with ping between', [frame(1, user[:20], fin=False), frame(9, b'p'), None, frame(0, user[20:])],
      lambda got: got[0] == (10, b'p') and echo(got))
 case('70KB user request', [frame(1, request(['Email/set', {'pad': 'a' * 70000}, '0']))], echo)
@@ -188,6 +190,7 @@ case('unmasked frame', [frame(1, user, mask=False)], closed)
 case('RSV1 (compressed) frame', [frame(1, user, rsv=0x40)], closed)
 case('continuation without start', [frame(0, user)], closed)
 case('declared length over 1 MiB', [frame(1, b'', length=1048577)], closed)
+case('1100 empty continuation frames', [frame(1, b'{', fin=False)] + [frame(0, b'', fin=False)] * 1100, closed)
 sys.exit(1 if failures else 0)
 EOF
 

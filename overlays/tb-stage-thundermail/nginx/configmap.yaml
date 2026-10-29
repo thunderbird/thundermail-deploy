@@ -252,6 +252,7 @@ data:
   jmap.js: |
     const POLICY_CLOSE = Buffer.from([0x88, 0x82, 0, 0, 0, 0, 0x03, 0xf0]);
     const MAX_MESSAGE = 1048576;
+    const MAX_FRAGMENTS = 1024;
 
     function filter(r) {
       if (r.method === 'POST' && !isUserMessage(r.requestText)) {
@@ -325,7 +326,8 @@ data:
 
           const valid = (first & 0x70) === 0 && (pending[1] & 0x80) !== 0 && (control
             ? opcode <= 10 && length <= 125 && (first & 0x80) !== 0
-            : opcode <= 2 && (opcode === 0) === (frames.length > 0) && size + length <= MAX_MESSAGE);
+            : opcode <= 2 && (opcode === 0) === (frames.length > 0) && size + length <= MAX_MESSAGE
+              && frames.length < MAX_FRAGMENTS);
           if (!valid) {
             block();
             return;
