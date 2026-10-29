@@ -9,6 +9,7 @@ resources:
   - security-group-policy.yaml
   - service.yaml
   - serviceaccount.yaml
+  - vmservicescrape.yaml
 
 labels:
   - pairs:

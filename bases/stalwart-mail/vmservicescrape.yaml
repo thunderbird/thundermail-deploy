@@ -1,0 +1,37 @@
+---
+# Scrape Stalwart's Prometheus endpoint into VictoriaMetrics. Lives in the thundermail namespace so
+# it stays inside the per-environment Argo AppProject; the VM operator discovers scrapes
+# cluster-wide (same pattern as keycloak-customer-deploy bases/keycloak/vmservicescrape.yaml).
+#
+# Every stalwart Service carries app=stalwart, but only stalwart-mgmt has a port named `mgmt`, so
+# the port filter below keeps the scrape off the public-facing Services. The mgmt listener answers
+# plain HTTP in-cluster. Each Stalwart node serves only its own counters, so the operator generates
+# one target per endpoint (pod), which is what we want.
+#
+# Credentials come from the stalwart-metrics-scrape Secret (secrets.yaml); until that Secret and
+# the Metrics object (bases/stalwart-configs) exist the targets simply report down.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: stalwart
+  namespace: thundermail
+spec:
+  namespaceSelector:
+    matchNames:
+      - thundermail
+  selector:
+    matchLabels:
+      app: stalwart
+  endpoints:
+    - port: mgmt
+      scheme: http
+      path: /metrics/prometheus
+      interval: 30s
+      scrapeTimeout: 10s
+      basicAuth:
+        username:
+          name: stalwart-metrics-scrape
+          key: username
+        password:
+          name: stalwart-metrics-scrape
+          key: password

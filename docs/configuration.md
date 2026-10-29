@@ -304,6 +304,24 @@ In the admin console, go to Settings ⇢ Telemetry ⇢ Tracers. You'll find one 
 Change the "Tracer type" to "Console". Scroll down and click `🖫 Save`.
 
 
+## Metrics
+
+Stalwart has a built-in Prometheus exporter, served at `/metrics/prometheus` on every HTTP listener. The configuration template (`bases/stalwart-configs/config/stalwart-config-base-tpl.yaml`) enables it in the `Metrics` object with HTTP basic auth: the username is `prometheus`, and the password is read from the `STALWART_METRICS_PASSWORD` environment variable, which the stalwart Deployment takes from the `stalwart-metrics-scrape` Secret. That Secret is an ExternalSecret; each overlay points it at a Secrets Manager entry with two properties, `username` (must be `prometheus`) and `password`.
+
+Three things keep the endpoint private:
+
+- Nginx returns 404 for `/metrics` on the public 443 listener, next to the `/admin` and `/api` guards.
+- The `VMServiceScrape` in `bases/stalwart-mail/vmservicescrape.yaml` scrapes the in-cluster `stalwart-mgmt` Service (port 8080) with the same credentials, so VictoriaMetrics never goes through the public path.
+- Stalwart disables the endpoint when only one of the username/secret pair is set, so a missing Secret leaves it off rather than open.
+
+To check it on a running pod:
+
+    kubectl -n thundermail port-forward deploy/stalwart 18080:8080
+    curl -s -u prometheus:$PASSWORD http://localhost:18080/metrics/prometheus | head
+
+The same setting can be flipped by hand with `stalwart-cli update Metrics --field prometheus='{...}'` followed by `create action/ReloadSettings`, but anything set that way is drift from the template until the template catches up.
+
+
 ## Making Changes Take Effect
 
 Changing a setting in the admin console _**is not**_ enough to trigger the change on live servers. To accomplish this, you have to reload server settings.

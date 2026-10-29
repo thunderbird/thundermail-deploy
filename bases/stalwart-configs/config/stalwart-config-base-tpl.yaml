@@ -244,6 +244,26 @@ value:
   useXForwarded: true
   usePermissiveCors: true
 ---
+# Prometheus exporter at /metrics/prometheus on every HTTP listener. nginx returns 404 for /metrics
+# on the public 443 listener (bases/nginx/configmap.yaml); the in-cluster VMServiceScrape
+# (bases/stalwart-mail/vmservicescrape.yaml) scrapes the mgmt listener with the basic-auth pair that
+# the stalwart-metrics-scrape ExternalSecret delivers. The password arrives through the
+# STALWART_METRICS_PASSWORD environment variable on the stalwart Deployment. Stalwart disables the
+# endpoint when only one of authUsername/authSecret resolves, so a missing Secret leaves it off.
+'@type': update
+object: Metrics
+value:
+  prometheus:
+    '@type': Enabled
+    authUsername: prometheus
+    authSecret:
+      '@type': EnvironmentVariable
+      variableName: STALWART_METRICS_PASSWORD
+  openTelemetry:
+    '@type': Disabled
+  metricsPolicy: exclude
+  metrics: {}
+---
 '@type': update
 object: BlobStore
 value:

@@ -47,6 +47,17 @@ spec:
                   name: stalwart-postgresql-admin-password
                   key: STALWART_POSTGRESQL_ADMIN_PASSWORD
 
+            # Basic-auth password for the Prometheus endpoint (/metrics/prometheus). The Metrics
+            # object in the Stalwart configuration template reads it with
+            # '@type: EnvironmentVariable'. Optional so a missing stalwart-metrics-scrape Secret
+            # can never keep the pod from starting; Stalwart then leaves the endpoint disabled.
+            - name: STALWART_METRICS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-metrics-scrape
+                  key: password
+                  optional: true
+
             # Reference for the remainder of these variables:
             #   https://stalw.art/docs/configuration/environment-variables/
 
