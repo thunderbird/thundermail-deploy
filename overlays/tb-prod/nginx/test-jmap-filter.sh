@@ -328,19 +328,24 @@ def burst(n, threads, credential):
             except OSError as e:
                 responses.append(('error ' + type(e).__name__).encode())
     pool = [threading.Thread(target=worker, args=(range(t, n, threads),)) for t in range(threads)]
+    start = time.time()
     [t.start() for t in pool]
     [t.join() for t in pool]
-    return responses
+    return responses, time.time() - start
 
-def rate_case(desc, responses):
+def rate_case(desc, result):
+    responses, elapsed = result
     codes = [r.split(b'\r\n')[0].decode() for r in responses]
     ok, limited = codes.count('HTTP/1.1 200 OK'), codes.count('HTTP/1.1 429 Too Many Requests')
-    report(desc, 201 <= ok <= 300 and ok + limited == len(codes), f'{ok} x 200, {limited} x 429, {len(codes) - ok - limited} other')
+    allowed = 201 + 20 * elapsed + 5
+    report(desc, min(len(codes), 201) <= ok <= allowed and ok + limited == len(codes),
+           f'{ok} x 200, {limited} x 429, {len(codes) - ok - limited} other in {elapsed:.1f} s (at most {allowed:.0f} allowed)')
 
 rate_case('limit_req: 400 requests, 400 credentials, one address', burst(400, 8, 'rotate-{}'))
 time.sleep(11)
-responses = burst(400, 2, 'one')
-rate_case('limit_req: 400 requests, one credential', responses)
+result = burst(400, 2, 'one')
+rate_case('limit_req: 400 requests, one credential', result)
+responses = result[0]
 limited = next((r for r in responses if r.startswith(b'HTTP/1.1 429')), b'')
 head, _, body = limited.partition(b'\r\n\r\n')
 report('429 is JMAP problem JSON with Retry-After', b'Content-Type: application/problem+json' in head and b'Retry-After: 1' in head
