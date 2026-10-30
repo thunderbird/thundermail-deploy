@@ -133,10 +133,12 @@ data:
 
       limit_conn_zone $binary_remote_addr zone=jmap_ip:10m;
       limit_conn_zone $jmap_client zone=jmap_client:10m;
-      limit_req_zone $jmap_client zone=jmap_rate:10m rate=20r/s;
+      limit_req_zone $jmap_client zone=jmap_rate:10m rate=100r/s;
+      limit_req_zone $binary_remote_addr zone=jmap_ip_rate:10m rate=20r/s;
 
       map $request_uri $stalwart_route {
         "~^/jmap/ws(?:[/?#]|$)"                ws;
+        "~^/jmap/eventsource(?:[/?#]|$)"       sse;
         "~^/jmap(?:/(?:/[^?#]*)?)?(?:[?#]|$)"  api;
         "~^/(?:account|admin|api|metrics)(?:[/?#]|$)"  blocked;
         default                                "";
@@ -201,6 +203,9 @@ data:
           if ($stalwart_route = ws) {
             rewrite ^ /.jmap-ws last;
           }
+          if ($stalwart_route = sse) {
+            rewrite ^ /.jmap-sse last;
+          }
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.thundermail.com;
           proxy_set_header X-Forwarded-For $remote_addr;
@@ -213,11 +218,27 @@ data:
           limit_conn jmap_ip 16;
           limit_conn jmap_client 4;
           limit_conn_status 429;
-          limit_req zone=jmap_rate burst=40 nodelay;
+          limit_req zone=jmap_rate burst=200 nodelay;
+          limit_req zone=jmap_ip_rate burst=200 nodelay;
           limit_req_status 429;
           client_max_body_size 1m;
           client_body_timeout 10s;
           js_content jmap.filter;
+          error_page 413 /.jmap-error-413;
+          error_page 429 /.jmap-error-429;
+        }
+
+        location = /.jmap-error-413 {
+          internal;
+          default_type application/problem+json;
+          return 413 '{"type":"urn:ietf:params:jmap:error:limit","status":413,"limit":"maxSizeRequest","detail":"The request is larger than the 1048576 bytes this server accepts."}';
+        }
+
+        location = /.jmap-error-429 {
+          internal;
+          default_type application/problem+json;
+          add_header Retry-After 1 always;
+          return 429 '{"type":"urn:ietf:params:jmap:error:limit","status":429,"limit":"maxConcurrentRequests","detail":"Too many concurrent or rapid requests from this client. Retry shortly."}';
         }
 
         location = /.jmap-ws {
@@ -232,6 +253,17 @@ data:
           proxy_set_header X-Forwarded-For $remote_addr;
           proxy_set_header Forwarded "";
           proxy_read_timeout 10m;
+        }
+
+        location = /.jmap-sse {
+          internal;
+          proxy_pass https://stalwart-https$request_uri;
+          proxy_buffering off;
+          proxy_read_timeout 1h;
+          proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_ssl_name mail.thundermail.com;
         }
 
         location @stalwart {
@@ -361,9 +393,23 @@ data:
             continue;
           }
 
-          const unmasked = Buffer.alloc(length);
-          for (let i = 0; i < length; i++) {
-            unmasked[i] = frame[offset + i] ^ frame[offset - 4 + (i % 4)];
+          const unmasked = Buffer.from(frame.subarray(offset, offset + length));
+          const key = frame.readUInt32LE(offset - 4);
+          if (key !== 0) {
+            const whole = length >>> 2;
+            if (unmasked.byteOffset % 4 === 0) {
+              const words = new Uint32Array(unmasked.buffer, unmasked.byteOffset, whole);
+              for (let i = 0; i < whole; i++) {
+                words[i] ^= key;
+              }
+            } else {
+              for (let i = 0; i < whole * 4; i++) {
+                unmasked[i] ^= frame[offset - 4 + (i % 4)];
+              }
+            }
+            for (let i = whole * 4; i < length; i++) {
+              unmasked[i] ^= frame[offset - 4 + (i % 4)];
+            }
           }
           frames.push(frame);
           payload.push(unmasked);

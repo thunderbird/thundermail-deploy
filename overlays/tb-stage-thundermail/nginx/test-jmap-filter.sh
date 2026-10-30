@@ -36,6 +36,11 @@ http {
     location = /jmap/soak {
       proxy_pass http://wsecho:8081;
     }
+    location = /jmap/eventsource {
+      proxy_pass http://wsecho:8082;
+      proxy_buffering off;
+      proxy_read_timeout 1h;
+    }
     location = /jmap/ws {
       proxy_pass http://wsecho:8080;
       proxy_http_version 1.1;
@@ -80,6 +85,8 @@ def handle(conn):
             key = value.strip()
         elif name.lower() == b'authorization':
             auth = value.strip()
+        elif name.lower() in (b'x-forwarded-for', b'forwarded'):
+            print('HEADER', name.lower().decode(), value.strip().decode(), flush=True)
     accept = base64.b64encode(hashlib.sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
     conn.sendall(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + b'\r\n\r\n')
     message = b''
@@ -121,17 +128,28 @@ def slow(conn):
     conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nslow')
     conn.close()
 
+def sse(conn):
+    stream = conn.makefile('rb')
+    while stream.readline() not in (b'\r\n', b''):
+        pass
+    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n'
+                 b'event: state\ndata: {}\n\n')
+    time.sleep(65)
+    conn.sendall(b'event: ping\ndata: {}\n\n')
+    conn.close()
+
 def serve(port, handler):
     server = socket.create_server(('0.0.0.0', port))
     while True:
         threading.Thread(target=handler, args=(server.accept()[0],), daemon=True).start()
 
 threading.Thread(target=serve, args=(8081, slow), daemon=True).start()
+threading.Thread(target=serve, args=(8082, sse), daemon=True).start()
 serve(8080, handle)
 EOF
 
 cat > "$work/py/client.py" <<'EOF'
-import json, os, socket, ssl, struct, sys, threading
+import json, os, socket, ssl, struct, sys, threading, time
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
@@ -144,7 +162,7 @@ def connect(path='/jmap/ws', timeout=3):
     sock = tls(timeout)
     sock.sendall((f'GET {path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
                   'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n'
-                  'Authorization: Bearer test\r\n\r\n').encode())
+                  'Authorization: Bearer test\r\nX-Forwarded-For: 6.6.6.6\r\nForwarded: for=6.6.6.6\r\n\r\n').encode())
     stream = sock.makefile('rb')
     status = stream.readline()
     while stream.readline() not in (b'\r\n', b''):
@@ -210,6 +228,28 @@ def case(desc, frames, expect, path='/jmap/ws'):
     echoed += sum(1 for f in got if is_echo(f))
     report('ws ' + desc, expect(got), [(op, data[:24]) for op, data in got])
 
+sse_result = {}
+def sse():
+    sock = tls(90)
+    sock.sendall(b'GET /jmap/eventsource?types=*&closeafter=no&ping=65 HTTP/1.1\r\nHost: localhost\r\n'
+                 b'Authorization: Bearer test\r\nAccept: text/event-stream\r\n\r\n')
+    start, data = time.time(), b''
+    while 'ping' not in sse_result:
+        try:
+            chunk = sock.recv(4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        data += chunk
+        if 'state' not in sse_result and b'event: state' in data:
+            sse_result['state'] = time.time() - start
+        if b'event: ping' in data:
+            sse_result['ping'] = time.time() - start
+    sock.close()
+sse_thread = threading.Thread(target=sse)
+sse_thread.start()
+
 echo = lambda got: is_echo(got[-1])
 closed = lambda got: got[-1] == (8, b'\x03\xf0')
 
@@ -255,7 +295,7 @@ threads = [threading.Thread(target=post, args=(i,)) for i in range(20)]
 [t.start() for t in threads]
 [t.join() for t in threads]
 ok_count = statuses.count('HTTP/1.1 200 OK')
-report('http soak 20 concurrent 1MB dense bodies', ok_count >= 16 and set(statuses) <= {'HTTP/1.1 200 OK', 'HTTP/1.1 429 Too Many Requests'},
+report('http soak 20 concurrent 1MB dense bodies', ok_count == 16 and statuses.count('HTTP/1.1 429 Too Many Requests') == 4,
        f'{len(dense)} bytes each: {sorted(set(statuses))}, {ok_count} x 200')
 
 soak = request(['Email/set', {'pad': 'a' * 900000}, '0'])
@@ -272,6 +312,43 @@ for _ in range(50):
 sock.close()
 echoed += count
 report('ws soak 50 x 900KB on one socket', count == 50, f'{count} of 50 echoed')
+
+def burst(n, threads, credential):
+    responses = []
+    def worker(indexes):
+        for i in indexes:
+            try:
+                s = tls(10)
+                s.sendall(b'POST /jmap HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\n'
+                          b'Authorization: Bearer %s\r\nContent-Length: 18\r\n\r\n{"methodCalls":[]}' % credential.format(i).encode())
+                response = b''
+                while chunk := s.recv(65536):
+                    response += chunk
+                responses.append(response)
+            except OSError as e:
+                responses.append(('error ' + type(e).__name__).encode())
+    pool = [threading.Thread(target=worker, args=(range(t, n, threads),)) for t in range(threads)]
+    [t.start() for t in pool]
+    [t.join() for t in pool]
+    return responses
+
+def rate_case(desc, responses):
+    codes = [r.split(b'\r\n')[0].decode() for r in responses]
+    ok, limited = codes.count('HTTP/1.1 200 OK'), codes.count('HTTP/1.1 429 Too Many Requests')
+    report(desc, 201 <= ok <= 300 and ok + limited == len(codes), f'{ok} x 200, {limited} x 429, {len(codes) - ok - limited} other')
+
+rate_case('limit_req: 400 requests, 400 credentials, one address', burst(400, 8, 'rotate-{}'))
+time.sleep(11)
+responses = burst(400, 2, 'one')
+rate_case('limit_req: 400 requests, one credential', responses)
+limited = next((r for r in responses if r.startswith(b'HTTP/1.1 429')), b'')
+head, _, body = limited.partition(b'\r\n\r\n')
+report('429 is JMAP problem JSON with Retry-After', b'Content-Type: application/problem+json' in head and b'Retry-After: 1' in head
+       and b'"type":"urn:ietf:params:jmap:error:limit"' in body, head.split(b'\r\n')[0].decode() + ' ' + body[:60].decode())
+
+sse_thread.join()
+report('eventsource first event arrives promptly', sse_result.get('state', 99) < 3, f"state after {sse_result.get('state', 'never')} s")
+report('eventsource survives a 65 s gap to the ping', sse_result.get('ping', 0) > 60, f"ping after {sse_result.get('ping', 'never')} s")
 
 print('ECHOED', echoed)
 sys.exit(1 if failures else 0)
@@ -332,6 +409,8 @@ check 403 '' 'admin on POST /jmap//upload/a' "${json[@]}" --request-target /jmap
 check 403 '' 'admin on POST /jmap//../upload/a' "${json[@]}" --request-target /jmap//../upload/a -d "$mixed"
 check 403 '' 'admin on absolute-form target' "${json[@]}" --request-target https://localhost/jmap -d "$mixed"
 check 403 '' 'escaped x\u003a method name' "${json[@]}" --request-target /jmap -d '{"methodCalls":[["x\u003aAccount/get",{},"0"]]}'
+check 403 '' 'escaped \u0078: method name' "${json[@]}" --request-target /jmap -d '{"methodCalls":[["\u0078:Account/get",{},"0"]]}'
+check 200 'POST /jmap' 'user call with "x:" in arguments' "${json[@]}" --request-target /jmap -d '{"methodCalls":[["Core/echo",{"x:k":"x:v"},"0"]]}'
 check 403 '' 'duplicate methodCalls, admin last' "${json[@]}" --request-target /jmap \
   -d '{"methodCalls":[["Core/echo",{},"0"]],"methodCalls":[["x:Account/get",{},"1"]]}'
 check 403 '' 'admin chunked body' "${json[@]}" -H 'Transfer-Encoding: chunked' --request-target /jmap -d "$mixed"
@@ -360,7 +439,7 @@ check 200 'GET /jmap/eventsource/' 'eventsource drops Upgrade header' \
 check 200 'PROPFIND /dav/cal/u/' 'PROPFIND /dav/cal/u/' -X PROPFIND --request-target /dav/cal/u/
 check 200 'POST /auth/token' 'POST /auth/token' -d grant_type=password --request-target /auth/token
 check 200 'GET /API/account' 'not a Stalwart route: /API/account' --request-target /API/account
-for path in /admin /api/account /account /metrics/prometheus /.jmap-api /.jmap-ws \
+for path in /admin /api/account /account /metrics/prometheus /.jmap-api /.jmap-ws /.jmap-sse /.jmap-error-413 /.jmap-error-429 \
   /api/../x /api/account/../../x /api/live/delivery/../../../x /api/live/delivery/example.com/../../../../x \
   /api/schema/../../x /api/discover/a@b.c/../../../x /metrics/prometheus/../../x /admin/../x /admin/index.html/../../x \
   /account/../x /api/%2e%2e/x /api/%2E%2E/x /api/.%2e/x /metrics/prometheus/%2e%2e/%2e%2e/x '/api/..;/x' \
@@ -370,14 +449,17 @@ done
 check 404 '' 'POST /api/auth/../../x' -d x --request-target /api/auth/../../x
 check 404 '' 'POST /api/../jmap' "${json[@]}" -d "$mixed" --request-target /api/../jmap
 
-rate() {
-  "$engine" exec "$name-edge" sh -c "seq $1 | xargs -P 8 -I{} curl -sk -o /dev/null -w '%{http_code}\n' \
-    -H 'Content-Type: application/json' -H \"Authorization: Bearer $2\" -d '{\"methodCalls\":[]}' https://localhost/jmap" | sort | uniq -c | tr -s ' \n' ' '
-}
-limited=$(rate 80 'same{}' )
-if [[ $limited != *429* ]]; then pass 'limit_req: 80 requests from 80 credentials' "$limited"; else fail 'limit_req: 80 requests from 80 credentials' "$limited"; fi
-limited=$(rate 80 same)
-if [[ $limited == *429* && $limited == *200* ]]; then pass 'limit_req: 80 requests from one credential' "$limited"; else fail 'limit_req: 80 requests from one credential' "$limited"; fi
+conn=$("$engine" exec "$name-edge" sh -c "seq 6 | xargs -P 6 -I{} curl -sk -o /dev/null -w '%{http_code}\n' \
+  -H 'Content-Type: application/json' -H 'Authorization: Bearer conn' -d '{\"methodCalls\":[]}' https://localhost/jmap//soak" | sort | uniq -c | tr -s ' \n' ' ')
+if [[ $conn == ' 4 200 2 429 ' ]]; then pass 'limit_conn: 6 slow requests, one credential' "$conn"; else fail 'limit_conn: 6 slow requests, one credential' "$conn"; fi
+
+shape=$("$engine" exec "$name-edge" sh -c "curl -sk -D - -H 'Content-Type: application/json' --data-binary @/tmp/huge https://localhost/jmap")
+if [[ $shape == *'HTTP/1.1 413'* && $shape == *'Content-Type: application/problem+json'* && $shape == *'"limit":"maxSizeRequest"'* ]]; then
+  pass '413 is JMAP problem JSON' "$(head -1 <<< "$shape" | tr -d '\r')"
+else
+  fail '413 is JMAP problem JSON' "${shape:0:160}"
+fi
+"$engine" exec "$name-edge" curl -sk -m 3 -o /dev/null --request-target /jmap/ws "${json[@]}" -d "$mixed" https://localhost/ || true
 
 client=0
 "$engine" run --rm --network "$name" -v "$work/py:/py:ro,Z" "$python" python -u /py/client.py > "$work/client.log" 2>&1 || client=$?
@@ -393,8 +475,11 @@ else
   pass 'ws upstream received only user messages' "$echoed received"
 fi
 
+headers=$("$engine" logs "$name-wsecho" 2>&1 | grep '^HEADER' || true)
+if [[ -n $headers && $headers != *6.6.6.6* ]]; then pass 'ws upstream got rewritten X-Forwarded-For' "$(sort -u <<< "$headers" | tr '\n' ' ')"; else fail 'ws upstream got rewritten X-Forwarded-For' "$(sort -u <<< "$headers" | head -3 | tr '\n' ' ')"; fi
+
 blocked=$("$engine" logs "$name-edge" 2>&1 | grep -c 'blocked JMAP WebSocket session' || true)
-if [[ $blocked -ge 12 ]]; then pass 'blocked ws sessions are logged' "$blocked log lines"; else fail 'blocked ws sessions are logged' "$blocked log lines"; fi
+if [[ $blocked -eq 12 ]]; then pass 'blocked ws sessions are logged' "$blocked log lines"; else fail 'blocked ws sessions are logged' "$blocked log lines"; fi
 
 oom=$("$engine" exec "$name-edge" sh -c 'grep "^oom_kill " /sys/fs/cgroup/memory.events' | cut -d' ' -f2 || true)
 killed=$("$engine" logs "$name-edge" 2>&1 | grep -c 'exited on signal' || true)
