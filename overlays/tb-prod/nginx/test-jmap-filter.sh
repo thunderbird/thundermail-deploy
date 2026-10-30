@@ -2,7 +2,7 @@
 set -euo pipefail
 
 overlay=$(cd "$(dirname "$0")/.." && pwd)
-engine=$(command -v podman || command -v docker)
+engine=${CONTAINER_ENGINE:-$(command -v podman || command -v docker)}
 image=${NGINX_IMAGE:-docker.io/library/nginx:1.31}
 python=${PYTHON_IMAGE:-docker.io/library/python:3.13-slim}
 name=jmap-filter-$$
@@ -31,7 +31,13 @@ http {
     ssl_certificate_key /etc/nginx/ssl/tls.key;
     client_max_body_size 0;
     location / {
-      return 200 "UPSTREAM $request_method $request_uri upgrade=[$http_upgrade]";
+      return 200 "UPSTREAM $request_method $request_uri upgrade=[$http_upgrade] auth=[$http_authorization] len=[$content_length] xff=[$http_x_forwarded_for] fwd=[$http_forwarded]";
+    }
+    location = /jmap {
+      if ($arg_soak) {
+        proxy_pass http://wsecho:8081;
+      }
+      return 200 "UPSTREAM $request_method $request_uri upgrade=[$http_upgrade] auth=[$http_authorization] len=[$content_length] xff=[$http_x_forwarded_for] fwd=[$http_forwarded]";
     }
     location = /jmap/ws {
       proxy_pass http://wsecho:8080;
@@ -51,7 +57,7 @@ stream {
 EOF
 
 cat > "$work/py/wsecho.py" <<'EOF'
-import base64, hashlib, json, socket, struct, threading
+import base64, hashlib, json, socket, struct, threading, time
 
 def send(conn, opcode, payload):
     n = len(payload)
@@ -63,12 +69,20 @@ def send(conn, opcode, payload):
         header = bytes([0x80 | opcode, 127]) + struct.pack('>Q', n)
     conn.sendall(header + payload)
 
+def unmask(data, mask):
+    if mask == b'\0\0\0\0':
+        return data
+    return bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+
 def handle(conn):
     stream = conn.makefile('rb')
-    key = b''
+    key = auth = b''
     while (line := stream.readline()) not in (b'\r\n', b''):
-        if line.lower().startswith(b'sec-websocket-key:'):
-            key = line.split(b':', 1)[1].strip()
+        name, _, value = line.partition(b':')
+        if name.lower() == b'sec-websocket-key':
+            key = value.strip()
+        elif name.lower() == b'authorization':
+            auth = value.strip()
     accept = base64.b64encode(hashlib.sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
     conn.sendall(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + b'\r\n\r\n')
     message = b''
@@ -79,7 +93,7 @@ def handle(conn):
         elif n == 127:
             n = struct.unpack('>Q', stream.read(8))[0]
         mask = stream.read(4) if head[1] & 0x80 else b'\0\0\0\0'
-        data = bytes(b ^ mask[i % 4] for i, b in enumerate(stream.read(n)))
+        data = unmask(stream.read(n), mask)
         opcode = head[0] & 0x0f
         if opcode == 8:
             send(conn, 8, data)
@@ -89,26 +103,48 @@ def handle(conn):
             continue
         message += data
         if head[0] & 0x80:
-            calls = json.loads(message).get('methodCalls', [])
-            print('RECEIVED', ' '.join(call[0] for call in calls) or '-', flush=True)
-            send(conn, 1, b'ECHO ' + message[:40])
+            try:
+                names = ' '.join(call[0] for call in json.loads(message).get('methodCalls', [])) or '-'
+            except ValueError:
+                names = 'INVALID'
+            print('RECEIVED', names, flush=True)
+            send(conn, 1, b'ECHO auth=' + auth + b' ' + message[:40])
             message = b''
     conn.close()
 
-server = socket.create_server(('0.0.0.0', 8080))
-while True:
-    threading.Thread(target=handle, args=(server.accept()[0],), daemon=True).start()
+def slow(conn):
+    stream = conn.makefile('rb')
+    length = 0
+    while (line := stream.readline()) not in (b'\r\n', b''):
+        name, _, value = line.partition(b':')
+        if name.lower() == b'content-length':
+            length = int(value)
+    stream.read(length)
+    time.sleep(2)
+    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok')
+    conn.close()
+
+def serve(port, handler):
+    server = socket.create_server(('0.0.0.0', port))
+    while True:
+        threading.Thread(target=handler, args=(server.accept()[0],), daemon=True).start()
+
+threading.Thread(target=serve, args=(8081, slow), daemon=True).start()
+serve(8080, handle)
 EOF
 
-cat > "$work/py/wsclient.py" <<'EOF'
-import json, os, socket, ssl, struct, sys
+cat > "$work/py/client.py" <<'EOF'
+import json, os, socket, ssl, struct, sys, threading
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
-def connect(path='/jmap/ws'):
-    sock = ctx.wrap_socket(socket.create_connection(('edge', 443), timeout=3))
+def tls(timeout=3):
+    return ctx.wrap_socket(socket.create_connection(('edge', 443), timeout=timeout))
+
+def connect(path='/jmap/ws', timeout=3):
+    sock = tls(timeout)
     sock.sendall((f'GET {path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
                   'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n'
                   'Authorization: Bearer test\r\n\r\n').encode())
@@ -119,7 +155,7 @@ def connect(path='/jmap/ws'):
     assert b' 101 ' in status, status
     return sock, stream
 
-def frame(opcode, payload, fin=True, mask=True, rsv=0, length=None):
+def frame(opcode, payload, fin=True, mask=True, rsv=0, length=None, key=None):
     n = len(payload) if length is None else length
     bit = 0x80 if mask else 0
     if n < 126:
@@ -128,8 +164,10 @@ def frame(opcode, payload, fin=True, mask=True, rsv=0, length=None):
         header = bytes([(0x80 if fin else 0) | rsv | opcode, bit | 126]) + struct.pack('>H', n)
     else:
         header = bytes([(0x80 if fin else 0) | rsv | opcode, bit | 127]) + struct.pack('>Q', n)
-    key = os.urandom(4) if mask else b''
-    return header + key + (bytes(b ^ key[i % 4] for i, b in enumerate(payload)) if mask else payload)
+    if not mask:
+        return header + payload
+    key = os.urandom(4) if key is None else key
+    return header + key + (payload if key == b'\0\0\0\0' else bytes(b ^ key[i % 4] for i, b in enumerate(payload)))
 
 def read(stream):
     try:
@@ -151,9 +189,18 @@ def request(*calls):
 user = request(['Mailbox/get', {'accountId': 'a'}, '0'], ['Email/query', {'accountId': 'a'}, '1'])
 admin = request(['Mailbox/get', {'accountId': 'a'}, '0'], ['x:Account/get', {}, '1'])
 failures = 0
+echoed = 0
+
+def is_echo(f):
+    return f[0] == 1 and f[1].startswith(b'ECHO auth=Bearer test ')
+
+def report(desc, ok, detail):
+    global failures
+    failures += 0 if ok else 1
+    print(f"{'ok   ' if ok else 'FAIL '} {desc:<45} {detail}")
 
 def case(desc, frames, expect, path='/jmap/ws'):
-    global failures
+    global echoed
     sock, stream = connect(path)
     got = []
     for f in frames:
@@ -163,12 +210,11 @@ def case(desc, frames, expect, path='/jmap/ws'):
             sock.sendall(f)
     got.append(read(stream))
     sock.close()
-    ok = expect(got)
-    failures += 0 if ok else 1
-    print(f"{'ok   ' if ok else 'FAIL '} {('ws ' + desc):<45} {[(op, data[:24]) for op, data in got]}")
+    echoed += sum(1 for f in got if is_echo(f))
+    report('ws ' + desc, expect(got), [(op, data[:24]) for op, data in got])
 
-echo = lambda got: got[-1][0] == 1 and got[-1][1].startswith(b'ECHO ')
-closed = lambda got: got[-1] in ((8, b'\x03\xf0'), ('eof', b''))
+echo = lambda got: is_echo(got[-1])
+closed = lambda got: got[-1] == (8, b'\x03\xf0')
 
 case('user request', [frame(1, user)], echo)
 case('user request on /jmap/ws?basic=x', [frame(1, user)], echo, '/jmap/ws?basic=x')
@@ -179,18 +225,52 @@ case('user split into 1000 fragments', [frame(1, padded[:1], fin=False)] + [fram
 case('fragmented user with ping between', [frame(1, user[:20], fin=False), frame(9, b'p'), None, frame(0, user[20:])],
      lambda got: got[0] == (10, b'p') and echo(got))
 case('70KB user request', [frame(1, request(['Email/set', {'pad': 'a' * 70000}, '0']))], echo)
-case('user then admin on one connection', [frame(1, user), None, frame(1, admin)], lambda got: echo(got[:1]) and closed(got))
+case('user then admin on one connection', [frame(1, user), None, frame(1, admin)], lambda got: is_echo(got[0]) and closed(got))
 case('admin in batch', [frame(1, admin)], closed)
 case('admin on /jmap/ws?basic=x', [frame(1, admin)], closed, '/jmap/ws?basic=x')
 case('admin split across fragments', [frame(1, admin[:60], fin=False), frame(0, admin[60:])], closed)
 case('admin with escaped x\\u003a', [frame(1, admin.replace(b'x:Account', b'x\\u003aAccount'))], closed)
 case('admin in binary frame', [frame(2, admin)], closed)
-case('invalid JSON', [frame(1, b'{"methodCalls":[["x:Account/get"')], closed)
+case('invalid JSON', [frame(1, b'{"methodCalls":[["Core/echo"')], closed)
 case('unmasked frame', [frame(1, user, mask=False)], closed)
 case('RSV1 (compressed) frame', [frame(1, user, rsv=0x40)], closed)
 case('continuation without start', [frame(0, user)], closed)
 case('declared length over 1 MiB', [frame(1, b'', length=1048577)], closed)
 case('1100 empty continuation frames', [frame(1, b'{', fin=False)] + [frame(0, b'', fin=False)] * 1100, closed)
+
+dense = b'{"methodCalls":[["Core/echo",{"a":[' + b','.join([b'[]'] * 349000) + b']},"0"]]}'
+statuses = []
+def post(i):
+    try:
+        s = tls(60)
+        s.sendall(b'POST /jmap?soak=1 HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\n'
+                  b'Authorization: Bearer soak-%d\r\nContent-Length: %d\r\n\r\n' % (i, len(dense)) + dense)
+        statuses.append(s.recv(64).split(b'\r\n')[0].decode() or 'empty')
+    except OSError as e:
+        statuses.append('error ' + type(e).__name__)
+threads = [threading.Thread(target=post, args=(i,)) for i in range(20)]
+[t.start() for t in threads]
+[t.join() for t in threads]
+ok_count = statuses.count('HTTP/1.1 200 OK')
+report('http soak 20 concurrent 1MB dense bodies', ok_count >= 16 and set(statuses) <= {'HTTP/1.1 200 OK', 'HTTP/1.1 429 Too Many Requests'},
+       f'{len(dense)} bytes each: {sorted(set(statuses))}, {ok_count} x 200')
+
+soak = request(['Email/set', {'pad': 'a' * 900000}, '0'])
+sock, stream = connect(timeout=30)
+count = 0
+for _ in range(50):
+    try:
+        sock.sendall(frame(1, soak, key=b'\0\0\0\0'))
+    except OSError:
+        break
+    if not is_echo(read(stream)):
+        break
+    count += 1
+sock.close()
+echoed += count
+report('ws soak 50 x 900KB on one socket', count == 50, f'{count} of 50 echoed')
+
+print('ECHOED', echoed)
 sys.exit(1 if failures else 0)
 EOF
 
@@ -200,7 +280,8 @@ EOF
   -v "$work/mock.conf:/etc/nginx/nginx.conf:ro,Z" -v "$work/ssl:/etc/nginx/ssl:ro,Z" "$image" > /dev/null
 sleep 1
 "$engine" run --rm --network "$name" -v "$work/etc:/etc/nginx:ro,Z" --entrypoint nginx "$image" -t -q
-"$engine" run -d --name "$name-edge" --network "$name" --network-alias edge -v "$work/etc:/etc/nginx:ro,Z" "$image" > /dev/null
+"$engine" run -d --name "$name-edge" --network "$name" --network-alias edge --memory=1g --memory-swap=1g \
+  -v "$work/etc:/etc/nginx:ro,Z" "$image" > /dev/null
 sleep 1
 
 "$engine" exec "$name-edge" sh -c '
@@ -212,21 +293,26 @@ sleep 1
   head -c 53000000 /dev/zero > /tmp/53mb'
 
 failures=0
+pass() { printf 'ok    %-45s %s\n' "$1" "$2"; }
+fail() { printf 'FAIL  %-45s %s\n' "$1" "$2"; failures=$((failures + 1)); }
+
 check() {
   local code=$1 upstream=$2 desc=$3
   shift 3
-  local got out
-  got=$("$engine" exec "$name-edge" curl -sk -o /tmp/out -w '%{http_code}' "$@" https://localhost/ || true)
+  local got size out len
+  read -r got size < <("$engine" exec "$name-edge" curl -sk -o /tmp/out -w '%{http_code} %{size_upload}\n' \
+    -H 'Authorization: Bearer test' -H 'X-Forwarded-For: 6.6.6.6' -H 'Forwarded: for=6.6.6.6' "$@" https://localhost/ || true)
   out=$("$engine" exec "$name-edge" cat /tmp/out)
-  if [[ $got == "$code" && ( -z $upstream || $out == "UPSTREAM $upstream upgrade=[]" ) ]]; then
-    printf 'ok    %-45s %s\n' "$desc" "$got"
+  len=${size%.*}
+  [[ $len == 0 ]] && len=
+  if [[ $got == "$code" && ( -z $upstream || $out == "UPSTREAM $upstream upgrade=[] auth=[Bearer test] len=[$len] xff=[127.0.0.1] fwd=[]" ) ]]; then
+    pass "$desc" "$got"
   else
-    printf 'FAIL  %-45s expected %s %s, got %s %s\n' "$desc" "$code" "$upstream" "$got" "${out:0:120}"
-    failures=$((failures + 1))
+    fail "$desc" "expected $code $upstream, got $got ${out:0:160}"
   fi
 }
 
-json=(-H 'Content-Type: application/json' -H 'Authorization: Bearer test')
+json=(-H 'Content-Type: application/json')
 user='{"using":["urn:ietf:params:jmap:core","urn:ietf:params:jmap:mail"],"methodCalls":[["Mailbox/get",{"accountId":"a"},"0"],["Email/query",{"accountId":"a"},"1"]]}'
 mixed='{"using":["urn:ietf:params:jmap:core","urn:ietf:params:jmap:mail"],"methodCalls":[["Mailbox/get",{"accountId":"a"},"0"],["x:Account/get",{},"1"]]}'
 
@@ -242,7 +328,7 @@ check 403 '' 'admin on POST /jmap#/upload/a' "${json[@]}" --request-target '/jma
 check 403 '' 'admin on POST /jmap//upload/a' "${json[@]}" --request-target /jmap//upload/a -d "$mixed"
 check 403 '' 'admin on POST /jmap//../upload/a' "${json[@]}" --request-target /jmap//../upload/a -d "$mixed"
 check 403 '' 'admin on absolute-form target' "${json[@]}" --request-target https://localhost/jmap -d "$mixed"
-check 403 '' 'escaped x: method name' "${json[@]}" --request-target /jmap -d '{"methodCalls":[["x:Account/get",{},"0"]]}'
+check 403 '' 'escaped x\u003a method name' "${json[@]}" --request-target /jmap -d '{"methodCalls":[["x\u003aAccount/get",{},"0"]]}'
 check 403 '' 'duplicate methodCalls, admin last' "${json[@]}" --request-target /jmap \
   -d '{"methodCalls":[["Core/echo",{},"0"]],"methodCalls":[["x:Account/get",{},"1"]]}'
 check 403 '' 'admin chunked body' "${json[@]}" -H 'Transfer-Encoding: chunked' --request-target /jmap -d "$mixed"
@@ -270,18 +356,46 @@ check 200 'GET /jmap/eventsource/' 'eventsource drops Upgrade header' \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' --request-target /jmap/eventsource/
 check 200 'PROPFIND /dav/cal/u/' 'PROPFIND /dav/cal/u/' -X PROPFIND --request-target /dav/cal/u/
 check 200 'POST /auth/token' 'POST /auth/token' -d grant_type=password --request-target /auth/token
-for path in /admin /api/account /account /metrics/prometheus /.jmap-api /.jmap-ws; do
+check 200 'GET /API/account' 'not a Stalwart route: /API/account' --request-target /API/account
+for path in /admin /api/account /account /metrics/prometheus /.jmap-api /.jmap-ws \
+  /api/../x /api/account/../../x /api/live/delivery/../../../x /api/live/delivery/example.com/../../../../x \
+  /api/schema/../../x /api/discover/a@b.c/../../../x /metrics/prometheus/../../x /admin/../x /admin/index.html/../../x \
+  /account/../x /api/%2e%2e/x /api/%2E%2E/x /api/.%2e/x /metrics/prometheus/%2e%2e/%2e%2e/x '/api/..;/x' \
+  /%61pi/account //api/account /./api/account '/api;/account' /api%2Faccount /x/../api/account; do
   check 404 '' "GET $path" --request-target "$path"
 done
+check 404 '' 'POST /api/auth/../../x' -d x --request-target /api/auth/../../x
+check 404 '' 'POST /api/../jmap' "${json[@]}" -d "$mixed" --request-target /api/../jmap
 
-"$engine" run --rm --network "$name" -v "$work/py:/py:ro,Z" "$python" python -u /py/wsclient.py || failures=$((failures + 1))
+rate() {
+  "$engine" exec "$name-edge" sh -c "seq $1 | xargs -P 8 -I{} curl -sk -o /dev/null -w '%{http_code}\n' \
+    -H 'Content-Type: application/json' -H \"Authorization: Bearer $2\" -d '{\"methodCalls\":[]}' https://localhost/jmap" | sort | uniq -c | tr -s ' \n' ' '
+}
+limited=$(rate 80 'same{}' )
+if [[ $limited != *429* ]]; then pass 'limit_req: 80 requests from 80 credentials' "$limited"; else fail 'limit_req: 80 requests from 80 credentials' "$limited"; fi
+limited=$(rate 80 same)
+if [[ $limited == *429* && $limited == *200* ]]; then pass 'limit_req: 80 requests from one credential' "$limited"; else fail 'limit_req: 80 requests from one credential' "$limited"; fi
+
+client=0
+"$engine" run --rm --network "$name" -v "$work/py:/py:ro,Z" "$python" python -u /py/client.py > "$work/client.log" 2>&1 || client=$?
+grep -v '^ECHOED' "$work/client.log"
+[[ $client -eq 0 ]] || failures=$((failures + 1))
+echoed=$(sed -n 's/^ECHOED //p' "$work/client.log")
 received=$("$engine" logs "$name-wsecho" 2>&1 | grep '^RECEIVED' || true)
-if grep -q 'x:' <<< "$received"; then
-  printf 'FAIL  %-45s %s\n' 'ws upstream received an x: method' "$(grep 'x:' <<< "$received" | head -3 | tr '\n' ' ')"
-  failures=$((failures + 1))
+if grep -q 'x:\|INVALID' <<< "$received"; then
+  fail 'ws upstream received only user messages' "$(grep 'x:\|INVALID' <<< "$received" | head -3 | tr '\n' ' ')"
+elif [[ $(grep -c . <<< "$received") != "$echoed" ]]; then
+  fail 'ws upstream received only user messages' "received $(grep -c . <<< "$received"), echoed ${echoed:-none}"
 else
-  printf 'ok    %-45s %s\n' 'ws upstream never received an x: method' "$(wc -l <<< "$received") messages"
+  pass 'ws upstream received only user messages' "$echoed received"
 fi
+
+blocked=$("$engine" logs "$name-edge" 2>&1 | grep -c 'blocked JMAP WebSocket session' || true)
+if [[ $blocked -ge 12 ]]; then pass 'blocked ws sessions are logged' "$blocked log lines"; else fail 'blocked ws sessions are logged' "$blocked log lines"; fi
+
+oom=$("$engine" exec "$name-edge" sh -c 'grep "^oom_kill " /sys/fs/cgroup/memory.events' | cut -d' ' -f2 || true)
+killed=$("$engine" logs "$name-edge" 2>&1 | grep -c 'exited on signal' || true)
+if [[ $oom == 0 && $killed == 0 ]]; then pass 'edge (--memory=1g) had no OOM kill' "oom_kill=$oom"; else fail 'edge (--memory=1g) had no OOM kill' "oom_kill=${oom:-unknown} workers killed=$killed"; fi
 
 echo "$failures failure(s)"
 [[ $failures -eq 0 ]]

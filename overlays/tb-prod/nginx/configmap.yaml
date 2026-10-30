@@ -19,11 +19,13 @@ data:
 
     user nginx;
     worker_processes auto;
+    worker_rlimit_nofile 8192;
 
     error_log /var/log/nginx/error.log warn;
     pid /run/nginx.pid;
 
     stream {
+      js_engine qjs;
       js_import jmap from /etc/nginx/jmap.js;
 
       log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
@@ -120,15 +122,29 @@ data:
     # Documentation for HTTP server configuration can be found here:
     # https://nginx.org/en/docs/http/configuring_https_servers.html
 
-    events {}
+    events {
+      worker_connections 4096;
+    }
 
     http {
+      js_engine qjs;
       js_import jmap from /etc/nginx/jmap.js;
+      js_set $jmap_client jmap.clientKey;
+
+      limit_conn_zone $binary_remote_addr zone=jmap_ip:10m;
+      limit_conn_zone $jmap_client zone=jmap_client:10m;
+      limit_req_zone $jmap_client zone=jmap_rate:10m rate=20r/s;
 
       map $request_uri $stalwart_route {
         "~^/jmap/ws(?:[/?#]|$)"                ws;
         "~^/jmap(?:/(?:/[^?#]*)?)?(?:[?#]|$)"  api;
+        "~^/(?:account|admin|api|metrics)(?:[/?#]|$)"  blocked;
         default                                "";
+      }
+
+      map $http_upgrade $connection_upgrade {
+        default  upgrade;
+        ""       close;
       }
 
       upstream stalwart-https {
@@ -176,6 +192,9 @@ data:
 
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
+          if ($stalwart_route = blocked) {
+            return 404;
+          }
           if ($stalwart_route = api) {
             rewrite ^ /.jmap-api last;
           }
@@ -184,13 +203,20 @@ data:
           }
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
           proxy_ssl_name mail.thundermail.com;
         }
 
         location = /.jmap-api {
           internal;
+          limit_conn jmap_ip 16;
+          limit_conn jmap_client 4;
+          limit_conn_status 429;
+          limit_req zone=jmap_rate burst=40 nodelay;
+          limit_req_status 429;
           client_max_body_size 1m;
-          client_body_buffer_size 1m;
+          client_body_timeout 10s;
           js_content jmap.filter;
         }
 
@@ -198,15 +224,21 @@ data:
           internal;
           proxy_pass http://127.0.0.1:8090$request_uri;
           proxy_http_version 1.1;
+          proxy_pass_request_body off;
+          proxy_set_header Content-Length "";
           proxy_set_header Upgrade $http_upgrade;
-          proxy_set_header Connection upgrade;
+          proxy_set_header Connection $connection_upgrade;
           proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
           proxy_read_timeout 10m;
         }
 
         location @stalwart {
           proxy_pass https://stalwart-https$request_uri;
           proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
           proxy_ssl_name mail.thundermail.com;
         }
       }
@@ -225,9 +257,16 @@ data:
       }
     }
   jmap.js: |
+    import crypto from 'crypto';
+
     const POLICY_CLOSE = Buffer.from([0x88, 0x82, 0, 0, 0, 0, 0x03, 0xf0]);
     const MAX_MESSAGE = 1048576;
     const MAX_FRAGMENTS = 1024;
+
+    function clientKey(r) {
+      const auth = r.headersIn.Authorization;
+      return r.remoteAddress + (auth ? ' ' + crypto.createHash('sha256').update(auth).digest('base64url') : '');
+    }
 
     function filter(r) {
       if (r.method === 'POST' && !isUserMessage(r.requestText)) {
@@ -256,8 +295,9 @@ data:
       let payload = [];
       let size = 0;
 
-      function block() {
+      function block(reason) {
         blocked = true;
+        s.error(`blocked JMAP WebSocket session from ${s.remoteAddress}: ${reason}`);
         s.send(POLICY_CLOSE);
       }
 
@@ -304,7 +344,7 @@ data:
             : opcode <= 2 && (opcode === 0) === (frames.length > 0) && size + length <= MAX_MESSAGE
               && frames.length < MAX_FRAGMENTS);
           if (!valid) {
-            block();
+            block('frame rule');
             return;
           }
 
@@ -331,7 +371,7 @@ data:
 
           if (first & 0x80) {
             if (!isUserMessage(Buffer.concat(payload).toString())) {
-              block();
+              block('admin method or invalid JSON');
               return;
             }
             frames.forEach((f) => s.send(f));
@@ -343,4 +383,4 @@ data:
       });
     }
 
-    export default { filter, wsFilter };
+    export default { clientKey, filter, wsFilter };

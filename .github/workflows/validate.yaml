@@ -1,7 +1,7 @@
 name: validate
 
 concurrency:
-  group: validate
+  group: validate-${{ github.event_name }}
   cancel-in-progress: true
 
 on:
@@ -10,6 +10,10 @@ on:
       - '**'
       - '!main'
       - '!**stalwart-configs-preview**'
+  pull_request:
+    paths:
+      - 'overlays/*/nginx/**'
+      - '.github/workflows/validate.yaml'
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -19,6 +23,7 @@ permissions:
 
 jobs:
   kustomize-build:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: staging
@@ -35,3 +40,26 @@ jobs:
             kustomize build "$overlay" > /dev/null
           done
           ! grep -rEn '\$\{[A-Z0-9_]+\}' overlays/*/stalwart-configs
+
+  nginx-jmap-filter:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install yq
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          echo "654d2943ca1d3be2024089eb4f270f4070f491a0610481d128509b2834870049  /usr/local/bin/yq" | sha256sum -c -
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Run the JMAP filter test for every overlay that has one
+        env:
+          CONTAINER_ENGINE: docker
+        run: |
+          for test in overlays/*/nginx/test-jmap-filter.sh; do
+            echo "::group::${test}"
+            "${test}"
+            echo "::endgroup::"
+          done
