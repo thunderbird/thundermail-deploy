@@ -33,11 +33,8 @@ http {
     location / {
       return 200 "UPSTREAM $request_method $request_uri upgrade=[$http_upgrade] auth=[$http_authorization] len=[$content_length] xff=[$http_x_forwarded_for] fwd=[$http_forwarded]";
     }
-    location = /jmap {
-      if ($arg_soak) {
-        proxy_pass http://wsecho:8081;
-      }
-      return 200 "UPSTREAM $request_method $request_uri upgrade=[$http_upgrade] auth=[$http_authorization] len=[$content_length] xff=[$http_x_forwarded_for] fwd=[$http_forwarded]";
+    location = /jmap/soak {
+      proxy_pass http://wsecho:8081;
     }
     location = /jmap/ws {
       proxy_pass http://wsecho:8080;
@@ -121,7 +118,7 @@ def slow(conn):
             length = int(value)
     stream.read(length)
     time.sleep(2)
-    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok')
+    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nslow')
     conn.close()
 
 def serve(port, handler):
@@ -243,9 +240,15 @@ statuses = []
 def post(i):
     try:
         s = tls(60)
-        s.sendall(b'POST /jmap?soak=1 HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\n'
+        s.sendall(b'POST /jmap//soak HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\n'
                   b'Authorization: Bearer soak-%d\r\nContent-Length: %d\r\n\r\n' % (i, len(dense)) + dense)
-        statuses.append(s.recv(64).split(b'\r\n')[0].decode() or 'empty')
+        response = b''
+        while chunk := s.recv(65536):
+            response += chunk
+        status = response.split(b'\r\n')[0].decode() or 'empty'
+        if status == 'HTTP/1.1 200 OK' and not response.endswith(b'\r\n\r\nslow'):
+            status += ' without the slow upstream body'
+        statuses.append(status)
     except OSError as e:
         statuses.append('error ' + type(e).__name__)
 threads = [threading.Thread(target=post, args=(i,)) for i in range(20)]
