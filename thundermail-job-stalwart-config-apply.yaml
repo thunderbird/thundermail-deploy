@@ -43,7 +43,7 @@ spec:
           yq -e \
             '(.dnsManagement // "Manual") | test("^(Manual|Automatic)$")' \
             /etc/stalwart-values/values.yaml > /dev/null
-          yq eval-all \
+          yq eval \
             --output-format=json \
             --indent=0 \
             'load("/etc/stalwart-values/values.yaml") as $values
