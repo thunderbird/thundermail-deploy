@@ -320,9 +320,12 @@ Kubernetes copies `STALWART_METRICS_PASSWORD` into the container when the pod st
 
 So whenever you create the Secrets Manager entry for the first time, or rotate its `password`:
 
-    # Pull the new value into the Kubernetes Secret now instead of waiting for the hourly refresh
+    # Pull the new value into the Kubernetes Secret now instead of waiting for the hourly refresh.
+    # SecretSynced alone can be left over from the previous sync, so wait for refreshTime to move.
+    before=$(kubectl -n thundermail get externalsecret stalwart-metrics-scrape -o jsonpath='{.status.refreshTime}')
     kubectl -n thundermail annotate externalsecret stalwart-metrics-scrape force-sync=$(date +%s) --overwrite
-    kubectl -n thundermail get externalsecret stalwart-metrics-scrape   # wait for SecretSynced
+    until [ "$(kubectl -n thundermail get externalsecret stalwart-metrics-scrape -o jsonpath='{.status.refreshTime}')" != "$before" ]; do sleep 2; done
+    kubectl -n thundermail get externalsecret stalwart-metrics-scrape   # STATUS must be SecretSynced
 
     # Roll the stalwart pods so they read the new environment variable
     kubectl -n thundermail rollout restart deploy/stalwart
