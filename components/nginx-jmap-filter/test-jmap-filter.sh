@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-overlay=$(cd "$(dirname "$0")/.." && pwd)
+overlay=${1:?usage: $0 <overlay dir>}
 engine=${CONTAINER_ENGINE:-$(command -v podman || command -v docker)}
 image=${NGINX_IMAGE:-docker.io/library/nginx:1.31}
 python=${PYTHON_IMAGE:-docker.io/library/python:3.13-slim}

@@ -5,6 +5,9 @@ kind: Kustomization
 resources:
   - ../../bases
 
+components:
+  - ../../components/nginx-jmap-filter
+
 namespace: "thundermail"
 
 images:

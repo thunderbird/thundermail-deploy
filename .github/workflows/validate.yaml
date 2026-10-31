@@ -16,6 +16,7 @@ on:
       - 'overlays/*/kustomization.yaml'
       - 'bases/nginx/**'
       - 'bases/kustomization.yaml'
+      - 'components/nginx-jmap-filter/**'
       - '.github/workflows/validate.yaml'
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -61,12 +62,14 @@ jobs:
           echo "654d2943ca1d3be2024089eb4f270f4070f491a0610481d128509b2834870049  /usr/local/bin/yq" | sha256sum -c -
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Run the JMAP filter test for every overlay that has one
+      - name: Run the JMAP filter test for every overlay that uses the component
         env:
           CONTAINER_ENGINE: docker
         run: |
-          for test in overlays/*/nginx/test-jmap-filter.sh; do
-            echo "::group::${test}"
-            "${test}"
+          overlays=$(grep -l 'components/nginx-jmap-filter' overlays/*/kustomization.yaml | xargs -n1 dirname)
+          test -n "${overlays}"
+          for overlay in ${overlays}; do
+            echo "::group::${overlay}"
+            components/nginx-jmap-filter/test-jmap-filter.sh "${overlay}"
             echo "::endgroup::"
           done
