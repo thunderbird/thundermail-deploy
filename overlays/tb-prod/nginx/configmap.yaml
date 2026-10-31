@@ -14,13 +14,20 @@ data:
     # reverse proxy configuration for our purposes.
     #    https://docs.nginx.com/nginx/admin-guide/load-balancer/tcp-udp-load-balancer/
 
+    load_module /usr/lib/nginx/modules/ngx_http_js_module.so;
+    load_module /usr/lib/nginx/modules/ngx_stream_js_module.so;
+
     user nginx;
     worker_processes auto;
+    worker_rlimit_nofile 8192;
 
     error_log /var/log/nginx/error.log warn;
     pid /run/nginx.pid;
 
     stream {
+      js_engine qjs;
+      js_import jmap from /etc/nginx/jmap.js;
+
       log_format json '{"timestamp": "$time_iso8601", "connection": "$connection", "remote_addr": "$remote_addr", '
           '"hostname": "$hostname", "proxy_protocol": {"addr": "$proxy_protocol_addr", "port": "$proxy_protocol_port", '
           '"server_addr": "$proxy_protocol_server_addr", "server_port": "$proxy_protocol_server_port"}, '
@@ -47,6 +54,10 @@ data:
 
       upstream stalwart-managesieve {
         server stalwart-mail:4190;
+      }
+
+      upstream stalwart-https {
+        server stalwart-https:443;
       }
 
       server {
@@ -89,6 +100,16 @@ data:
         proxy_pass stalwart-managesieve;
         access_log /var/log/nginx/access.log json;
       }
+
+      server {
+        listen 127.0.0.1:8090;
+        proxy_connect_timeout 1s;
+        proxy_timeout 10m;
+        proxy_pass stalwart-https;
+        proxy_ssl on;
+        proxy_ssl_name mail.thundermail.com;
+        js_filter jmap.wsFilter;
+      }
     }
 
     # HTTP traffic to Stalwart is always encrypted. We need to decrypt it here so we can determine
@@ -101,9 +122,33 @@ data:
     # Documentation for HTTP server configuration can be found here:
     # https://nginx.org/en/docs/http/configuring_https_servers.html
 
-    events {}
+    events {
+      worker_connections 4096;
+    }
 
     http {
+      js_engine qjs;
+      js_import jmap from /etc/nginx/jmap.js;
+      js_set $jmap_client jmap.clientKey;
+
+      limit_conn_zone $binary_remote_addr zone=jmap_ip:10m;
+      limit_conn_zone $jmap_client zone=jmap_client:10m;
+      limit_req_zone $jmap_client zone=jmap_rate:10m rate=100r/s;
+      limit_req_zone $binary_remote_addr zone=jmap_ip_rate:10m rate=20r/s;
+
+      map $request_uri $stalwart_route {
+        "~^/jmap/ws(?:[/?#]|$)"                ws;
+        "~^/jmap/eventsource(?:[/?#]|$)"       sse;
+        "~^/jmap(?:/(?:/[^?#]*)?)?(?:[?#]|$)"  api;
+        "~^/(?:account|admin|api|metrics)(?:[/?#]|$)"  blocked;
+        default                                "";
+      }
+
+      map $http_upgrade $connection_upgrade {
+        default  upgrade;
+        ""       close;
+      }
+
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
         # internal sources.
@@ -128,6 +173,8 @@ data:
         gzip on;
         gzip_types application/json;
 
+        client_max_body_size 50m;
+
         # Specifically block access to these routes
         location ^~ /account {  # Stalwart's user account settings system, superceded by thunderbird-accounts
           return 404;
@@ -147,8 +194,83 @@ data:
 
         # All other routes are acceptable, and should be proxied to the backend
         location ^~ / {
+          if ($stalwart_route = blocked) {
+            return 404;
+          }
+          if ($stalwart_route = api) {
+            rewrite ^ /.jmap-api last;
+          }
+          if ($stalwart_route = ws) {
+            rewrite ^ /.jmap-ws last;
+          }
+          if ($stalwart_route = sse) {
+            rewrite ^ /.jmap-sse last;
+          }
           proxy_pass https://stalwart-https;
           proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_ssl_name mail.thundermail.com;
+        }
+
+        location = /.jmap-api {
+          internal;
+          limit_conn jmap_ip 16;
+          limit_conn jmap_client 4;
+          limit_conn_status 429;
+          limit_req zone=jmap_rate burst=200 nodelay;
+          limit_req zone=jmap_ip_rate burst=200 nodelay;
+          limit_req_status 429;
+          client_max_body_size 1m;
+          client_body_timeout 10s;
+          js_content jmap.filter;
+          error_page 413 /.jmap-error-413;
+          error_page 429 /.jmap-error-429;
+        }
+
+        location = /.jmap-error-413 {
+          internal;
+          default_type application/problem+json;
+          return 413 '{"type":"urn:ietf:params:jmap:error:limit","status":413,"limit":"maxSizeRequest","detail":"The request is larger than the 1048576 bytes this server accepts."}';
+        }
+
+        location = /.jmap-error-429 {
+          internal;
+          default_type application/problem+json;
+          add_header Retry-After 1 always;
+          return 429 '{"type":"urn:ietf:params:jmap:error:limit","status":429,"limit":"maxConcurrentRequests","detail":"Too many concurrent or rapid requests from this client. Retry shortly."}';
+        }
+
+        location = /.jmap-ws {
+          internal;
+          proxy_pass http://127.0.0.1:8090$request_uri;
+          proxy_http_version 1.1;
+          proxy_pass_request_body off;
+          proxy_set_header Content-Length "";
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_read_timeout 10m;
+        }
+
+        location = /.jmap-sse {
+          internal;
+          proxy_pass https://stalwart-https$request_uri;
+          proxy_buffering off;
+          proxy_read_timeout 1h;
+          proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
+          proxy_ssl_name mail.thundermail.com;
+        }
+
+        location @stalwart {
+          proxy_pass https://stalwart-https$request_uri;
+          proxy_set_header Host mail.thundermail.com;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Forwarded "";
           proxy_ssl_name mail.thundermail.com;
         }
       }
