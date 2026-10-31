@@ -314,6 +314,22 @@ Three things keep the endpoint private:
 - The `VMServiceScrape` in `bases/stalwart-mail/vmservicescrape.yaml` scrapes the in-cluster `stalwart-mgmt` Service (port 8080) with the same credentials, so VictoriaMetrics never goes through the public path.
 - Stalwart disables the endpoint when only one of the username/secret pair is set, so a missing Secret leaves it off rather than open.
 
+### Creating or rotating the credential
+
+Kubernetes copies `STALWART_METRICS_PASSWORD` into the container when the pod starts, and nothing restarts the stalwart pods when the Secret changes later (`ReloadSettings` can't change the process environment either). After the ExternalSecret picks up a new value, VictoriaMetrics sends the new password while Stalwart still holds the old one, or none at all if the pod started before the Secret existed. Scrapes keep failing until the pods restart.
+
+So whenever you create the Secrets Manager entry for the first time, or rotate its `password`:
+
+    # Pull the new value into the Kubernetes Secret now instead of waiting for the hourly refresh
+    kubectl -n thundermail annotate externalsecret stalwart-metrics-scrape force-sync=$(date +%s) --overwrite
+    kubectl -n thundermail get externalsecret stalwart-metrics-scrape   # wait for SecretSynced
+
+    # Roll the stalwart pods so they read the new environment variable
+    kubectl -n thundermail rollout restart deploy/stalwart
+    kubectl -n thundermail rollout status deploy/stalwart
+
+This is an ordinary rolling restart of the mail pods. Expect IMAP/SMTP clients to reconnect, so pick a quiet moment in prod. Scrapes fail between the sync and the end of the roll, then recover on their own.
+
 To check it on a running pod:
 
     kubectl -n thundermail port-forward deploy/stalwart 18080:8080
