@@ -170,6 +170,15 @@ data:
         ""       close;
       }
 
+      # A WebSocket upgrade or EventSource GET has no body. Reject one in the rewrite phase, before
+      # limit_conn counts it, so a client without credentials cannot hold a push slot by never
+      # sending the body it announced.
+      map "$http_content_length:$http_transfer_encoding" $push_has_body {
+        ":"      "";
+        "0:"     "";
+        default  1;
+      }
+
       upstream stalwart-https {
         # The "stalwart-https" server is a Kubernetes Service exposing Stalwart's HTTPS port to
         # internal sources.
@@ -261,8 +270,11 @@ data:
 
         location = /.jmap-ws {
           internal;
+          if ($push_has_body) {
+            return 400;
+          }
           limit_conn jmap_push_ip 32;
-          limit_conn jmap_push_total 256;
+          limit_conn jmap_push_total 128;
           limit_conn_status 429;
           proxy_pass http://127.0.0.1:8090$request_uri;
           proxy_http_version 1.1;
@@ -278,8 +290,11 @@ data:
 
         location = /.jmap-sse {
           internal;
+          if ($push_has_body) {
+            return 400;
+          }
           limit_conn jmap_push_ip 32;
-          limit_conn jmap_push_total 256;
+          limit_conn jmap_push_total 128;
           limit_conn_status 429;
           proxy_pass https://stalwart-https$request_uri;
           proxy_buffering off;

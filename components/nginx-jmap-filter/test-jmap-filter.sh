@@ -22,6 +22,8 @@ yq 'select(.kind == "ConfigMap" and .metadata.name == "nginx-config") | .data["n
 yq 'select(.kind == "ConfigMap" and .metadata.name == "nginx-config") | .data["jmap.js"]' "$work/rendered.yaml" > "$work/etc/jmap.js"
 pp=()
 grep -Eq 'listen +443 +ssl +proxy_protocol' "$work/etc/nginx.conf" && pp=(--haproxy-protocol)
+push_total=$(grep -oP 'limit_conn jmap_push_total \K[0-9]+' "$work/etc/nginx.conf" | sort -u || true)
+[[ $push_total =~ ^[0-9]+$ ]] || { echo "$overlay: expected one jmap_push_total value, got '${push_total}'" >&2; exit 1; }
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=test -keyout "$work/ssl/tls.key" -out "$work/ssl/tls.crt" 2>/dev/null
 for path in $(yq 'select(.kind == "Deployment" and .metadata.name == "nginx") | .spec.template.spec.volumes[].projected.sources[].secret.items[]?.path' "$work/rendered.yaml"); do
   case $path in
@@ -352,22 +354,23 @@ def rate_limits():
     report('429 is JMAP problem JSON with Retry-After', b'Content-Type: application/problem+json' in head and b'Retry-After: 1' in head
            and b'"type":"urn:ietf:params:jmap:error:limit"' in body, head.split(b'\r\n')[0].decode() + ' ' + body[:60].decode())
 
-def push_open(path, credential):
+def push_open(path, credential, extra=''):
     sock = tls(30)
     sock.sendall((f'GET {path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
                   f'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n'
-                  f'Authorization: Bearer {credential}\r\nAccept: text/event-stream\r\n\r\n').encode())
+                  f'Authorization: Bearer {credential}\r\nAccept: text/event-stream\r\n{extra}\r\n').encode())
     head = b''
     while b'\r\n\r\n' not in head and (chunk := sock.recv(4096)):
         head += chunk
     return status(head), sock
 
-def push_caps():
+def park_sessions(n, prefix):
+    """Open n WebSocket sessions at once, each parking an unfinished 1 MiB message; returns (codes, open sockets)."""
     park = frame(1, b'a' * 524288, fin=False, key=b'\0\0\0\0') + frame(0, b'a' * 524288, key=b'\0\0\0\0')[:-1]
     held, codes, lock = [], [], threading.Lock()
     def session(i):
         try:
-            code, sock = push_open('/jmap/ws', f'push-{i}')
+            code, sock = push_open('/jmap/ws', f'{prefix}-{i}')
             if code == 'HTTP/1.1 101 Switching Protocols':
                 sock.sendall(park)
                 with lock:
@@ -378,9 +381,30 @@ def push_caps():
             code = 'error ' + type(e).__name__
         with lock:
             codes.append(code)
-    threads = [threading.Thread(target=session, args=(i,)) for i in range(520)]
+    threads = [threading.Thread(target=session, args=(i,)) for i in range(n)]
     [t.start() for t in threads]
     [t.join() for t in threads]
+    return codes, held
+
+def push_hold(n, hold):
+    """One of several containers (one address each) that together exceed the pod-wide push cap."""
+    codes, held = park_sessions(n, 'hold-' + socket.gethostname())
+    time.sleep(hold)
+    [s.close() for s in held]
+    print('PUSHHOLD', codes.count('HTTP/1.1 101 Switching Protocols'), codes.count('HTTP/1.1 429 Too Many Requests'), len(codes))
+
+def push_bodies():
+    for path in ('/jmap/ws', '/jmap/eventsource'):
+        for extra in ('Content-Length: 10', 'Transfer-Encoding: chunked'):
+            try:
+                code, sock = push_open(path, 'held', extra + '\r\n')
+                sock.close()
+            except OSError as e:
+                code = 'error ' + type(e).__name__
+            report(f'push {path} announcing a body ({extra.split(":")[0]})', code == 'HTTP/1.1 400 Bad Request', code)
+
+def push_caps():
+    codes, held = park_sessions(520, 'push')
     upgraded, limited = codes.count('HTTP/1.1 101 Switching Protocols'), codes.count('HTTP/1.1 429 Too Many Requests')
     report('push cap: 520 ws sessions from one address', upgraded == 32 and limited == 488,
            f'{upgraded} x 101, {limited} x 429 of {len(codes)}')
@@ -420,11 +444,14 @@ def eventsource():
 
 if sys.argv[1:] == ['eventsource']:
     eventsource()
+elif sys.argv[1:2] == ['push-hold']:
+    push_hold(int(sys.argv[2]), float(sys.argv[3]))
 else:
     ws_cases()
     http_soak()
     ws_soak()
     rate_limits()
+    push_bodies()
     push_caps()
     print('ECHOED', echoed)
     print('BLOCKED', blocked)
@@ -575,6 +602,18 @@ grep -v '^ECHOED\|^BLOCKED' "$work/client.log"
 [[ $client -eq 0 ]] || failures=$((failures + 1))
 [[ $("$engine" wait "$name-eventsource") == 0 ]] || failures=$((failures + 1))
 "$engine" logs "$name-eventsource" 2>&1
+
+# One more address x 32 sessions than the pod-wide cap (jmap_push_total) allows: it must stop the rest.
+holders=$((push_total / 32 + 1))
+for i in $(seq "$holders"); do
+  containers+=("$name-hold-$i")
+  "$engine" run -d --name "$name-hold-$i" --network "$name" -e PROXY_PROTOCOL=${#pp[@]} -v "$work/py:/py:ro,z" "$python" python -u /py/client.py push-hold 32 15 > /dev/null &
+done
+wait
+read -r upgraded limited total < <(for i in $(seq "$holders"); do "$engine" wait "$name-hold-$i" > /dev/null; "$engine" logs "$name-hold-$i" 2>&1; done |
+  awk '/^PUSHHOLD/ { u += $2; l += $3; t += $4 } END { print u + 0, l + 0, t + 0 }')
+result "push cap: $((holders * 32)) ws sessions from $holders addresses" "$upgraded x 101, $limited x 429 of $total (cap $push_total)" \
+  test "$upgraded:$limited:$total" = "$push_total:32:$((holders * 32))"
 
 echoed=$(sed -n 's/^ECHOED //p' "$work/client.log")
 received=$("$engine" logs "$name-wsecho" 2>&1 | grep '^RECEIVED' || true)
