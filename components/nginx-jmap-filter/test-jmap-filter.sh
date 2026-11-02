@@ -20,6 +20,8 @@ kubectl kustomize "$overlay" > "$work/rendered.yaml"
 mkdir -p "$work/etc" "$work/ssl" "$work/py"
 yq 'select(.kind == "ConfigMap" and .metadata.name == "nginx-config") | .data["nginx.conf"]' "$work/rendered.yaml" > "$work/etc/nginx.conf"
 yq 'select(.kind == "ConfigMap" and .metadata.name == "nginx-config") | .data["jmap.js"]' "$work/rendered.yaml" > "$work/etc/jmap.js"
+pp=()
+grep -Eq 'listen +443 +ssl +proxy_protocol' "$work/etc/nginx.conf" && pp=(--haproxy-protocol)
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=test -keyout "$work/ssl/tls.key" -out "$work/ssl/tls.crt" 2>/dev/null
 for path in $(yq 'select(.kind == "Deployment" and .metadata.name == "nginx") | .spec.template.spec.volumes[].projected.sources[].secret.items[]?.path' "$work/rendered.yaml"); do
   case $path in
@@ -176,7 +178,7 @@ threading.Event().wait()
 EOF
 
 cat > "$work/py/client.py" <<'EOF'
-import json, socket, ssl, struct, sys, threading, time
+import json, os, socket, ssl, struct, sys, threading, time
 from wsframe import frame, read_frame
 
 ctx = ssl.create_default_context()
@@ -191,7 +193,11 @@ def report(desc, ok, detail):
     print(f"{'ok   ' if ok else 'FAIL '} {desc:<45} {detail}")
 
 def tls(timeout=3):
-    return ctx.wrap_socket(socket.create_connection(('edge', 443), timeout=timeout))
+    sock = socket.create_connection(('edge', 443), timeout=timeout)
+    if os.environ.get('PROXY_PROTOCOL') == '1':
+        src, dst = sock.getsockname(), sock.getpeername()
+        sock.sendall(f'PROXY TCP4 {src[0]} {dst[0]} {src[1]} {dst[1]}\r\n'.encode())
+    return ctx.wrap_socket(sock)
 
 def http_post(path, credential, body, timeout):
     """POST on a fresh connection; returns the raw response, or b'error <exception>'."""
@@ -444,9 +450,9 @@ wait_until "$engine" exec "$name-mock" curl -sk -o /dev/null https://localhost/
 "$engine" run --rm --network "$name" -v "$work/etc:/etc/nginx:ro,z" --entrypoint nginx "$image" -t -q
 "$engine" run -d --name "$name-edge" --network "$name" --network-alias edge --memory=1g --memory-swap=1g \
   -v "$work/etc:/etc/nginx:ro,z" "$image" > /dev/null
-wait_until "$engine" exec "$name-edge" curl -skf -o /dev/null https://localhost/.well-known/jmap
+wait_until "$engine" exec "$name-edge" curl -skf "${pp[@]}" -o /dev/null https://localhost/.well-known/jmap
 wait_until wsecho_ready
-"$engine" run -d --name "$name-eventsource" --network "$name" -v "$work/py:/py:ro,z" "$python" python -u /py/client.py eventsource > /dev/null
+"$engine" run -d --name "$name-eventsource" --network "$name" -e PROXY_PROTOCOL=${#pp[@]} -v "$work/py:/py:ro,z" "$python" python -u /py/client.py eventsource > /dev/null
 
 "$engine" exec "$name-edge" sh -c '
   head -c 900000 /dev/zero | tr "\0" a > /tmp/pad
@@ -469,7 +475,7 @@ check() {
   local code=$1 upstream=$2 desc=$3
   shift 3
   local response got size out len
-  response=$("$engine" exec "$name-edge" curl -sk -w '\n%{http_code} %{size_upload}' \
+  response=$("$engine" exec "$name-edge" curl -sk "${pp[@]}" -w '\n%{http_code} %{size_upload}' \
     -H 'Authorization: Bearer test' -H 'X-Forwarded-For: 6.6.6.6' -H 'Forwarded: for=6.6.6.6' "$@" https://localhost/ || true)
   out=${response%$'\n'*}
   read -r got size <<< "${response##*$'\n'}"
@@ -546,11 +552,11 @@ done
 check 404 '' 'POST /api/auth/../../x' -d x --request-target /api/auth/../../x
 check 404 '' 'POST /api/../jmap' "${json[@]}" -d "$mixed" --request-target /api/../jmap
 
-conn=$("$engine" exec "$name-edge" sh -c "seq 6 | xargs -P 6 -I{} curl -sk -o /dev/null -w '%{http_code}\n' \
+conn=$("$engine" exec "$name-edge" sh -c "seq 6 | xargs -P 6 -I{} curl -sk ${pp[*]} -o /dev/null -w '%{http_code}\n' \
   -H 'Content-Type: application/json' -H 'Authorization: Bearer conn' -d '{\"methodCalls\":[]}' https://localhost/jmap//soak" | sort | uniq -c | tr -s ' \n' ' ')
 result 'limit_conn: 6 slow requests, one credential' "$conn" test "$conn" = ' 4 200 2 429 '
 
-shape=$("$engine" exec "$name-edge" sh -c "curl -sk -D - -H 'Content-Type: application/json' --data-binary @/tmp/huge https://localhost/jmap")
+shape=$("$engine" exec "$name-edge" sh -c "curl -sk ${pp[*]} -D - -H 'Content-Type: application/json' --data-binary @/tmp/huge https://localhost/jmap")
 if [[ $shape == *'HTTP/1.1 413'* && $shape == *'Content-Type: application/problem+json'* && $shape == *'"limit":"maxSizeRequest"'* ]]; then
   pass '413 is JMAP problem JSON' "$(head -1 <<< "$shape" | tr -d '\r')"
 else
@@ -559,12 +565,12 @@ fi
 
 blocked_ws_log_lines() { "$engine" logs "$name-edge" 2>&1 | grep -c 'blocked JMAP WebSocket session' || true; }
 before=$(blocked_ws_log_lines)
-"$engine" exec "$name-edge" curl -sk -m 3 -o /dev/null --request-target /jmap/ws "${json[@]}" -d "$mixed" https://localhost/ || true
+"$engine" exec "$name-edge" curl -sk "${pp[@]}" -m 3 -o /dev/null --request-target /jmap/ws "${json[@]}" -d "$mixed" https://localhost/ || true
 after=$(blocked_ws_log_lines)
 result 'POST body on /jmap/ws is not forwarded' "$((after - before)) blocked sessions logged" test "$after" = "$before"
 
 client=0
-"$engine" run --rm --network "$name" -v "$work/py:/py:ro,z" "$python" python -u /py/client.py > "$work/client.log" 2>&1 || client=$?
+"$engine" run --rm --network "$name" -e PROXY_PROTOCOL=${#pp[@]} -v "$work/py:/py:ro,z" "$python" python -u /py/client.py > "$work/client.log" 2>&1 || client=$?
 grep -v '^ECHOED\|^BLOCKED' "$work/client.log"
 [[ $client -eq 0 ]] || failures=$((failures + 1))
 [[ $("$engine" wait "$name-eventsource") == 0 ]] || failures=$((failures + 1))
