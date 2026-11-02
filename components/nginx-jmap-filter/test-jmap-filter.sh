@@ -386,10 +386,13 @@ def park_sessions(n, prefix):
     [t.join() for t in threads]
     return codes, held
 
-def push_hold(n, hold):
+def push_hold(n):
     """One of several containers (one address each) that together exceed the pod-wide push cap."""
     codes, held = park_sessions(n, 'hold-' + socket.gethostname())
-    time.sleep(hold)
+    open('/sync/' + socket.gethostname(), 'w').close()
+    deadline = time.time() + 120
+    while not os.path.exists('/sync/release') and time.time() < deadline:
+        time.sleep(0.1)
     [s.close() for s in held]
     print('PUSHHOLD', codes.count('HTTP/1.1 101 Switching Protocols'), codes.count('HTTP/1.1 429 Too Many Requests'), len(codes))
 
@@ -445,7 +448,7 @@ def eventsource():
 if sys.argv[1:] == ['eventsource']:
     eventsource()
 elif sys.argv[1:2] == ['push-hold']:
-    push_hold(int(sys.argv[2]), float(sys.argv[3]))
+    push_hold(int(sys.argv[2]))
 else:
     ws_cases()
     http_soak()
@@ -605,11 +608,17 @@ grep -v '^ECHOED\|^BLOCKED' "$work/client.log"
 
 # One more address x 32 sessions than the pod-wide cap (jmap_push_total) allows: it must stop the rest.
 holders=$((push_total / 32 + 1))
+mkdir -p "$work/sync"
 for i in $(seq "$holders"); do
   containers+=("$name-hold-$i")
-  "$engine" run -d --name "$name-hold-$i" --network "$name" -e PROXY_PROTOCOL=${#pp[@]} -v "$work/py:/py:ro,z" "$python" python -u /py/client.py push-hold 32 15 > /dev/null &
+  "$engine" run -d --name "$name-hold-$i" --network "$name" -e PROXY_PROTOCOL=${#pp[@]} -v "$work/py:/py:ro,z" -v "$work/sync:/sync:z" "$python" python -u /py/client.py push-hold 32 > /dev/null &
 done
 wait
+for _ in {1..600}; do
+  [[ $(find "$work/sync" -type f | wc -l) -ge $holders ]] && break
+  sleep 0.1
+done
+touch "$work/sync/release"
 read -r upgraded limited total < <(for i in $(seq "$holders"); do "$engine" wait "$name-hold-$i" > /dev/null; "$engine" logs "$name-hold-$i" 2>&1; done |
   awk '/^PUSHHOLD/ { u += $2; l += $3; t += $4 } END { print u + 0, l + 0, t + 0 }')
 result "push cap: $((holders * 32)) ws sessions from $holders addresses" "$upgraded x 101, $limited x 429 of $total (cap $push_total)" \
