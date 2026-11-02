@@ -18,7 +18,7 @@ data:
     load_module /usr/lib/nginx/modules/ngx_stream_js_module.so;
 
     user nginx;
-    worker_processes auto;
+    worker_processes 2;
     worker_rlimit_nofile 8192;
 
     error_log /var/log/nginx/error.log warn;
@@ -101,6 +101,10 @@ data:
         access_log /var/log/nginx/access.log json;
       }
 
+      # JMAP WebSocket filter. location /.jmap-ws proxies the upgrade here over plain HTTP; this
+      # server re-encrypts to Stalwart, and jmap.wsFilter checks every client message and ends the
+      # session on an x: method. It is a stream server because http proxying cannot see frames
+      # after the upgrade.
       server {
         listen 127.0.0.1:8090;
         proxy_connect_timeout 1s;
@@ -131,11 +135,20 @@ data:
       js_import jmap from /etc/nginx/jmap.js;
       js_set $jmap_client jmap.clientKey;
 
+      # $binary_remote_addr is the TCP peer; there is no real_ip. The Stormbox bridge (the jmap.*
+      # Cloudflare Worker) strips client-IP headers, so its users arrive from shared Cloudflare
+      # egress addresses and share the per-address limits below.
       limit_conn_zone $binary_remote_addr zone=jmap_ip:10m;
       limit_conn_zone $jmap_client zone=jmap_client:10m;
-      limit_req_zone $jmap_client zone=jmap_rate:10m rate=100r/s;
+      limit_conn_zone $binary_remote_addr zone=jmap_push_ip:10m;
+      limit_conn_zone $server_name zone=jmap_push_total:1m;
       limit_req_zone $binary_remote_addr zone=jmap_ip_rate:10m rate=20r/s;
 
+      # Route on the raw request target, because that is what proxy_pass forwards and what
+      # Stalwart routes on: it splits the raw path on "/" and serves the JMAP API when the segment
+      # after "jmap" is empty (/jmap, /jmap/, /jmap//x). Location blocks match the normalized URI,
+      # so /api/../x would otherwise pass "location ^~ /" and still reach Stalwart's /api.
+      # location ^~ / turns these values into a 404 or a rewrite to an internal location.
       map $request_uri $stalwart_route {
         "~^/jmap/ws(?:[/?#]|$)"                ws;
         "~^/jmap/eventsource(?:[/?#]|$)"       sse;
@@ -218,7 +231,6 @@ data:
           limit_conn jmap_ip 16;
           limit_conn jmap_client 4;
           limit_conn_status 429;
-          limit_req zone=jmap_rate burst=200 nodelay;
           limit_req zone=jmap_ip_rate burst=200 nodelay;
           limit_req_status 429;
           client_max_body_size 1m;
@@ -243,6 +255,9 @@ data:
 
         location = /.jmap-ws {
           internal;
+          limit_conn jmap_push_ip 32;
+          limit_conn jmap_push_total 256;
+          limit_conn_status 429;
           proxy_pass http://127.0.0.1:8090$request_uri;
           proxy_http_version 1.1;
           proxy_pass_request_body off;
@@ -257,6 +272,9 @@ data:
 
         location = /.jmap-sse {
           internal;
+          limit_conn jmap_push_ip 32;
+          limit_conn jmap_push_total 256;
+          limit_conn_status 429;
           proxy_pass https://stalwart-https$request_uri;
           proxy_buffering off;
           proxy_read_timeout 1h;

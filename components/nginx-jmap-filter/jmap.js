@@ -1,3 +1,12 @@
+// Loaded by nginx.conf with js_engine qjs:
+//   http   js_set $jmap_client jmap.clientKey; js_content jmap.filter (location = /.jmap-api)
+//   stream js_filter jmap.wsFilter (127.0.0.1:8090, which /.jmap-ws proxies to)
+// How each one fails:
+//   filter     an exception is a 500; invalid JSON or an x: call is a 403.
+//   wsFilter   an exception ends the session; a broken rule sends Close 1008 to Stalwart, which
+//              drops the connection, so the client sees it close (1006).
+//   clientKey  an exception leaves $jmap_client empty, which turns off the per-credential
+//              limit (jmap_client) but not the per-address ones.
 import crypto from 'crypto';
 
 const POLICY_CLOSE = Buffer.from([0x88, 0x82, 0, 0, 0, 0, 0x03, 0xf0]);
