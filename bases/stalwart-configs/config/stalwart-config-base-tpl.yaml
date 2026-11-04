@@ -305,8 +305,8 @@ value:
 '@type': destroy
 object: Tracer
 value:
-  '@type': Log
   path: '/var/log/stalwart'
+  prefix: stalwart.log
 ---
 '@type': upsert
 object: AllowedIp
