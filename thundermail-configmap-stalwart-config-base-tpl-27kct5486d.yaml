@@ -305,6 +305,20 @@ data:
         eventsPolicy: exclude
         '@type': Stdout
     ---
+    # Cannot call a `destroy` on a Tracer using any filter other than the ID.
+    # Instead, we do a `reconcile` to find the Tracer and replace it with an empty
+    # object.
+    '@type': reconcile
+    object: Tracer
+    matchOn:
+      - path
+      - prefix
+    scope:
+      '@type': Log
+      path: /var/log/stalwart
+      prefix: stalwart.log
+    value: {}
+    ---
     '@type': upsert
     object: AllowedIp
     matchOn:
@@ -476,5 +490,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-cf98b5mb9d
+  name: stalwart-config-base-tpl-27kct5486d
   namespace: thundermail
