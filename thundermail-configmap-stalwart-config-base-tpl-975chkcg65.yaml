@@ -308,8 +308,8 @@ data:
     '@type': destroy
     object: Tracer
     value:
-      '@type': Log
       path: '/var/log/stalwart'
+      prefix: stalwart.log
     ---
     '@type': upsert
     object: AllowedIp
@@ -482,5 +482,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-b8tft75k6f
+  name: stalwart-config-base-tpl-975chkcg65
   namespace: thundermail
