@@ -305,6 +305,12 @@ data:
         eventsPolicy: exclude
         '@type': Stdout
     ---
+    '@type': destroy
+    object: Tracer
+    value:
+      '@type': Log
+      path: '/var/log/stalwart'
+    ---
     '@type': upsert
     object: AllowedIp
     matchOn:
@@ -476,5 +482,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-cf98b5mb9d
+  name: stalwart-config-base-tpl-b8tft75k6f
   namespace: thundermail
