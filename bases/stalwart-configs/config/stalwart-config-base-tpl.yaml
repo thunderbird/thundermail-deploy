@@ -302,11 +302,19 @@ value:
     eventsPolicy: exclude
     '@type': Stdout
 ---
-'@type': destroy
+# Cannot call a `destroy` on a Tracer using any filter other than the ID.
+# Instead, we do a `reconcile` to find the Tracer and replace it with an empty
+# object.
+'@type': reconcile
 object: Tracer
-value:
+matchOn:
+  - path
+  - prefix
+scope:
   '@type': Log
-  path: '/var/log/stalwart'
+  path: /var/log/stalwart
+  prefix: stalwart.log
+value: {}
 ---
 '@type': upsert
 object: AllowedIp
