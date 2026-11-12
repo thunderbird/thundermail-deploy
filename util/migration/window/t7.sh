@@ -81,16 +81,23 @@ env_sync() {
 
 two() { [ "$("${KS[@]}" -n "$NS" get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = 2 ]; }
 
+issuer_ok() {
+  local ip out
+  ip=$(doh "$ISSUER_HOST")
+  out=$(curl -s -m 20 -w '\n%{http_code}' --resolve "$ISSUER_HOST:443:${ip:-0.0.0.0}" "https://$ISSUER_HOST/realms/tbpro/.well-known/openid-configuration") || true
+  ISSUER_CODE=$(tail -1 <<<"$out")
+  ISSUER_BODY=$(sed '$d' <<<"$out")
+  ISSUER=$(jq -r '.issuer // empty' <<<"$ISSUER_BODY" 2>/dev/null) || ISSUER=""
+  [ "$ISSUER" = "https://$ISSUER_HOST/realms/tbpro" ]
+}
+
 repoint() {
-  local ip issuer
-  printf '  + wait 120s for sts/keycloak-customer replicas 2, rollout status 600s, issuer check on %s\n' "$ISSUER_HOST"
+  printf '  + wait 120s for sts/keycloak-customer replicas 2, rollout status 600s, issuer check on %s retried for 180s\n' "$ISSUER_HOST"
   [ "$APPLY" = 1 ] || return 0
   until_ok 120 two || { echo "sts/keycloak-customer is not at 2 replicas"; return 1; }
   "${KS[@]}" -n "$NS" rollout status sts/keycloak-customer --timeout=600s || return 1
-  ip=$(doh "$ISSUER_HOST")
-  issuer=$(curl -s -m 20 --resolve "$ISSUER_HOST:443:${ip:-0.0.0.0}" "https://$ISSUER_HOST/realms/tbpro/.well-known/openid-configuration" | jq -r '.issuer // empty')
-  echo "issuer: ${issuer:-none}"
-  [ "$issuer" = "https://$ISSUER_HOST/realms/tbpro" ]
+  until_ok 180 issuer_ok || { printf 'issuer: %s after 180s (last HTTP %s, body starts: %s)\n' "${ISSUER:-none}" "${ISSUER_CODE:-none}" "$(head -c 200 <<<"$ISSUER_BODY" | tr -c '[:print:]' ' ')"; return 1; }
+  echo "issuer: $ISSUER"
 }
 
 if [ "$(gh pr view "$T7_PR" -R "$REPO" --json state -q .state 2>/dev/null)" = MERGED ]; then
