@@ -182,12 +182,16 @@ readback() {
 accounts_check() {
   local out id cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
   printf '  + %s\n' "$(shq "${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd")"
+  printf '  + a failure is PENDING (not a STOP) while %s has no put-accounts-bundle row for this cut\n' "$TIMING_TSV"
   [ "$APPLY" = 1 ] || return 0
   out=$("${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd") || return 1
   VALUE=$(tail -1 <<<"$out")
   id=$(sed '$d' <<<"$out" | jq -r '.primaryAccounts["urn:stalwart:jmap"] // empty' 2>/dev/null || true)
   echo "Accounts -> Stalwart GET /jmap/session: $VALUE urn:stalwart:jmap account ${id:+present}${id:-missing}"
-  [ "$VALUE" = 200 ] && [ -n "$id" ]
+  [ "$VALUE" = 200 ] && [ -n "$id" ] && return 0
+  [ -z "$(after_cut put-accounts-bundle)" ] || return 1
+  printf 'PENDING  the #1539 Accounts bundle write: no put-accounts-bundle row for this cut in %s; write the bundle, record the row, rerun with --apply --go\n' "$TIMING_TSV"
+  NEEDS=$((NEEDS + 1))
 }
 
 prereqs

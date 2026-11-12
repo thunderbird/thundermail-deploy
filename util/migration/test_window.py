@@ -252,6 +252,41 @@ class T7Issuer(Harness):
         self.assertIn('upstream connect error', out)
 
 
+class W5AccountsCheck(Harness):
+    BODY = 'accounts_check; echo "rc=$? needs=$NEEDS"'
+
+    def check(self, code, body, *rows):
+        tsv = ''.join(
+            '%s\t2026-11-12T0%d:00:00Z\t2026-11-12T0%d:00:00Z\t\t\n' % (r, i, i)
+            for i, r in enumerate(rows)
+        )
+        (self.t / 'ev').mkdir(mode=0o700)
+        (self.t / 'ev' / 'timing.tsv').write_text(tsv)
+        rules = [
+            {'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '%s\n%s' % (body, code)}
+        ]
+        return self.fn('w5-promote.sh', self.BODY, rules=rules)
+
+    def test_401_before_the_bundle_write_is_pending(self):
+        out = self.check(401, '{}', 'cut-ecs')
+        self.assertIn('PENDING  the #1539 Accounts bundle write', out)
+        self.assertIn('rc=0 needs=1', out)
+
+    def test_401_after_the_bundle_write_fails(self):
+        out = self.check(401, '{}', 'cut-ecs', 'put-accounts-bundle')
+        self.assertIn('rc=1 needs=0', out)
+        self.assertNotIn('PENDING  the', out)
+
+    def test_bundle_row_from_an_earlier_cut_does_not_count(self):
+        out = self.check(401, '{}', 'put-accounts-bundle', 'cut-ecs')
+        self.assertIn('rc=0 needs=1', out)
+
+    def test_200_passes(self):
+        session = json.dumps({'primaryAccounts': {'urn:stalwart:jmap': 'a'}})
+        out = self.check(200, session, 'cut-ecs')
+        self.assertIn('rc=0 needs=0', out)
+
+
 class Mock:
     def __init__(self, cfg):
         self.cfg, self.lock = cfg, threading.Lock()

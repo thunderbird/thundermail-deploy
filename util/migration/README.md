@@ -165,6 +165,10 @@ the keying for the real hosts.
   un-banned nginx pod IPs, and no nginx pod IP in `BlockedIp`. A rerun after a later stop skips
   the apply once the cut has an `unmigrated-applied` row. Dry-run Stalwart reads need the
   operator's own port-forward.
+- W5 `accounts-stalwart-check` needs the #1539 Accounts bundle write, which happens outside the
+  script. While the cut has no `put-accounts-bundle` row in `$TIMING_TSV`, a failed check prints
+  `PENDING` and W5 exits 2 instead of stopping; write the bundle, record that row, and rerun
+  `--apply --go`. With the row present, a failed check is a STOP.
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
