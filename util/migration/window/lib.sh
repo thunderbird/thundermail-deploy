@@ -237,6 +237,34 @@ port_forward() {
   PF_OK=1
 }
 
+mail_tls() {
+  local st=()
+  case "$1" in 25|587) st=(-starttls smtp) ;; esac
+  timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername mail.stage-thundermail.com -verify_return_error -verify_hostname mail.stage-thundermail.com "${st[@]}" </dev/null >/dev/null 2>&1
+}
+
+restart_stalwart() {
+  local pod pf p bad="" fwd=()
+  run "${KS[@]}" -n thundermail rollout restart deploy/stalwart || return 1
+  run "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s || return 1
+  printf '  + port-forward a Running stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993, then up to 60s per port for TLS verified for mail.stage-thundermail.com (STARTTLS on 25 and 587)\n'
+  [ "$APPLY" = 1 ] || return 0
+  pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart-nginx --field-selector=status.phase=Running -o name | head -1)
+  [ -n "$pod" ] || { echo "no Running stalwart-nginx pod"; return 1; }
+  for p in 25 465 587 993; do fwd+=("$((10000 + p)):$p"); done
+  "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
+  pf=$!
+  for p in 25 465 587 993; do until_ok 60 mail_tls "$p" || bad="$bad $p"; done
+  kill "$pf" 2>/dev/null || true
+  [ -z "$bad" ] || { echo "after the Stalwart restart, no verified TLS through $pod on:$bad"; return 1; }
+  echo "Stalwart restarted; 25 465 587 993 answer through $pod with TLS verified for mail.stage-thundermail.com"
+  [ "$PF_OK" = 1 ] || return 0
+  [ -z "$PF" ] || { kill "$PF" && wait "$PF"; } 2>/dev/null || true
+  PF=""
+  PF_OK=0
+  port_forward
+}
+
 cfg_trees() {
   local p
   for p in $CFG_PATHS; do git -C "$REPO_DIR" rev-parse -q --verify "$1:$p" 2>/dev/null || echo none; done | tr '\n' ' '

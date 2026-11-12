@@ -18,7 +18,7 @@ TOOLS = (
     'mktemp mv openssl paste perl printf rm sed seq setsid sha256sum sort ss stat swaks tail tee '
     'timeout touch tr true false uniq wc xargs'
 ).split()
-FAKES = ('kubectl', 'gh', 'aws', 'stalwart-cli', 'podman', 'rclone')
+FAKES = ('kubectl', 'gh', 'aws', 'git', 'stalwart-cli', 'podman', 'rclone')
 M = 'mail.stage-thundermail.com'
 FAKE = """#!{py}
 import json, os, re, sys, time
@@ -27,13 +27,22 @@ open(os.environ['FAKE_LOG'], 'a').write(name + ' ' + args + '\\n')
 for rule in json.load(open(os.environ['FAKE_RULES'])):
     if rule['tool'] == name and re.search(rule['match'], args):
         time.sleep(rule.get('sleep', 0))
+        if rule.get('serve'):
+            import http.server
+
+            class Ok(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.end_headers()
+
+            http.server.HTTPServer(('127.0.0.1', rule['serve']), Ok).serve_forever()
         sys.stdout.write(rule.get('out', ''))
         sys.exit(rule.get('rc', 0))
 sys.exit(1)
 """
 FAKE_DATE = """#!{bash}
 [ "$*" = "+%s" ] || exec {date} "$@"
-n=$(( $(cat "$FAKE_CLOCK" 2>/dev/null || echo 1800000000) + 30 ))
+n=$(( $(cat "$FAKE_CLOCK" 2>/dev/null || echo 1800000000) + 5 ))
 echo "$n" > "$FAKE_CLOCK"
 echo "$n"
 """
@@ -78,12 +87,15 @@ class Harness(unittest.TestCase):
         (bins / 'date').write_text(
             FAKE_DATE.format(bash=shutil.which('bash'), date=shutil.which('date'))
         )
-        (bins / 'sleep').write_text('#!%s\nexit 0\n' % shutil.which('bash'))
+        (bins / 'sleep').write_text(
+            '#!%s\nexec %s 0.2\n' % (shutil.which('bash'), shutil.which('sleep'))
+        )
         for t in ('date', 'sleep'):
             (bins / t).chmod(0o755)
         ext = r / 'ext'
         ext.write_text(
-            'subjectAltName=DNS:*.stage-thundermail.com,DNS:%s,IP:1.1.1.1,IP:127.0.0.1\n' % M
+            'subjectAltName=DNS:api.cloudflare.com,DNS:*.stage-thundermail.com,DNS:%s,IP:1.1.1.1,IP:127.0.0.1\n'
+            % M
         )
         ec = ['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes']
         for args in (
@@ -153,10 +165,13 @@ class Harness(unittest.TestCase):
         (t / 'rules.json').write_text(json.dumps(list(rules)))
         (t / 'ev').mkdir(exist_ok=True, mode=0o700)
         (t / 'secret').mkdir(exist_ok=True, mode=0o700)
-        pre = '%s link set lo up; %s addr add 1.1.1.1/32 dev lo\n' % (
-            shutil.which('ip'),
-            shutil.which('ip'),
-        )
+        (t / 'hosts').write_text('127.0.0.1 localhost api.cloudflare.com\n')
+        (t / 'nsswitch.conf').write_text('hosts: files\n')
+        ip, mnt = shutil.which('ip'), shutil.which('mount')
+        pre = '%s --bind %s/hosts /etc/hosts || exit 97\n' % (mnt, t)
+        pre += '%s --bind %s/nsswitch.conf /etc/nsswitch.conf || exit 97\n' % (mnt, t)
+        pre += '%s link set lo up || exit 97\n' % ip
+        pre += '%s addr add 1.1.1.1/32 dev lo || exit 97\n' % ip
         if mock is not None:
             cfg = {
                 'cert': str(self.root / 'leaf.pem'),
@@ -179,7 +194,7 @@ class Harness(unittest.TestCase):
             )
         (t / 'driver.sh').write_text(pre + script)
         p = subprocess.run(
-            [shutil.which('unshare'), '-rn', shutil.which('bash'), str(t / 'driver.sh')],
+            [shutil.which('unshare'), '-rnm', shutil.which('bash'), str(t / 'driver.sh')],
             input=stdin,
             capture_output=True,
             text=True,
@@ -287,6 +302,188 @@ class W5AccountsCheck(Harness):
         self.assertIn('rc=0 needs=0', out)
 
 
+class RestartProbe(Harness):
+    UP = {'10025': {'starttls': True}, '10587': {'starttls': True}, '10465': {'implicit': True}}
+    RULES = [
+        {'tool': 'kubectl', 'match': 'rollout (restart|status) deploy/stalwart$|--timeout=600s$'},
+        {
+            'tool': 'kubectl',
+            'match': 'get pod -l app=stalwart-nginx',
+            'out': 'pod/stalwart-nginx-1\n',
+        },
+        {'tool': 'kubectl', 'match': 'port-forward pod/stalwart-nginx-1', 'sleep': 60},
+    ]
+
+    def probe(self, smtp, imap=None, setup='', rules=()):
+        mock = {'smtp': smtp, 'imap': {'10993': {'implicit': True}} if imap is None else imap}
+        return self.fn(
+            'lib.sh',
+            'restart_stalwart; echo "rc=$? pf_ok=$PF_OK"',
+            setup,
+            rules=[*rules, *self.RULES],
+            mock=mock,
+        )
+
+    def test_restart_then_all_four_ports_verified(self):
+        out = self.probe(self.UP)
+        self.assertIn('Stalwart restarted; 25 465 587 993 answer', out)
+        self.assertIn('rc=0', out)
+        log = (self.t / 'fake.log').read_text()
+        self.assertLess(
+            log.index('rollout restart deploy/stalwart'),
+            log.index('rollout status deploy/stalwart'),
+        )
+        self.assertIn(
+            'port-forward pod/stalwart-nginx-1 10025:25 10465:465 10587:587 10993:993', log
+        )
+
+    def test_a_dead_listener_fails_the_step(self):
+        out = self.probe({k: v for k, v in self.UP.items() if k != '10587'}, imap={})
+        self.assertIn('no verified TLS through pod/stalwart-nginx-1 on: 587 993', out)
+        self.assertIn('rc=1', out)
+
+    def test_port_25_without_starttls_fails(self):
+        out = self.probe({**self.UP, '10025': {}})
+        self.assertIn('on: 25', out)
+        self.assertIn('rc=1', out)
+
+    def test_the_stalwart_port_forward_is_reopened(self):
+        rules = [
+            {
+                'tool': 'kubectl',
+                'match': 'get pod -l app=stalwart --field',
+                'out': 'pod/stalwart-new\n',
+            },
+            {
+                'tool': 'kubectl',
+                'match': 'port-forward pod/stalwart-new 18080:8080',
+                'serve': 18080,
+            },
+        ]
+        setup = 'STALWART_URL=http://127.0.0.1:18080 PF_OK=1'
+        out = self.probe(self.UP, setup=setup, rules=rules)
+        self.assertIn('port-forward pod/stalwart-new -> http://127.0.0.1:18080', out)
+        self.assertIn('rc=0 pf_ok=1', out)
+
+
+class DryRun(Harness):
+    ENV = {
+        'KC_LEGACY_PG_USER': 'u',
+        'KC_LEGACY_PG_PASSWORD': 'pw-kc',
+        'KCD_DIR': '/nonexistent',
+        'KUBECONFIG_STAGE': '/dev/null',
+        'KUBECONFIG_HUB': '/dev/null',
+        'T7_PR': '1',
+        'T7_REVERT_PR': '2',
+        'STALWART_URL': 'http://127.0.0.1:18080',
+        'STALWART_USER': 'admin',
+        'STALWART_PASSWORD': 'pw-st',
+        'KARGO_PROJECT_CONFIGS': 'p',
+        'KARGO_STAGE_CONFIGS': 's',
+        'KARGO_WAREHOUSE_CONFIGS': 'w',
+        'STALWART_ADMIN_ACCOUNT_ID': 'a',
+        'TEST_USER': 'user@stage-thundermail.com',
+        'CF_ZONE_ID': 'z',
+        'TARGET_NLB_DNS': 'nlb.example.test',
+        'FLIP_PR': '3',
+        'SPF_FINAL_TXT': 'v=spf1 -all',
+        'TEST_MAILBOX': 'box@example.test',
+        'TEST_SENDER': 'user@stage-thundermail.com',
+        'TEST_SENDER_APP_PASSWORD': 'pw-app',
+        'T6_SHA': 'c1',
+        'INBOUND_FROM': 'w7@sender.example.test',
+        'LEGACY_BLOB_BUCKET': 'l',
+        'TARGET_BLOB_BUCKET': 't',
+    }
+
+    CF = '/client/v4/zones/z'
+    OK = {
+        'code': 200,
+        'body': json.dumps({'success': True, 'result': [], 'result_info': {'total_pages': 1}}),
+    }
+    MOCK = {
+        'https': {
+            '/dns-query?name=nlb.example.test': [doh('127.0.0.1')],
+            '/dns-query': [{'code': 200, 'body': '{}'}],
+            CF: [
+                {
+                    'code': 200,
+                    'body': json.dumps(
+                        {'success': True, 'result': {'name': 'stage-thundermail.com'}}
+                    ),
+                }
+            ],
+            CF + '/dns_records': [OK],
+            CF + '/dns_records/export': [
+                {'code': 200, 'body': 'stage-thundermail.com. 300 IN A 192.0.2.1'}
+            ],
+            CF + '/rulesets': [
+                {'code': 200, 'body': json.dumps({'success': True, 'result': {'rules': []}})}
+            ],
+        }
+    }
+    FREIGHT = {
+        'items': [
+            {
+                'metadata': {'name': 'f1', 'creationTimestamp': '2026-11-01T00:00:00Z'},
+                'origin': {'name': 'w'},
+                'commits': [{'id': 'c1'}],
+            }
+        ]
+    }
+    RULES = [
+        {
+            'tool': 'aws',
+            'match': 'describe-secret',
+            'out': json.dumps({'VersionIdsToStages': {'v1': ['AWSCURRENT']}}),
+        },
+        {'tool': 'aws', 'match': 'get-secret-value', 'out': json.dumps({'SecretString': '{}'})},
+        {'tool': 'gh', 'match': 'pr view .*state,isDraft', 'out': 'OPEN false APPROVED c1\n'},
+        {'tool': 'git', 'match': 'fetch'},
+        {'tool': 'git', 'match': 'rev-parse', 'out': 'tree1\n'},
+        {'tool': 'kubectl', 'match': 'get freight -o json', 'out': json.dumps(FREIGHT)},
+        {'tool': 'kubectl', 'match': 'get stage s', 'out': 'f0'},
+    ]
+
+    def dry(self, script):
+        mig = self.t / 'mig'
+        shutil.copytree(self.MIG, mig, ignore=shutil.ignore_patterns('__pycache__', 'test_*.py'))
+        (mig / 'check-prereqs.sh').write_text('echo "HAVE 1  NEED 0"\n')
+        (self.t / 'secret').mkdir(mode=0o700)
+        (self.t / 'secret' / 'realm-before-1.json').write_text('{}')
+        env = self.t / 'cutover.env'
+        env.write_text(''.join("%s='%s'\n" % kv for kv in self.ENV.items()))
+        env.chmod(0o600)
+        e = self.env(CUTOVER_ENV=str(env), VENV_PY=sys.executable, CF_API_TOKEN_AGENT='cf-token')
+        cmd = 'bash %s/window/%s --dry-run; echo "rc=$?"\n' % (mig, script)
+        return self.netns(cmd, rules=self.RULES, mock=self.MOCK, env=e)
+
+    def test_every_changed_script_dry_runs_to_exit_0(self):
+        for script in (
+            't7.sh',
+            'w5-promote.sh',
+            'w6-verify.sh',
+            'w7.sh',
+            'w7-verify.sh',
+            'test-sender-password.sh',
+        ):
+            with self.subTest(script=script):
+                self.setUp()
+                out = self.dry(script)
+                self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+
+    def test_w5_and_w7_restart_stalwart_after_the_promote(self):
+        for script, before in (
+            ('w5-promote.sh', '== dryrun-settings-promote'),
+            ('w7.sh', 'job/stalwart-config-apply; restart'),
+        ):
+            with self.subTest(script=script):
+                self.setUp()
+                out = self.dry(script)
+                self.assertIn('rollout restart deploy/stalwart', out[out.index(before) :])
+                self.assertIn('stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993', out)
+
+
 class Mock:
     def __init__(self, cfg):
         self.cfg, self.lock = cfg, threading.Lock()
@@ -323,7 +520,7 @@ class Mock:
                 mock.log(port=443, method=self.command, path=self.path)
                 if 'jmap' in mock.cfg and self.path.startswith('/jmap'):
                     return self.reply(*mock.jmap(self))
-                for key in mock.cfg.get('https', {}):
+                for key in sorted(mock.cfg.get('https', {}), key=len, reverse=True):
                     if self.path.startswith(key):
                         r = mock.next(key)
                         return self.reply(r['code'], r['body'], r.get('type', 'application/json'))

@@ -74,8 +74,8 @@ job_started() { [ "$("${KS[@]}" -n thundermail get job stalwart-config-apply -o 
 flip() {
   local sha
   merge_pr "$TMD" "$FLIP_PR" || return 1
-  printf '  + FLIP_SHA from gh pr view FLIP_PR; wait 600s for freight_for FLIP_SHA; append FREIGHT; promote it; wait for job/stalwart-config-apply\n'
-  [ "$APPLY" = 1 ] || return 0
+  printf '  + FLIP_SHA from gh pr view FLIP_PR; wait 600s for freight_for FLIP_SHA; append FREIGHT; promote it; wait for job/stalwart-config-apply; restart Stalwart and probe the mail ports\n'
+  [ "$APPLY" = 1 ] || { restart_stalwart; return; }
   sha=$(gh pr view "$FLIP_PR" -R "$TMD" --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
   [ -n "$sha" ] || { echo "FLIP_PR $FLIP_PR has no merge commit"; return 1; }
   until_ok 600 freight_for "$sha" || { echo "no Freight for the flip commit $sha after 600s: stop, FREIGHT not appended"; return 1; }
@@ -87,7 +87,8 @@ flip() {
   until_ok 120 job_started || { echo "stalwart-config-apply did not start after the promotion"; return 1; }
   "${KS[@]}" -n thundermail wait --for=condition=complete job/stalwart-config-apply --timeout=600s || return 1
   VALUE=$("${KS[@]}" -n thundermail get job stalwart-config-apply -o jsonpath='{.status.succeeded}')
-  [ "$VALUE" = 1 ]
+  [ "$VALUE" = 1 ] || return 1
+  restart_stalwart
 }
 
 cname_live() { [ "$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=mail.$ZONE_NAME&type=CNAME" | jq -r '.Answer[0].data // empty' | sed 's/\.$//')" = "$TARGET_NLB_DNS" ]; }

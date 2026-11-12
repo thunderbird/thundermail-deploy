@@ -39,7 +39,8 @@ snap_settings() {
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>}" \
     "stalwart-cli create action/ReloadSettings" \
     "for ip in \$($(shq "${KS[@]}" -n thundermail get pod -l app=stalwart-nginx --field-selector=status.phase=Running -o 'jsonpath={.items[*].status.podIP}')); do ids=\$(stalwart-cli query BlockedIp --where \"address=\$ip\" --fields id --json | jq -r .id | paste -sd, -); [ -z \"\$ids\" ] || stalwart-cli delete BlockedIp --ids \"\$ids\"; done" \
-    "stalwart-cli create action/ReloadBlockedIps" > "$RESTORE" || return 1
+    "stalwart-cli create action/ReloadBlockedIps" \
+    "$(shq "${KS[@]}" -n thundermail rollout restart deploy/stalwart); $(shq "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s)" > "$RESTORE" || return 1
   mark_restore
 }
 
@@ -202,6 +203,7 @@ if [ "$PHASE" = 1 ]; then
   step freight "" freight
   step quotas "" quotas
   step settings-promote succeeded promote
+  step stalwart-restart "" restart_stalwart
   step unmigrated-dry-run changes unmigrated_dry
   if [ "$APPLY" = 1 ]; then
     mark unmigrated-plan counts "$PLAN"

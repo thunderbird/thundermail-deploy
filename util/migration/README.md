@@ -169,6 +169,14 @@ the keying for the real hosts.
   script. While the cut has no `put-accounts-bundle` row in `$TIMING_TSV`, a failed check prints
   `PENDING` and W5 exits 2 instead of stopping; write the bundle, record that row, and rerun
   `--apply --go`. With the row present, a failed check is a STOP.
+- After every stalwart-configs promote (W5 phase 1 `settings-promote`, W7 step 3) the script
+  restarts Stalwart (`restart_stalwart` in window/lib.sh: `rollout restart deploy/stalwart`, then
+  `rollout status`), because 0.16 does not rebind listeners or reload certificates after the config
+  Job. It then port-forwards a Running `stalwart-nginx` pod (local 10025, 10465, 10587, 10993) and
+  needs TLS verified for `mail.stage-thundermail.com` on 25, 465, 587 and 993 (STARTTLS on 25 and
+  587) within 60 s per port, else the step stops. This works from the operator host without port
+  25 egress. An open Stalwart port-forward is reopened on the new pod. The W5 restore file ends with
+  the same restart.
 - After the W2 revoke the security group has no ingress rules and a restore re-adds them with new
   ids, so rebuild the env file (`build-cutover-env.sh`) before any W2 rerun.
 - W7 runs one GATE step per `--apply --go` (1 SPF edits, 2 merge PR 148, 3 flip and promote,
