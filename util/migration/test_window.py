@@ -520,6 +520,29 @@ class W7Verify(Harness):
         self.assertRegex(out, r'PASS  first-delivery +delivered to the Inbox')
 
 
+class W6Verify(Harness):
+    def test_folders_run_even_when_verify_fails(self):
+        mig = self.t / 'fix'
+        (mig / 'verify').mkdir(parents=True)
+        (mig / 'verify' / 'stage.env').write_text('')
+        (mig / 'verify' / 'expected-warn.txt').write_text('extra on target:\n')
+        (mig / 'verify' / 'run_all.sh').write_text(
+            'echo "  FAIL  emails: source 1, target 0"; exit 1\n'
+        )
+        text = (self.MIG / 'window' / 'w6-verify.sh').read_text().splitlines()
+        main = '\n'.join(text[text.index('prereqs') :])
+        setup = (
+            'MIG_DIR=%s VERIFY_OUT=%s/out EXPECTED_WARN=%s/verify/expected-warn.txt '
+            'UNEXPECTED_WARN=0 SUITE_FAILED=""\n'
+            'prereqs() { :; }; helpers() { :; }; port_forward() { :; }; live() { :; }\n'
+            'folders() { echo "folders ran"; VALUE=3; }' % (mig, self.t, mig)
+        )
+        out = self.fn('w6-verify.sh', main, setup)
+        self.assertIn('folders ran', out)
+        self.assertIn('STOP TEST (apply): verify: run_all exit=1 FAIL=1', out)
+        self.assertLess(out.index('folders ran'), out.index('STOP TEST'))
+
+
 class DryRun(Harness):
     ENV = {
         'KC_LEGACY_PG_USER': 'u',

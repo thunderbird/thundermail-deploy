@@ -4,7 +4,7 @@ checked for size and RFC 5322 header shape. Needs $VERIFY_OUT/source.json from 0
 VERIFY_SKIP_BODIES=1 downloads a random sample (VERIFY_BODY_SAMPLE, default 1% and at least 200) instead of every body."""
 import datetime, json, os, random, re
 from concurrent.futures import ThreadPoolExecutor
-from common import principals, enc, dec, ids_of, get_paged, download, OUT, Report, short
+from common import principals, enc, dec, ids_of, get_paged, download, OUT, GATE_SUBJECT, Report, short
 
 r = Report("03 messages")
 src_acc, _ = principals()
@@ -15,7 +15,7 @@ def account(lid):
     who, aid = src_acc[lid]["name"], enc(lid)
     try:
         ids = ids_of(who, aid, "Email")
-        return lid, get_paged(who, aid, "Email", ids, ["id", "blobId", "size", "receivedAt", "mailboxIds", "threadId"]), None
+        return lid, get_paged(who, aid, "Email", ids, ["id", "blobId", "size", "receivedAt", "mailboxIds", "threadId", "subject"]), None
     except Exception as ex:
         return lid, [], str(ex)[:120]
 
@@ -28,6 +28,10 @@ with ThreadPoolExecutor(4) as ex:
         for e in rows:
             tgt[(lid, dec(e["id"]) & 0xFFFFFFFF)] = e
 r.check(not failed, f"accounts that could not be read: {len(failed)} {failed[:3]}")
+gate = [k for k, e in tgt.items() if k not in src and (e.get("subject") or "").startswith(GATE_SUBJECT)]
+for k in gate:
+    del tgt[k]
+r.ok(f"gate check messages on target only, left out: {len(gate)} (subject {GATE_SUBJECT}*)")
 
 
 def ts(s):
@@ -37,7 +41,7 @@ def ts(s):
 both = set(src) & set(tgt)
 missing, extra = sorted(set(src) - set(tgt)), sorted(set(tgt) - set(src))
 r.check(not missing, f"messages: source {len(src)}, target {len(tgt)}, matched {len(both)}; missing on target {len(missing)} {missing[:5]}")
-r.check(not extra, f"extra on target: {len(extra)} {extra[:5]}", warn_only=True)
+r.check(not extra, f"extra on target: {len(extra)} (received since the snapshot) {extra[:5]}", warn_only=True)
 indexed = [k for k in both if src[k][0] >= 0]
 sz = [k for k in indexed if src[k][0] != tgt[k]["size"]]
 r.check(not sz, f"size mismatches: {len(sz)} of {len(indexed)} indexed {sz[:3]}")
@@ -49,7 +53,7 @@ nt = [k for k, e in tgt.items() if not e.get("threadId")]
 r.check(not nt, f"messages without a thread: {len(nt)}")
 
 HEADER = re.compile(rb"^[!-9;-~]+:", re.M)
-items = list(tgt.items())
+items = [(k, tgt[k]) for k in sorted(both)]
 sampled = os.environ.get("VERIFY_SKIP_BODIES") == "1"
 if sampled:
     n = int(os.environ.get("VERIFY_BODY_SAMPLE", "0")) or max(200, len(items) // 100)
@@ -72,9 +76,9 @@ with ThreadPoolExecutor(4) as ex:
 errs = sum(1 for s, _ in res if s == "error")
 bad = sum(1 for s, _ in res if s == "bad")
 r.check(errs == 0 and bad == 0, f"bodies downloaded{' (random sample)' if sampled else ''}: "
-        f"{sum(1 for s, _ in res if s == 'ok')}/{len(res)} of {len(tgt)} "
+        f"{sum(1 for s, _ in res if s == 'ok')}/{len(res)} of {len(both)} migrated "
         f"(errors {errs}, wrong size or not an email {bad}), {sum(int(n) for s, n in res if s == 'ok')} bytes")
 json.dump({"bodies_checked": "sample" if sampled else "all",
-           "blobs": {f"{a}:{d}": e["blobId"] for (a, d), e in tgt.items()}},
+           "blobs": {f"{a}:{d}": tgt[(a, d)]["blobId"] for a, d in both}},
           open(f"{OUT}/target-message-blobs.json", "w"))
 r.done()

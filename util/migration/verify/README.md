@@ -8,8 +8,8 @@ For tb-stage, `window/w6-verify.sh` sources `stage.env` (variable names from the
 |---|---|
 | `01_source_snapshot.py` | Snapshots the source database: live documents per account and collection, every message's size and received time, event and contact index rows. Later checks compare against this. |
 | `02_directory.py` | Account ids, names, addresses, aliases, catch-all addresses, quota limits, domains, DKIM keys |
-| `03_messages.py` | Every live message matched by account and document id, including messages the 0.15 search index missed. Size and received time compared against the source; every message is in some folder and thread. Downloads every body (or a sample) and checks its size and headers. |
-| `04_collections.py` | Per-account emails, folders, calendars, events, address books, contacts, files, Sieve scripts. Downloads file bodies. Matches event titles and contact emails by UID. |
+| `03_messages.py` | Every live message matched by account and document id, including messages the 0.15 search index missed. Size and received time compared against the source; every message is in some folder and thread. Downloads every migrated body (or a sample) and checks its size and headers. Messages only on the target whose subject starts with `w7-verify-` (gate check mail) are left out; other target-only messages are a WARN. |
+| `04_collections.py` | Per-account emails (gate check mail left out; more emails than the source, with none lost, is a WARN), folders, calendars, events, address books, contacts, files, Sieve scripts. Downloads file bodies. Matches event titles and contact emails by UID. |
 | `05_folders.py` | Standard folders exist; each folder's total and unread counts agree with its messages |
 | `06_buckets.py` | Source and target blob buckets: keys, sizes, objects the target has purged |
 | `07_target_config.py` | Right server (hostname), target bucket and stores, auto-banned internal addresses, blocked/allowed IPs, webhooks, quotas, ban rates, MTA-STS |

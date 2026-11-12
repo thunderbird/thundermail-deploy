@@ -4,12 +4,13 @@ scripts and emails vs the source; file bodies downloaded; event titles and conta
 the source search index. Needs $VERIFY_OUT/source.json from 01."""
 import json, re
 from concurrent.futures import ThreadPoolExecutor
-from common import principals, enc, jmap, ids_of, get_paged, download, OUT, Report, short
+from common import principals, enc, dec, jmap, ids_of, get_paged, download, OUT, GATE_SUBJECT, Report, short
 
 r = Report("04 collections and content")
 src_acc, _ = principals()
 S = json.load(open(f"{OUT}/source.json"))
 src = {int(k): v for k, v in S["accounts"].items()}
+src_msgs = set(S["messages"])
 
 # Identity/get is left out on purpose: on 0.16 it creates missing identities and deletes ones whose address no
 # longer resolves to the account, so reading it changes the target.
@@ -27,6 +28,9 @@ def account(lid):
         out[k] = len(x[1]["list"])
     for k, obj in QUERY.items():
         out[k] = len(ids_of(who, aid, obj))
+    gate = get_paged(who, aid, "Email", ids_of(who, aid, "Email", {"filter": {"subject": GATE_SUBJECT}}), ["id", "subject"])
+    out["emails"] -= sum(1 for e in gate if (e.get("subject") or "").startswith(GATE_SUBJECT)
+                         and f"{lid}:{dec(e['id']) & 0xFFFFFFFF}" not in src_msgs)
     files = get_paged(who, aid, "FileNode", ids_of(who, aid, "FileNode"), ["blobId", "size"]) if out["files"] else []
     out["file_bad"] = 0
     for f in files:
@@ -57,6 +61,8 @@ for k in ("emails", "mailboxes", "events", "contacts", "files", "sieve"):
             r.warn(msg + " (all had none and got the default set)")
         else:
             r.fail(msg + f" {diff[:4]}")
+    elif k == "emails" and diff and all(t_ > s_ for _, s_, t_ in diff):
+        r.warn(f"{k}: source {s}, target {t}; accounts with mail received since the snapshot {len(diff)} {diff[:4]}")
     else:
         r.check(not diff, f"{k}: source {s}, target {t}; differing accounts {len(diff)} {diff[:4]}")
 for k in ("calendars", "addressbooks"):

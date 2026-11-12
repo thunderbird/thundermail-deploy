@@ -7,6 +7,7 @@ MAIL_HOST=mail.stage-thundermail.com
 VERIFY_OUT=$EVIDENCE_DIR/verify-$TS
 EXPECTED_WARN=$MIG_DIR/verify/expected-warn.txt
 UNEXPECTED_WARN=0
+SUITE_FAILED=""
 printf 'n/a: read-only step; %s stays as evidence\n' "$VERIFY_OUT" > "$RESTORE"
 
 suite() {
@@ -21,7 +22,7 @@ suite() {
   printf 'run_all %s PASS=%s WARN=%s (not in expected-warn.txt: %s) FAIL=%s (FAIL lines plus %s crashed checks) (%s)\n' "${out%% *}" "$(grep -c '^  PASS  ' "$f" || true)" "$(grep -c '^  WARN  ' "$f" || true)" "$UNEXPECTED_WARN" "$VALUE" "$(grep -c '^Traceback ' "$f" || true)" "$f"
   echo "counts:"
   grep -E '^  (PASS|WARN)  .*[0-9]' "$f" | sed -E "s/'[^']*'/<x>/g; s/\"[^\"]*\"/<x>/g; s/[^ ]+@[^ ]+/<addr>/g" || true
-  [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ] && [ "$UNEXPECTED_WARN" = 0 ]; }
+  [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ] && [ "$UNEXPECTED_WARN" = 0 ]; } || { SUITE_FAILED="verify: run_all ${out%% *} FAIL=$VALUE unexpected WARN=$UNEXPECTED_WARN ($f)"; echo "$SUITE_FAILED; imap-jmap-folders runs next, then W6 stops"; }
 }
 
 imap_folders() {
@@ -60,4 +61,5 @@ if live verify/stage.env verify/run_all.sh verify/expected-warn.txt; then
   again "$(sn verify)" unexpected_warns "$UNEXPECTED_WARN" || stop "could not write the verify unexpected_warns row"
 fi
 step imap-jmap-folders folders folders
+[ -z "$SUITE_FAILED" ] || stop "$SUITE_FAILED"
 finish

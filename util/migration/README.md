@@ -186,6 +186,7 @@ the keying for the real hosts.
   and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
   edits `spf.` in place to `SPF_FINAL_TXT` with TTL 300 in one upsert (custom domains include it,
   so it is never deleted); the apex and `mail.` SPF TXTs stay as they are (#1535).
+- W6 runs `imap-jmap-folders` even when `verify` fails, then stops with the verify result.
 - `w7-verify.sh` prints one PASS, FAIL or NEED row per check. NEED (for example no port 25
   egress from this host) counts as not passed: it fails the gate like FAIL, and the summary and
   the STOP line read `passed=N not passed=M (FAIL=a NEED=b)`. Run it from a host that reaches
