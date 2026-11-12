@@ -203,8 +203,10 @@ the keying for the real hosts.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
   `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
   start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
-  created in the Accounts UI from stdin, checks a JMAP session and appends
-  `TEST_SENDER_APP_PASSWORD`.
+  created in the Accounts UI from `TEST_SENDER_APP_PASSWORD` in `$OPERATOR_ENV` (default
+  `~/.local/state/talos/cutover-operator.env`, mode 600), else from stdin, never from an argument.
+  It stores the value (appends `TEST_SENDER_APP_PASSWORD`) only after a JMAP session on 443, an
+  IMAP LOGIN on 993 and an SMTP AUTH on 587 all succeed, and names the ports that failed.
 - `cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT]` is dry-run by default; an SPF upsert edits
   the one `v=spf1` TXT at NAME in place, empty content is refused, and it refuses to delete `spf.*`
   or touch `_externaldns.*`.

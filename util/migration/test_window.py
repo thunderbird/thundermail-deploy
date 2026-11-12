@@ -366,6 +366,52 @@ class RestartProbe(Harness):
         self.assertIn('rc=0 pf_ok=1', out)
 
 
+class SenderPassword(Harness):
+    USER = 'user@stage-thundermail.com'
+    SETUP = 'TEST_USER=%s TARGET_NLB_DNS=nlb.example.test M=%s OPERATOR_ENV=%%s/operator.env' % (
+        USER,
+        M,
+    )
+    BODY = 'capture; echo "rc=$?"; cat "$ENV_FILE" 2>/dev/null | grep -c TEST_SENDER_APP_PASSWORD'
+
+    def run_capture(self, pw, imap_pw=None, smtp_pw=None, operator=None, stdin=''):
+        session = {'code': 200, 'body': '{}', 'auth': '%s:%s' % (self.USER, pw)}
+        mock = {
+            'https': {
+                '/dns-query?name=nlb.example.test': [doh('127.0.0.1')],
+                '/jmap/session': [session],
+            },
+            'imap': {'993': {'implicit': True, 'password': imap_pw or pw}},
+            'smtp': {'587': {'starttls': True, 'password': smtp_pw or pw}},
+        }
+        if operator is not None:
+            (self.t / 'operator.env').write_text(
+                "export TEST_SENDER_APP_PASSWORD='%s'\n" % operator
+            )
+            (self.t / 'operator.env').chmod(0o600)
+        return self.fn(
+            'test-sender-password.sh', self.BODY, self.SETUP % self.t, mock=mock, stdin=stdin
+        )
+
+    def test_value_from_the_operator_env_file_is_proven_and_stored(self):
+        out = self.run_capture('app-pw-1', operator='app-pw-1')
+        self.assertIn(
+            'from %s/operator.env: JMAP 443, IMAP LOGIN 993 and SMTP AUTH 587 ok' % self.t, out
+        )
+        self.assertIn('rc=0\n1', out)
+        self.assertIn({'port': 993, 'login': True}, self.mock_log())
+
+    def test_jmap_alone_is_not_enough(self):
+        out = self.run_capture('app-pw-2', imap_pw='other', smtp_pw='other', stdin='app-pw-2\n')
+        self.assertIn('failed on: 993 (IMAP LOGIN) 587 (SMTP AUTH): password not stored', out)
+        self.assertIn('rc=1\n0', out)
+
+    def test_stdin_still_works(self):
+        out = self.run_capture('app-pw-3', stdin='app-pw-3\n')
+        self.assertIn('from stdin: JMAP 443', out)
+        self.assertIn('rc=0\n1', out)
+
+
 class DryRun(Harness):
     ENV = {
         'KC_LEGACY_PG_USER': 'u',
@@ -523,6 +569,12 @@ class Mock:
                 for key in sorted(mock.cfg.get('https', {}), key=len, reverse=True):
                     if self.path.startswith(key):
                         r = mock.next(key)
+                        if (
+                            'auth' in r
+                            and self.headers.get('Authorization')
+                            != 'Basic ' + base64.b64encode(r['auth'].encode()).decode()
+                        ):
+                            return self.reply(401, '{}')
                         return self.reply(r['code'], r['body'], r.get('type', 'application/json'))
                 self.reply(404, 'not found', 'text/plain')
 
