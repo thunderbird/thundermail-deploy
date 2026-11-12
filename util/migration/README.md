@@ -191,7 +191,11 @@ the keying for the real hosts.
   the STOP line read `passed=N not passed=M (FAIL=a NEED=b)`. Run it from a host that reaches
   port 25 on the new NLB. The `smtp-25-starttls` probe needs EHLO on 25 to list STARTTLS and
   the certificate to verify for `mail.stage-thundermail.com`; the inbound sends use `swaks --tls
-  --tls-verify` and fail on a server without STARTTLS.
+  --tls-verify` and fail on a server without STARTTLS. They send from `INBOUND_FROM` (operator env file, carried by
+  `build-cutover-env.sh`), an address the sending host is authorised for; it has no default, and an
+  empty value or `TEST_MAILBOX` stops W7 before any mail is sent. `first-delivery` passes only
+  when the message is in `TEST_USER`'s Inbox and its top `Received` header shows TLS (`with
+  ESMTPS`).
 - W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw,
   cancels its unfinished runs (`accounts-merge-yml` row), and at the end checks `disabled_manually`,
   no unfinished runs and legacy ECS `desiredCount` 0; re-enable it only after the

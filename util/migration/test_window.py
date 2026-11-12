@@ -414,7 +414,8 @@ class SenderPassword(Harness):
 
 class W7Verify(Harness):
     SETUP = (
-        'Z=stage-thundermail.com M=%s NLB_IP=127.0.0.1 FAILS=0 TABLE=%%s/table.txt '
+        'Z=stage-thundermail.com M=%s NLB_IP=127.0.0.1 TARGET_NLB_DNS=nlb.example.test FAILS=0 '
+        'TABLE=%%s/table.txt '
         'SUBJECT=w7-verify-1 TEST_MAILBOX=box@example.test INBOUND_FROM=w7@sender.example.test '
         'TEST_USER=u@stage-thundermail.com\n'
         ': > "$TABLE"' % M
@@ -468,6 +469,55 @@ class W7Verify(Harness):
         self.assertRegex(out, r'PASS  smtp-25-starttls +EHLO on 25 lists STARTTLS; TLS verified')
         self.assertIn('gate passed', out)
         self.assertTrue([r for r in self.mock_log() if r.get('port') == 25 and r['tls']])
+
+    def test_inbound_sends_from_inbound_from(self):
+        self.verify('chk inbound-test-user inbound u@stage-thundermail.com', self.UP)
+        sent = [r for r in self.mock_log() if r.get('port') == 25]
+        self.assertEqual([r['from'] for r in sent], ['w7@sender.example.test'])
+
+    def test_unset_inbound_from_stops_before_any_mail(self):
+        out = self.verify('INBOUND_FROM=""; mail; echo "rc=$?"', self.UP)
+        self.assertIn('NEED  INBOUND_FROM is empty or TEST_MAILBOX', out)
+        self.assertIn('rc=1', out)
+        self.assertEqual([r for r in self.mock_log() if r.get('port') == 25], [])
+
+    def test_no_forged_sender_in_util_migration(self):
+        hits = [
+            str(f.relative_to(self.MIG))
+            for f in self.MIG.rglob('*.sh')
+            if re.search(r'--from "?\$\{?TEST_MAILBOX', f.read_text())
+        ]
+        self.assertEqual(hits, [])
+
+    def delivery(self, box, received):
+        email = {
+            'id': 'm1',
+            'subject': 'w7-verify-1',
+            'mailboxIds': {box: True},
+            'received': received,
+        }
+        jmap = {'auth': 'u@stage-thundermail.com:app-pw', 'inbox': 'inbox1', 'emails': [email]}
+        mock = {'https': {}, 'jmap': jmap}
+        return self.verify('TEST_SENDER_APP_PASSWORD=app-pw; chk first-delivery delivery', mock)
+
+    TLS = ['from w7-check.local (host [192.0.2.7]) by mail (Stalwart SMTP) with ESMTPS id 1; Thu']
+    PLAIN = ['from w7-check.local (host [192.0.2.7]) by mail (Stalwart SMTP) with ESMTP id 1; Thu']
+
+    def test_delivery_to_junk_fails(self):
+        out = self.delivery('junk1', self.TLS)
+        self.assertRegex(
+            out, r'FAIL  first-delivery +inbound test message after 300s: not in the Inbox'
+        )
+
+    def test_delivery_without_tls_fails(self):
+        out = self.delivery('inbox1', self.PLAIN)
+        self.assertRegex(
+            out, r'FAIL  first-delivery +.*in the Inbox, no TLS in its top Received header'
+        )
+
+    def test_delivery_to_the_inbox_over_tls_passes(self):
+        out = self.delivery('inbox1', self.TLS)
+        self.assertRegex(out, r'PASS  first-delivery +delivered to the Inbox')
 
 
 class DryRun(Harness):
@@ -602,6 +652,39 @@ class Mock:
         with self.lock:
             q = self.cfg['https'][key]
             return q.pop(0) if len(q) > 1 else q[0]
+
+    def jmap(self, req):
+        j = self.cfg['jmap']
+        want = 'Basic ' + base64.b64encode(j['auth'].encode()).decode()
+        if req.headers.get('Authorization') != want:
+            return 401, '{}'
+        if req.command == 'GET':
+            api = 'https://%s/jmap' % M
+            return 200, json.dumps(
+                {'primaryAccounts': {'urn:ietf:params:jmap:mail': 'acc'}, 'apiUrl': api}
+            )
+        calls = json.loads(req.rfile.read(int(req.headers['Content-Length'])))['methodCalls']
+        out, last = [], []
+        for name, args, tag in calls:
+            if name == 'Mailbox/query':
+                out.append([name, {'ids': [j['inbox']]}, tag])
+            elif name == 'Email/query':
+                last = [e['id'] for e in j['emails'] if args['filter']['subject'] in e['subject']]
+                out.append([name, {'ids': last}, tag])
+            elif name == 'Email/get':
+                ids = args.get('ids', last)
+                rows = [
+                    {
+                        'id': e['id'],
+                        'subject': e['subject'],
+                        'mailboxIds': e['mailboxIds'],
+                        'header:Received:asText:all': e['received'],
+                    }
+                    for e in j['emails']
+                    if e['id'] in ids
+                ]
+                out.append([name, {'list': rows}, tag])
+        return 200, json.dumps({'methodResponses': out})
 
     def run(self):
         mock = self

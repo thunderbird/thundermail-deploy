@@ -124,27 +124,32 @@ starttls_25() {
 }
 
 inbound() {
-  timeout 60 swaks --helo w7-check.local --to "$1" --from "$TEST_MAILBOX" --server "$NLB_IP:25" --tls --tls-sni "$M" --tls-verify --tls-verify-target "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1 over STARTTLS"; return 0; }
+  timeout 60 swaks --helo w7-check.local --to "$1" --from "$INBOUND_FROM" --server "$NLB_IP:25" --tls --tls-sni "$M" --tls-verify --tls-verify-target "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1 over STARTTLS"; return 0; }
   egress_25 || return 1
   echo "swaks to $1 failed: refused, or no STARTTLS with a certificate verified for $M"; return 1
 }
 
 arrived() {
-  local s api id n
+  local s api id r
   s=$(curl -s -m 20 -K <(curl_user "$TEST_USER" "$TEST_SENDER_APP_PASSWORD") --resolve "$M:443:$NLB_IP" "https://$M/jmap/session") || return 1
   id=$(jq -re '.primaryAccounts["urn:ietf:params:jmap:mail"]' <<<"$s") || return 1
   api=$(jq -r .apiUrl <<<"$s")
-  n=$(curl -s -m 20 -K <(curl_user "$TEST_USER" "$TEST_SENDER_APP_PASSWORD") --resolve "$M:443:$NLB_IP" -H 'Content-Type: application/json' \
-    --data "$(jq -cn --arg id "$id" --arg s "$SUBJECT" '{using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"], methodCalls: [["Email/query", {accountId: $id, filter: {subject: $s}}, "0"]]}')" "$api" |
-    jq -r '.methodResponses[0][1].ids | length')
-  [ "${n:-0}" -gt 0 ]
+  r=$(curl -s -m 20 -K <(curl_user "$TEST_USER" "$TEST_SENDER_APP_PASSWORD") --resolve "$M:443:$NLB_IP" -H 'Content-Type: application/json' \
+    --data "$(jq -cn --arg id "$id" --arg s "$SUBJECT" '{using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"], methodCalls: [["Mailbox/query", {accountId: $id, filter: {role: "inbox"}}, "0"], ["Email/query", {accountId: $id, filter: {subject: $s}}, "1"], ["Email/get", {accountId: $id, "#ids": {resultOf: "1", name: "Email/query", path: "/ids"}, properties: ["subject", "mailboxIds", "header:Received:asText:all"]}, "2"]]}')" "$api") || return 1
+  DELIVERY=$(jq -r --arg s "$SUBJECT" '(.methodResponses[0][1].ids[0] // "") as $inbox | [.methodResponses[2][1].list[]? | select(.subject == $s)] |
+    if length == 0 then "not delivered"
+    elif any(.[]; .mailboxIds[$inbox] == true and ((."header:Received:asText:all"[0] // "") | test("\\bwith (ESMTPSA?|UTF8SMTPSA?)\\b"))) then "ok"
+    elif any(.[]; .mailboxIds[$inbox] == true) then "in the Inbox, no TLS in its top Received header"
+    else "not in the Inbox" end' <<<"$r" 2>/dev/null) || DELIVERY="unreadable JMAP reply"
+  [ "$DELIVERY" = ok ]
 }
 
 delivery() {
   local start; start=$(date -u +%FT%TZ)
-  until_ok 300 arrived || { echo "the inbound test message did not reach $TEST_USER over JMAP in 300s"; return 1; }
+  DELIVERY=""
+  until_ok 300 arrived || { echo "inbound test message after 300s: ${DELIVERY:-no JMAP session for $TEST_USER}"; return 1; }
   row first-external-delivery "$start" "$(date -u +%FT%TZ)" subject "$SUBJECT"
-  echo "delivered to $TEST_USER"
+  echo "delivered to the Inbox of $TEST_USER, top Received header shows TLS"
 }
 
 submission() {
@@ -189,7 +194,12 @@ probes() {
 }
 
 mail() {
-  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (STARTTLS required, certificate verified for mail.stage-thundermail.com, subject %s), JMAP poll 300s, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
+  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 from INBOUND_FROM (STARTTLS required, certificate verified for mail.stage-thundermail.com, subject %s), JMAP poll 300s for it in the Inbox with TLS in its top Received header, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
+  if [ -z "${INBOUND_FROM:-}" ] || [ "$INBOUND_FROM" = "$TEST_MAILBOX" ]; then
+    printf 'NEED  INBOUND_FROM is empty or TEST_MAILBOX in %s: set it to an address the sending host is authorised for (SPF or DKIM), never TEST_MAILBOX or a production address\n' "$ENV_FILE"
+    [ "$APPLY" = 1 ] && return 1
+    NEEDS=$((NEEDS + 1))
+  fi
   [ "$APPLY" = 1 ] || return 0
   chk inbound-test-user inbound "$TEST_USER"
   chk inbound-postmaster inbound "postmaster@$Z"
