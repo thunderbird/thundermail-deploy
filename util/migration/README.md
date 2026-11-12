@@ -172,7 +172,8 @@ the keying for the real hosts.
 - After every stalwart-configs promote (W5 phase 1 `settings-promote`, W7 step 3) the script
   restarts Stalwart (`restart_stalwart` in window/lib.sh: `rollout restart deploy/stalwart`, then
   `rollout status`), because 0.16 does not rebind listeners or reload certificates after the config
-  Job. It then port-forwards a Running `stalwart-nginx` pod (local 10025, 10465, 10587, 10993) and
+  Job. It then port-forwards a Running `stalwart-nginx` pod (local 10025, 10465, 10587, 10993; it
+  refuses to start when one is already in use and waits until kubectl owns all four) and
   needs TLS verified for `mail.stage-thundermail.com` on 25, 465, 587 and 993 (STARTTLS on 25 and
   587) within 60 s per port, else the step stops. This works from the operator host without port
   25 egress. An open Stalwart port-forward is reopened on the new pod. The W5 restore file ends with

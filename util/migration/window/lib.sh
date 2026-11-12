@@ -243,6 +243,8 @@ mail_tls() {
   timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername mail.stage-thundermail.com -verify_return_error -verify_hostname mail.stage-thundermail.com "${st[@]}" </dev/null >/dev/null 2>&1
 }
 
+mail_forwarded() { local p; for p in 25 465 587 993; do owned_by $((10000 + p)) kubectl || return 1; done; }
+
 restart_stalwart() {
   local pod pf p bad="" fwd=()
   run "${KS[@]}" -n thundermail rollout restart deploy/stalwart || return 1
@@ -251,9 +253,13 @@ restart_stalwart() {
   [ "$APPLY" = 1 ] || return 0
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart-nginx --field-selector=status.phase=Running -o name | head -1)
   [ -n "$pod" ] || { echo "no Running stalwart-nginx pod"; return 1; }
-  for p in 25 465 587 993; do fwd+=("$((10000 + p)):$p"); done
+  for p in 25 465 587 993; do
+    [ -z "$(listener $((10000 + p)))" ] || { echo "local port $((10000 + p)) is already in use: stop that listener, then rerun"; return 1; }
+    fwd+=("$((10000 + p)):$p")
+  done
   "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
   pf=$!
+  until_ok 30 mail_forwarded || { kill "$pf" 2>/dev/null || true; echo "port-forward to $pod did not open 10025 10465 10587 10993"; return 1; }
   for p in 25 465 587 993; do until_ok 60 mail_tls "$p" || bad="$bad $p"; done
   kill "$pf" 2>/dev/null || true
   [ -z "$bad" ] || { echo "after the Stalwart restart, no verified TLS through $pod on:$bad"; return 1; }

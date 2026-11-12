@@ -27,6 +27,29 @@ open(os.environ['FAKE_LOG'], 'a').write(name + ' ' + args + '\\n')
 for rule in json.load(open(os.environ['FAKE_RULES'])):
     if rule['tool'] == name and re.search(rule['match'], args):
         time.sleep(rule.get('sleep', 0))
+        if rule.get('forward'):
+            import socket, threading
+
+            def pipe(a, b):
+                while data := a.recv(65536):
+                    b.sendall(data)
+                b.shutdown(socket.SHUT_WR)
+
+            def relay(srv, port):
+                while True:
+                    c, _ = srv.accept()
+                    try:
+                        u = socket.create_connection(('127.0.0.1', port))
+                    except OSError:
+                        c.close()
+                        continue
+                    for x, y in ((c, u), (u, c)):
+                        threading.Thread(target=pipe, args=(x, y), daemon=True).start()
+
+            for pair in re.findall(r'(\\d+):(\\d+)', args):
+                srv = socket.create_server(('127.0.0.1', int(pair[0])))
+                threading.Thread(target=relay, args=(srv, int(pair[1])), daemon=True).start()
+            time.sleep(120)
         if rule.get('serve'):
             import http.server
 
@@ -303,7 +326,7 @@ class W5AccountsCheck(Harness):
 
 
 class RestartProbe(Harness):
-    UP = {'10025': {'starttls': True}, '10587': {'starttls': True}, '10465': {'implicit': True}}
+    UP = {'25': {'starttls': True}, '587': {'starttls': True}, '465': {'implicit': True}}
     RULES = [
         {'tool': 'kubectl', 'match': 'rollout (restart|status) deploy/stalwart$|--timeout=600s$'},
         {
@@ -311,11 +334,11 @@ class RestartProbe(Harness):
             'match': 'get pod -l app=stalwart-nginx',
             'out': 'pod/stalwart-nginx-1\n',
         },
-        {'tool': 'kubectl', 'match': 'port-forward pod/stalwart-nginx-1', 'sleep': 60},
+        {'tool': 'kubectl', 'match': 'port-forward pod/stalwart-nginx-1', 'forward': True},
     ]
 
     def probe(self, smtp, imap=None, setup='', rules=()):
-        mock = {'smtp': smtp, 'imap': {'10993': {'implicit': True}} if imap is None else imap}
+        mock = {'smtp': smtp, 'imap': {'993': {'implicit': True}} if imap is None else imap}
         return self.fn(
             'lib.sh',
             'restart_stalwart; echo "rc=$? pf_ok=$PF_OK"',
@@ -338,13 +361,27 @@ class RestartProbe(Harness):
         )
 
     def test_a_dead_listener_fails_the_step(self):
-        out = self.probe({k: v for k, v in self.UP.items() if k != '10587'}, imap={})
+        out = self.probe({k: v for k, v in self.UP.items() if k != '587'}, imap={})
         self.assertIn('no verified TLS through pod/stalwart-nginx-1 on: 587 993', out)
         self.assertIn('rc=1', out)
 
     def test_port_25_without_starttls_fails(self):
-        out = self.probe({**self.UP, '10025': {}})
+        out = self.probe({**self.UP, '25': {}})
         self.assertIn('on: 25', out)
+        self.assertIn('rc=1', out)
+
+    def test_a_leftover_listener_on_a_local_port_is_refused(self):
+        out = self.probe({**self.UP, '10465': {'implicit': True}})
+        self.assertIn('local port 10465 is already in use', out)
+        self.assertIn('rc=1', out)
+        self.assertNotIn('port-forward pod/stalwart-nginx-1', (self.t / 'fake.log').read_text())
+
+    def test_a_port_forward_that_never_opens_fails(self):
+        rules = [{'tool': 'kubectl', 'match': 'port-forward pod/stalwart-nginx-1', 'sleep': 60}]
+        out = self.probe(self.UP, rules=rules)
+        self.assertIn(
+            'port-forward to pod/stalwart-nginx-1 did not open 10025 10465 10587 10993', out
+        )
         self.assertIn('rc=1', out)
 
     def test_the_stalwart_port_forward_is_reopened(self):
