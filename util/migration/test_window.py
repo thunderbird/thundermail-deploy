@@ -431,6 +431,44 @@ class W7Verify(Harness):
         self.assertIn('STOP TEST (apply): passed=0 not passed=1 (FAIL=0 NEED=1)', out)
         self.assertNotIn('gate passed', out)
 
+    UP = {
+        'smtp': {'25': {'starttls': True}, '587': {'starttls': True}, '465': {'implicit': True}},
+        'imap': {'993': {'implicit': True}},
+        'https': {
+            '/dns-query?name=nlb.example.test': [doh('127.0.0.1')],
+            '/.well-known/mta-sts.txt': [{'code': 200, 'body': 'version: STSv1\nmode: testing\n'}],
+        },
+    }
+
+    def no_starttls_on_25(self):
+        return {**self.UP, 'smtp': {**self.UP['smtp'], '25': {}}}
+
+    def test_probes_fail_against_a_port_25_listener_without_starttls(self):
+        out = self.verify(
+            'TARGET_NLB_DNS=nlb.example.test; probes; gate; echo "gate passed"',
+            self.no_starttls_on_25(),
+        )
+        self.assertRegex(
+            out, r'FAIL  smtp-25-starttls +EHLO on 127.0.0.1:25 does not list STARTTLS'
+        )
+        self.assertIn('STOP TEST (apply): passed=4 not passed=1 (FAIL=1 NEED=0)', out)
+        self.assertNotIn('gate passed', out)
+
+    def test_inbound_refuses_a_server_without_starttls(self):
+        out = self.verify(
+            'chk inbound-test-user inbound u@stage-thundermail.com', self.no_starttls_on_25()
+        )
+        self.assertRegex(out, r'FAIL  inbound-test-user +swaks to u@stage-thundermail.com failed')
+        self.assertEqual([r for r in self.mock_log() if r.get('port') == 25], [])
+
+    def test_starttls_on_25_with_a_verified_certificate_passes(self):
+        body = 'TARGET_NLB_DNS=nlb.example.test; probes; chk inbound-test-user inbound '
+        body += 'u@stage-thundermail.com'
+        out = self.verify(body + '; gate; echo "gate passed"', self.UP)
+        self.assertRegex(out, r'PASS  smtp-25-starttls +EHLO on 25 lists STARTTLS; TLS verified')
+        self.assertIn('gate passed', out)
+        self.assertTrue([r for r in self.mock_log() if r.get('port') == 25 and r['tls']])
+
 
 class DryRun(Harness):
     ENV = {

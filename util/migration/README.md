@@ -189,7 +189,9 @@ the keying for the real hosts.
 - `w7-verify.sh` prints one PASS, FAIL or NEED row per check. NEED (for example no port 25
   egress from this host) counts as not passed: it fails the gate like FAIL, and the summary and
   the STOP line read `passed=N not passed=M (FAIL=a NEED=b)`. Run it from a host that reaches
-  port 25 on the new NLB.
+  port 25 on the new NLB. The `smtp-25-starttls` probe needs EHLO on 25 to list STARTTLS and
+  the certificate to verify for `mail.stage-thundermail.com`; the inbound sends use `swaks --tls
+  --tls-verify` and fail on a server without STARTTLS.
 - W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw,
   cancels its unfinished runs (`accounts-merge-yml` row), and at the end checks `disabled_manually`,
   no unfinished runs and legacy ECS `desiredCount` 0; re-enable it only after the

@@ -107,10 +107,26 @@ tls() {
   timeout 15 openssl s_client -connect "$NLB_IP:$1" -servername "$M" -verify_return_error -verify_hostname "$M" "${st[@]}" </dev/null >/dev/null 2>&1 || { echo "TLS on $NLB_IP:$1 failed"; return 1; }; echo "TLS $1 verified for $M"; }
 mta_sts() { curl -s -m 15 --resolve "mta-sts.$Z:443:$NLB_IP" "https://mta-sts.$Z/.well-known/mta-sts.txt" | grep -q '^mode: testing' || { echo "policy is not mode: testing"; return 1; }; echo "mode: testing from the new NLB"; }
 
+egress_25() { timeout 10 bash -c "exec 3<>/dev/tcp/$NLB_IP/25" 2>/dev/null || { echo "NEED port 25 egress from this host: rerun from a host that reaches $NLB_IP:25"; return 1; }; }
+
+starttls_25() {
+  local l got=""
+  egress_25 || return 1
+  exec 3<>"/dev/tcp/$NLB_IP/25" || return 1
+  while read -r -t 15 l <&3 && [ "${l:3:1}" = - ]; do :; done
+  printf 'EHLO w7-check.local\r\n' >&3
+  while read -r -t 15 l <&3; do l=${l%$'\r'}; got="$got$l"$'\n'; [ "${l:3:1}" = - ] || break; done
+  printf 'QUIT\r\n' >&3
+  exec 3>&-
+  grep -qix '250[- ]STARTTLS' <<<"$got" || { echo "EHLO on $NLB_IP:25 does not list STARTTLS: $(paste -sd' ' <<<"$got" | cut -c1-60)"; return 1; }
+  tls 25 smtp >/dev/null || { echo "STARTTLS on $NLB_IP:25 offered, but TLS not verified for $M"; return 1; }
+  echo "EHLO on 25 lists STARTTLS; TLS verified for $M"
+}
+
 inbound() {
-  timeout 60 swaks --helo w7-check.local --to "$1" --from "$TEST_MAILBOX" --server "$NLB_IP:25" --tls-optional-strict --tls-sni "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1"; return 0; }
-  timeout 10 bash -c "exec 3<>/dev/tcp/$NLB_IP/25" 2>/dev/null || { echo "NEED port 25 egress from this host: rerun from a host that reaches $NLB_IP:25"; return 1; }
-  echo "swaks to $1 was refused"; return 1
+  timeout 60 swaks --helo w7-check.local --to "$1" --from "$TEST_MAILBOX" --server "$NLB_IP:25" --tls --tls-sni "$M" --tls-verify --tls-verify-target "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1 over STARTTLS"; return 0; }
+  egress_25 || return 1
+  echo "swaks to $1 failed: refused, or no STARTTLS with a certificate verified for $M"; return 1
 }
 
 arrived() {
@@ -167,12 +183,13 @@ probes() {
   chk imaps tls 993
   chk smtps tls 465
   chk submission-starttls tls 587 smtp
+  chk smtp-25-starttls starttls_25
   chk mta-sts-policy mta_sts
   VALUE=$FAILS
 }
 
 mail() {
-  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (STARTTLS if offered, subject %s), JMAP poll 300s, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
+  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 (STARTTLS required, certificate verified for mail.stage-thundermail.com, subject %s), JMAP poll 300s, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
   [ "$APPLY" = 1 ] || return 0
   chk inbound-test-user inbound "$TEST_USER"
   chk inbound-postmaster inbound "postmaster@$Z"
