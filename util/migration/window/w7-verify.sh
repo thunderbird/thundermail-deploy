@@ -29,10 +29,14 @@ chain() {
 }
 
 chk() {
-  local name=$1 out; shift
-  if out=$("$@" 2>&1); then printf 'PASS  %-26s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-100)" | tee -a "$TABLE"
-  else FAILS=$((FAILS + 1)); printf 'FAIL  %-26s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-100)" | tee -a "$TABLE"; fi
+  local name=$1 out s=PASS; shift
+  if ! out=$("$@" 2>&1); then
+    FAILS=$((FAILS + 1))
+    case $(tail -1 <<<"$out") in NEED*) s=NEED ;; *) s=FAIL ;; esac
+  fi
+  printf '%s  %-26s %s\n' "$s" "$name" "$(tail -1 <<<"$out" | cut -c1-100)" | tee -a "$TABLE"
 }
+tally() { printf 'passed=%s not passed=%s (FAIL=%s NEED=%s)' "$(grep -c '^PASS' "$TABLE" || true)" "$FAILS" "$(grep -c '^FAIL' "$TABLE" || true)" "$(grep -c '^NEED' "$TABLE" || true)"; }
 
 has() { local got; got=$(dq "$1" "$2"); grep -qiF -- "$3" <<<"$got" || { echo "$1 $2: ${got:-none}"; return 1; }; echo "$1 $2 has $3"; }
 cname_to() { local got; got=$(dq "$1" CNAME | sed 's/\.$//'); [ "$got" = "$2" ] || { echo "$1 CNAME ${got:-none}"; return 1; }; echo "$1 -> $2"; }
@@ -105,7 +109,7 @@ mta_sts() { curl -s -m 15 --resolve "mta-sts.$Z:443:$NLB_IP" "https://mta-sts.$Z
 
 inbound() {
   timeout 60 swaks --helo w7-check.local --to "$1" --from "$TEST_MAILBOX" --server "$NLB_IP:25" --tls-optional-strict --tls-sni "$M" --header "Subject: $SUBJECT" >/dev/null 2>&1 && { echo "250 for $1"; return 0; }
-  timeout 10 bash -c "exec 3<>/dev/tcp/$NLB_IP/25" 2>/dev/null || { echo "NEED port 25 egress from this host: send to $1 from the TEST_MAILBOX provider"; return 0; }
+  timeout 10 bash -c "exec 3<>/dev/tcp/$NLB_IP/25" 2>/dev/null || { echo "NEED port 25 egress from this host: rerun from a host that reaches $NLB_IP:25"; return 1; }
   echo "swaks to $1 was refused"; return 1
 }
 
@@ -174,11 +178,10 @@ mail() {
   chk inbound-postmaster inbound "postmaster@$Z"
   chk first-delivery delivery
   chk submission submission
-  NEEDS=$((NEEDS + $(grep -c 'NEED port 25' "$TABLE" || true)))
   VALUE=$FAILS
 }
 
-gate() { [ "$APPLY" = 0 ] || [ "$FAILS" = 0 ] || stop "$FAILS check(s) failed; table $TABLE"; }
+gate() { [ "$APPLY" = 0 ] || [ "$FAILS" = 0 ] || stop "$(tally); table $TABLE"; }
 
 prereqs
 [ "$APPLY" = 0 ] || helpers swaks
@@ -188,5 +191,5 @@ step w7-probes fails probes
 gate
 step w7-mail fails mail
 gate
-printf 'table: %s (fails=%s)\n' "$TABLE" "$FAILS"
+printf 'table: %s %s\n' "$TABLE" "$(tally)"
 finish

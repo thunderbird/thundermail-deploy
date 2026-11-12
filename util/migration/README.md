@@ -186,6 +186,10 @@ the keying for the real hosts.
   and `w7-verify.sh`); it records `FREIGHT_MANUAL` for the rollback promotion and
   edits `spf.` in place to `SPF_FINAL_TXT` with TTL 300 in one upsert (custom domains include it,
   so it is never deleted); the apex and `mail.` SPF TXTs stay as they are (#1535).
+- `w7-verify.sh` prints one PASS, FAIL or NEED row per check. NEED (for example no port 25
+  egress from this host) counts as not passed: it fails the gate like FAIL, and the summary and
+  the STOP line read `passed=N not passed=M (FAIL=a NEED=b)`. Run it from a host that reaches
+  port 25 on the new NLB.
 - W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw,
   cancels its unfinished runs (`accounts-merge-yml` row), and at the end checks `disabled_manually`,
   no unfinished runs and legacy ECS `desiredCount` 0; re-enable it only after the

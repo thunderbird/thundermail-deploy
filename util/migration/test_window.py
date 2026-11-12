@@ -412,6 +412,26 @@ class SenderPassword(Harness):
         self.assertIn('rc=0\n1', out)
 
 
+class W7Verify(Harness):
+    SETUP = (
+        'Z=stage-thundermail.com M=%s NLB_IP=127.0.0.1 FAILS=0 TABLE=%%s/table.txt '
+        'SUBJECT=w7-verify-1 TEST_MAILBOX=box@example.test INBOUND_FROM=w7@sender.example.test '
+        'TEST_USER=u@stage-thundermail.com\n'
+        ': > "$TABLE"' % M
+    )
+
+    def verify(self, body, mock=None):
+        return self.fn('w7-verify.sh', body, self.SETUP % self.t, mock=mock)
+
+    def test_no_port_25_egress_fails_the_gate(self):
+        out = self.verify(
+            'chk inbound-test-user inbound u@stage-thundermail.com; gate; echo "gate passed"'
+        )
+        self.assertRegex(out, r'NEED  inbound-test-user +NEED port 25 egress')
+        self.assertIn('STOP TEST (apply): passed=0 not passed=1 (FAIL=0 NEED=1)', out)
+        self.assertNotIn('gate passed', out)
+
+
 class DryRun(Harness):
     ENV = {
         'KC_LEGACY_PG_USER': 'u',
