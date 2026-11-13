@@ -42,7 +42,7 @@ MAIL_PF=""
 exec > >(exec setsid tee -a "$LOG") 2>&1
 trap 'stop "command failed at line $LINENO"' ERR
 trap 'stop "interrupted by signal"' INT TERM HUP
-trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null; [ -z "$MAIL_PF" ] || kill "$MAIL_PF" 2>/dev/null || true' EXIT
+trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null || true; [ -z "$MAIL_PF" ] || kill "$MAIL_PF" 2>/dev/null || true' EXIT
 
 sn() { if [ "$APPLY" = 1 ]; then printf '%s' "$1"; else printf 'dryrun-%s' "$1"; fi; }
 row() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(printf '%s' "$5" | tr '\t\n\r' '   ')" >> "$TIMING_TSV"; }

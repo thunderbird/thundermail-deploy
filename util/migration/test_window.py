@@ -573,12 +573,13 @@ class RestartProbe(Harness):
         )
         sleep = shutil.which('sleep')
         body = (
-            '( %s\n trap "exit 1" INT TERM HUP\n restart_stalwart ) &\n'
+            '( set -e\n %s 0 & PF=$!; wait $PF\n %s\n'
+            ' trap "exit 1" INT TERM HUP\n restart_stalwart ) &\n'
             'sub=$!\n'
             'until [ -n "$(listener 10025)" ]; do %s 0.1; done\n'
             'kill -TERM $sub; wait $sub\n'
             '%s 1\n'
-            'echo "left=[$(listener 10025)]"' % (trap, sleep, sleep)
+            'echo "left=[$(listener 10025)]"' % (sleep, trap, sleep, sleep)
         )
         out = self.fn('lib.sh', body, rules=self.RULES, mock={'smtp': self.UP, 'imap': {}})
         self.assertIn('left=[]', out)
