@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shapes import norm_addr, norm_domain, strings, unwrap_int, unwrap_str
 
 OUT = os.environ.get("VERIFY_OUT", "out")
+GATE_SUBJECT = "w7-verify-"
 os.umask(0o077)
 os.makedirs(OUT, exist_ok=True)
 

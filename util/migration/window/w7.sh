@@ -74,8 +74,8 @@ job_started() { [ "$("${KS[@]}" -n thundermail get job stalwart-config-apply -o 
 flip() {
   local sha
   merge_pr "$TMD" "$FLIP_PR" || return 1
-  printf '  + FLIP_SHA from gh pr view FLIP_PR; wait 600s for freight_for FLIP_SHA; append FREIGHT; promote it; wait for job/stalwart-config-apply\n'
-  [ "$APPLY" = 1 ] || return 0
+  printf '  + FLIP_SHA from gh pr view FLIP_PR; wait 600s for freight_for FLIP_SHA; append FREIGHT; promote it; wait for job/stalwart-config-apply; restart Stalwart and probe the mail ports\n'
+  [ "$APPLY" = 1 ] || { restart_stalwart; return; }
   sha=$(gh pr view "$FLIP_PR" -R "$TMD" --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
   [ -n "$sha" ] || { echo "FLIP_PR $FLIP_PR has no merge commit"; return 1; }
   until_ok 600 freight_for "$sha" || { echo "no Freight for the flip commit $sha after 600s: stop, FREIGHT not appended"; return 1; }
@@ -87,7 +87,8 @@ flip() {
   until_ok 120 job_started || { echo "stalwart-config-apply did not start after the promotion"; return 1; }
   "${KS[@]}" -n thundermail wait --for=condition=complete job/stalwart-config-apply --timeout=600s || return 1
   VALUE=$("${KS[@]}" -n thundermail get job stalwart-config-apply -o jsonpath='{.status.succeeded}')
-  [ "$VALUE" = 1 ]
+  [ "$VALUE" = 1 ] || return 1
+  restart_stalwart
 }
 
 cname_live() { [ "$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=mail.$ZONE_NAME&type=CNAME" | jq -r '.Answer[0].data // empty' | sed 's/\.$//')" = "$TARGET_NLB_DNS" ]; }
@@ -161,10 +162,12 @@ gated() {
 }
 
 prereqs
-helpers snapshot-zone.sh restore-zone.sh restore-redirect.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
+helpers snapshot-zone.sh restore-zone.sh restore-redirect.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh openssl ss timeout
 NEXT=$(next_step)
 if [ "$APPLY" = 1 ]; then
   [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ] || stop "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT'"
+  ACCOUNTS=$(after_cut accounts-stalwart-check | cut -f5)
+  [ "$ACCOUNTS" = 200 ] || stop "the latest accounts-stalwart-check for this cut is '${ACCOUNTS:-none}', not 200: write the Accounts bundle, record put-accounts-bundle, rerun w5-promote.sh --apply --go"
 fi
 [ "$APPLY" = 0 ] || [ "$NEXT" != 6 ] || { echo "W7 steps 1-4 and verification are done for this cut"; finish; exit 0; }
 [ "$APPLY" = 0 ] || [ "$NEXT" != 1 ] || step snap-zone records snap_zone

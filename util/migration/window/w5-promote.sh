@@ -39,7 +39,8 @@ snap_settings() {
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>}" \
     "stalwart-cli create action/ReloadSettings" \
     "for ip in \$($(shq "${KS[@]}" -n thundermail get pod -l app=stalwart-nginx --field-selector=status.phase=Running -o 'jsonpath={.items[*].status.podIP}')); do ids=\$(stalwart-cli query BlockedIp --where \"address=\$ip\" --fields id --json | jq -r .id | paste -sd, -); [ -z \"\$ids\" ] || stalwart-cli delete BlockedIp --ids \"\$ids\"; done" \
-    "stalwart-cli create action/ReloadBlockedIps" > "$RESTORE" || return 1
+    "stalwart-cli create action/ReloadBlockedIps" \
+    "$(shq "${KS[@]}" -n thundermail rollout restart deploy/stalwart); $(shq "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s)" > "$RESTORE" || return 1
   mark_restore
 }
 
@@ -182,22 +183,28 @@ readback() {
 accounts_check() {
   local out id cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
   printf '  + %s\n' "$(shq "${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd")"
+  printf '  + a failure is PENDING (not a STOP) while %s has no put-accounts-bundle row for this cut\n' "$TIMING_TSV"
   [ "$APPLY" = 1 ] || return 0
   out=$("${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd") || return 1
   VALUE=$(tail -1 <<<"$out")
   id=$(sed '$d' <<<"$out" | jq -r '.primaryAccounts["urn:stalwart:jmap"] // empty' 2>/dev/null || true)
   echo "Accounts -> Stalwart GET /jmap/session: $VALUE urn:stalwart:jmap account ${id:+present}${id:-missing}"
-  [ "$VALUE" = 200 ] && [ -n "$id" ]
+  [ "$VALUE" = 200 ] && [ -n "$id" ] && return 0
+  [ "$VALUE" != 200 ] || VALUE=200-no-account
+  [ -z "$(after_cut put-accounts-bundle)" ] || return 1
+  printf 'PENDING  the #1539 Accounts bundle write: no put-accounts-bundle row for this cut in %s; write the bundle, rerun with --apply --go, and W7 --apply stops until this check is 200; record the row with: %s\n' "$TIMING_TSV" "printf 'put-accounts-bundle\\t%s\\t%s\\t\\t\\n' \"\$(date -u +%FT%TZ)\" \"\$(date -u +%FT%TZ)\" >> $(shq "$TIMING_TSV")"
+  NEEDS=$((NEEDS + 1))
 }
 
 prereqs
-helpers snapshot-settings.sh quota-reset.sh quota-reset.json.tpl apply_unmigrated.py promotion.yaml.tpl stalwart-cli "$PY"
+helpers snapshot-settings.sh quota-reset.sh quota-reset.json.tpl apply_unmigrated.py promotion.yaml.tpl stalwart-cli "$PY" openssl ss timeout
 if [ "$APPLY" = 1 ]; then port_forward || stop "no port-forward to Stalwart"; else port_forward || echo "no port-forward to Stalwart: live reads skipped"; fi
 if [ "$PHASE" = 1 ]; then
   step snap-settings "" snap_settings
   step freight "" freight
   step quotas "" quotas
   step settings-promote succeeded promote
+  step stalwart-restart "" restart_stalwart
   step unmigrated-dry-run changes unmigrated_dry
   if [ "$APPLY" = 1 ]; then
     mark unmigrated-plan counts "$PLAN"
@@ -217,6 +224,6 @@ step unban-nginx banned unban_nginx
 step reload "" reload
 step readback changes readback
 step accounts-stalwart-check http_code accounts_check
-printf 'manual: create and delete one app password for %s through Accounts (manage.py shell in deploy/accounts-web), check both Stalwart calls 2xx in the accounts-web log, then create one more and store it with: bash %s --apply (reads it from stdin, checks a JMAP session, appends TEST_SENDER_APP_PASSWORD to %s)\n' "$TEST_USER" "$MIG_DIR/window/test-sender-password.sh" "$ENV_FILE"
+printf 'manual: create and delete one app password for %s through Accounts (manage.py shell in deploy/accounts-web), check both Stalwart calls 2xx in the accounts-web log, then create one more and store it with: bash %s --apply (reads TEST_SENDER_APP_PASSWORD from the operator env file, else stdin, checks JMAP 443, IMAP 993 and SMTP AUTH 587, appends it to %s)\n' "$TEST_USER" "$MIG_DIR/window/test-sender-password.sh" "$ENV_FILE"
 printf '  + %s | grep -cE %s\n' "$(shq "${KS[@]}" -n accounts logs deploy/accounts-web --since=10m)" "'app.?password'"
 finish
