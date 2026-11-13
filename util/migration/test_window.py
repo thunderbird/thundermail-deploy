@@ -94,8 +94,19 @@ class Harness(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not shutil.which('unshare'):
-            raise unittest.SkipTest('needs unshare')
+        need = [
+            t
+            for t in ('unshare', 'ip', 'mount', 'swaks', 'openssl', 'curl', 'jq', 'ss')
+            if not shutil.which(t)
+        ]
+        if need:
+            raise unittest.SkipTest('needs ' + ' '.join(need))
+        if subprocess.run(
+            [shutil.which('unshare'), '-rnm', 'true'], capture_output=True
+        ).returncode:
+            raise unittest.SkipTest(
+                'unshare -rnm is not permitted here (no unprivileged user namespaces)'
+            )
         cls.root = pathlib.Path(tempfile.mkdtemp(prefix='window-test-'))
         r = cls.root
         bins = r / 'bin'
@@ -155,6 +166,37 @@ class Harness(unittest.TestCase):
             ],
         ):
             subprocess.run(['openssl', *args], cwd=r, check=True, capture_output=True)
+        (r / 'badext').write_text('subjectAltName=DNS:wrong.example.test\n')
+        for args in (
+            [
+                'req',
+                *ec,
+                '-keyout',
+                'bad.key',
+                '-out',
+                'bad.csr',
+                '-subj',
+                '/CN=wrong.example.test',
+            ],
+            [
+                'x509',
+                '-req',
+                '-in',
+                'bad.csr',
+                '-CA',
+                'ca.pem',
+                '-CAkey',
+                'ca.key',
+                '-CAcreateserial',
+                '-out',
+                'bad.pem',
+                '-days',
+                '2',
+                '-extfile',
+                'badext',
+            ],
+        ):
+            subprocess.run(['openssl', *args], cwd=r, check=True, capture_output=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -199,6 +241,8 @@ class Harness(unittest.TestCase):
             cfg = {
                 'cert': str(self.root / 'leaf.pem'),
                 'key': str(self.root / 'leaf.key'),
+                'badcert': str(self.root / 'bad.pem'),
+                'badkey': str(self.root / 'bad.key'),
                 'ready': str(t / 'ready'),
                 'log': str(t / 'mock.log'),
                 **mock,
@@ -236,7 +280,8 @@ class Harness(unittest.TestCase):
         )
         (self.t / 'defs.sh').write_text(src)
         head = (
-            'set -u\nAPPLY=1 KEY=TEST SUF="" NEEDS=0 PF="" PF_OK=0 GO="" SECRET_NAMES=""\n'
+            'set -u\nAPPLY=1 KEY=TEST SUF="" NEEDS=0 PF="" PF_OK=0 MAIL_PF="" GO=""\n'
+            'SECRET_NAMES=""\n'
             'MIG_DIR=%s ENV_FILE=%s/cutover.env LOG=%s/run.log RESTORE=%s/restore.txt\n'
             'KS=(kubectl --kubeconfig /dev/null) KH=(kubectl --kubeconfig /dev/null)\n'
             '. %s/defs.sh\n' % (mig, self.t, self.t, self.t, self.t)
@@ -293,7 +338,7 @@ class T7Issuer(Harness):
 class W5AccountsCheck(Harness):
     BODY = 'accounts_check; echo "rc=$? needs=$NEEDS"'
 
-    def check(self, code, body, *rows):
+    def check(self, code, body, *rows, run=None):
         tsv = ''.join(
             '%s\t2026-11-12T0%d:00:00Z\t2026-11-12T0%d:00:00Z\t\t\n' % (r, i, i)
             for i, r in enumerate(rows)
@@ -303,7 +348,7 @@ class W5AccountsCheck(Harness):
         rules = [
             {'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '%s\n%s' % (body, code)}
         ]
-        return self.fn('w5-promote.sh', self.BODY, rules=rules)
+        return self.fn('w5-promote.sh', run or self.BODY, rules=rules)
 
     def test_401_before_the_bundle_write_is_pending(self):
         out = self.check(401, '{}', 'cut-ecs')
@@ -324,6 +369,69 @@ class W5AccountsCheck(Harness):
         out = self.check(200, session, 'cut-ecs')
         self.assertIn('rc=0 needs=0', out)
 
+    def test_200_without_the_admin_account_is_recorded_as_such(self):
+        out = self.check(200, '{}', 'cut-ecs', run='accounts_check; echo "value=$VALUE"')
+        self.assertIn('value=200-no-account', out)
+
+    def test_the_printed_row_command_turns_the_next_failure_into_a_stop(self):
+        out = self.check(401, '{}', 'cut-ecs')
+        line = next(x for x in out.splitlines() if x.startswith('PENDING  '))
+        cmd = line.split('record the row with: ', 1)[1]
+        rules = [{'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '{}\n401'}]
+        out = self.fn('w5-promote.sh', cmd + '\n' + self.BODY, rules=rules)
+        self.assertIn('rc=1 needs=0', out)
+
+
+class W7AccountsGate(Harness):
+    def run_w7(self, value):
+        rows = [('cut-ecs', ''), ('accounts-stalwart-check', value)]
+        (self.t / 'ev').mkdir(mode=0o700)
+        (self.t / 'ev' / 'timing.tsv').write_text(
+            ''.join(
+                '%s\t2026-11-12T00:00:0%dZ\t2026-11-12T00:00:0%dZ\tm\t%s\n' % (r, i, i, v)
+                for i, (r, v) in enumerate(rows)
+            )
+        )
+        text = (self.MIG / 'window' / 'w7.sh').read_text().splitlines()
+        main = '\n'.join(text[text.index('prereqs') :])
+        setup = (
+            'SPF_FINAL_TXT=x SPF_DECIDED_TXT=x KEY=W7\n'
+            'prereqs() { :; }; helpers() { :; }; snap_zone() { :; }'
+        )
+        return self.fn('w7.sh', main, setup)
+
+    def test_w7_apply_stops_while_the_accounts_check_is_not_200(self):
+        for value in ('401', '200-no-account'):
+            with self.subTest(value=value):
+                self.setUp()
+                out = self.run_w7(value)
+                self.assertIn('STOP W7 (apply): the latest accounts-stalwart-check', out)
+
+    def test_w7_apply_goes_on_after_a_200(self):
+        out = self.run_w7('200')
+        self.assertNotIn('accounts-stalwart-check', out)
+        self.assertIn('STOP W7 (apply): no operator go', out)
+
+
+class BuildCarry(Harness):
+    def test_the_operator_file_never_supplies_the_sender_password(self):
+        f = self.MIG / 'build-cutover-env.sh'
+        text = f.read_text()
+        loop = text[text.index('  for name in $CARRY; do') :]
+        loop = loop[: loop.index('\n  done\n') + 8]
+        helpers = '\n'.join(x for x in text.splitlines() if x.startswith(('prev() ', 'op() ')))
+        (self.t / 'op.env').write_text("TEST_SENDER_APP_PASSWORD='from-operator-unproven'\n")
+        (self.t / 'op.env').chmod(0o600)
+        (self.t / 'cut.env').write_text("TEST_SENDER_APP_PASSWORD='proven-by-script'\n")
+        body = (
+            'ENV_FILE=%s/cut.env tmp=%s/out CARRY=TEST_SENDER_APP_PASSWORD\n: > "$tmp"\n%s\n'
+            'load_operator_env %s/op.env\ncarry() {\n%s\n}\ncarry >/dev/null\ncat "$tmp"'
+            % (self.t, self.t, helpers, self.t, loop)
+        )
+        out = self.fn('lib.sh', body)
+        self.assertIn("TEST_SENDER_APP_PASSWORD='proven-by-script'", out)
+        self.assertNotIn('from-operator-unproven', out)
+
 
 class RestartProbe(Harness):
     UP = {'25': {'starttls': True}, '587': {'starttls': True}, '465': {'implicit': True}}
@@ -336,6 +444,17 @@ class RestartProbe(Harness):
         },
         {'tool': 'kubectl', 'match': 'port-forward pod/stalwart-nginx-1', 'forward': True},
     ]
+
+    PODS = json.dumps(
+        {
+            'items': [
+                {'metadata': {'name': 'stalwart-old', 'deletionTimestamp': '2026-11-12T00:00:00Z'}},
+                {'metadata': {'name': 'stalwart-new'}},
+            ]
+        }
+    )
+
+    NAMES = 'pod/stalwart-old\npod/stalwart-new\n'
 
     def probe(self, smtp, imap=None, setup='', rules=()):
         mock = {'smtp': smtp, 'imap': {'993': {'implicit': True}} if imap is None else imap}
@@ -370,6 +489,11 @@ class RestartProbe(Harness):
         self.assertIn('on: 25', out)
         self.assertIn('rc=1', out)
 
+    def test_a_certificate_for_another_host_fails(self):
+        out = self.probe({**self.UP, '465': {'implicit': True, 'badcert': True}})
+        self.assertIn('no verified TLS through pod/stalwart-nginx-1 on: 465', out)
+        self.assertIn('rc=1', out)
+
     def test_a_leftover_listener_on_a_local_port_is_refused(self):
         out = self.probe({**self.UP, '10465': {'implicit': True}})
         self.assertIn('local port 10465 is already in use', out)
@@ -388,8 +512,13 @@ class RestartProbe(Harness):
         rules = [
             {
                 'tool': 'kubectl',
-                'match': 'get pod -l app=stalwart --field',
-                'out': 'pod/stalwart-new\n',
+                'match': 'get pod -l app=stalwart --field.*-o name',
+                'out': self.NAMES,
+            },
+            {
+                'tool': 'kubectl',
+                'match': 'get pod -l app=stalwart --field.*-o json',
+                'out': self.PODS,
             },
             {
                 'tool': 'kubectl',
@@ -402,6 +531,58 @@ class RestartProbe(Harness):
         self.assertIn('port-forward pod/stalwart-new -> http://127.0.0.1:18080', out)
         self.assertIn('rc=0 pf_ok=1', out)
 
+    def test_a_reused_operator_port_forward_is_replaced(self):
+        rules = [
+            {
+                'tool': 'kubectl',
+                'match': 'port-forward svc/stalwart-mgmt 18080:1$',
+                'forward': True,
+            },
+            {
+                'tool': 'kubectl',
+                'match': 'get pod -l app=stalwart --field.*-o name',
+                'out': self.NAMES,
+            },
+            {
+                'tool': 'kubectl',
+                'match': 'get pod -l app=stalwart --field.*-o json',
+                'out': self.PODS,
+            },
+            {
+                'tool': 'kubectl',
+                'match': 'port-forward pod/stalwart-new 18080:8080',
+                'serve': 18080,
+            },
+        ]
+        setup = (
+            'kubectl port-forward svc/stalwart-mgmt 18080:1 >/dev/null 2>&1 &\n'
+            'until [ -n "$(listener 18080)" ]; do sleep 0.1; done\n'
+            'STALWART_URL=http://127.0.0.1:18080 PF_OK=1 PF=""'
+        )
+        out = self.probe(self.UP, setup=setup, rules=rules)
+        self.assertNotIn('does not answer', out)
+        self.assertIn('stopped the reused kubectl port-forward on :18080', out)
+        self.assertIn('port-forward pod/stalwart-new -> http://127.0.0.1:18080', out)
+        self.assertIn('rc=0 pf_ok=1', out)
+
+    def test_a_signal_during_the_probe_stops_the_mail_port_forward(self):
+        trap = next(
+            x
+            for x in (self.MIG / 'window' / 'lib.sh').read_text().splitlines()
+            if x.startswith('trap ') and x.endswith(' EXIT')
+        )
+        sleep = shutil.which('sleep')
+        body = (
+            '( %s\n trap "exit 1" INT TERM HUP\n restart_stalwart ) &\n'
+            'sub=$!\n'
+            'until [ -n "$(listener 10025)" ]; do %s 0.1; done\n'
+            'kill -TERM $sub; wait $sub\n'
+            '%s 1\n'
+            'echo "left=[$(listener 10025)]"' % (trap, sleep, sleep)
+        )
+        out = self.fn('lib.sh', body, rules=self.RULES, mock={'smtp': self.UP, 'imap': {}})
+        self.assertIn('left=[]', out)
+
 
 class SenderPassword(Harness):
     USER = 'user@stage-thundermail.com'
@@ -411,15 +592,15 @@ class SenderPassword(Harness):
     )
     BODY = 'capture; echo "rc=$?"; cat "$ENV_FILE" 2>/dev/null | grep -c TEST_SENDER_APP_PASSWORD'
 
-    def run_capture(self, pw, imap_pw=None, smtp_pw=None, operator=None, stdin=''):
+    def run_capture(self, pw, imap_pw=None, smtp_pw=None, operator=None, stdin='', bad=False):
         session = {'code': 200, 'body': '{}', 'auth': '%s:%s' % (self.USER, pw)}
         mock = {
             'https': {
                 '/dns-query?name=nlb.example.test': [doh('127.0.0.1')],
                 '/jmap/session': [session],
             },
-            'imap': {'993': {'implicit': True, 'password': imap_pw or pw}},
-            'smtp': {'587': {'starttls': True, 'password': smtp_pw or pw}},
+            'imap': {'993': {'implicit': True, 'password': imap_pw or pw, 'badcert': bad}},
+            'smtp': {'587': {'starttls': True, 'password': smtp_pw or pw, 'badcert': bad}},
         }
         if operator is not None:
             (self.t / 'operator.env').write_text(
@@ -438,10 +619,31 @@ class SenderPassword(Harness):
         self.assertIn('rc=0\n1', out)
         self.assertIn({'port': 993, 'login': True}, self.mock_log())
 
+    def test_the_test_user_app_password_name_is_accepted(self):
+        (self.t / 'operator.env').write_text("export TEST_USER_APP_PASSWORD='app-pw-5'\n")
+        (self.t / 'operator.env').chmod(0o600)
+        out = self.run_capture('app-pw-5')
+        self.assertIn('from %s/operator.env: JMAP 443' % self.t, out)
+        self.assertIn('rc=0\n1', out)
+
+    def test_a_newline_in_the_password_cannot_inject_curl_or_imap_lines(self):
+        body = (
+            'pw=$\'pw\\ninsecure\'; curl_user u "$pw" | grep -c .; '
+            'printf \'a LOGIN "%s" "%s"\\r\\n\' u "$(cq "$pw")" | grep -c .'
+        )
+        out = self.fn('test-sender-password.sh', body, self.SETUP % self.t)
+        self.assertEqual(out.split(), ['1', '1'])
+
     def test_jmap_alone_is_not_enough(self):
         out = self.run_capture('app-pw-2', imap_pw='other', smtp_pw='other', stdin='app-pw-2\n')
         self.assertIn('failed on: 993 (IMAP LOGIN) 587 (SMTP AUTH): password not stored', out)
         self.assertIn('rc=1\n0', out)
+
+    def test_a_certificate_for_another_host_is_refused(self):
+        out = self.run_capture('app-pw-4', stdin='app-pw-4\n', bad=True)
+        self.assertIn('failed on: 993 (IMAP LOGIN) 587 (SMTP AUTH): password not stored', out)
+        self.assertIn('rc=1\n0', out)
+        self.assertNotIn({'port': 993, 'login': True}, self.mock_log())
 
     def test_stdin_still_works(self):
         out = self.run_capture('app-pw-3', stdin='app-pw-3\n')
@@ -507,6 +709,22 @@ class W7Verify(Harness):
         self.assertIn('gate passed', out)
         self.assertTrue([r for r in self.mock_log() if r.get('port') == 25 and r['tls']])
 
+    def wrong_cert_on_25(self):
+        return {**self.UP, 'smtp': {**self.UP['smtp'], '25': {'starttls': True, 'badcert': True}}}
+
+    def test_starttls_on_25_with_a_certificate_for_another_host_fails(self):
+        out = self.verify('TARGET_NLB_DNS=nlb.example.test; probes', self.wrong_cert_on_25())
+        self.assertRegex(
+            out, r'FAIL  smtp-25-starttls +STARTTLS on 127.0.0.1:25 offered, but TLS not verified'
+        )
+
+    def test_inbound_refuses_a_certificate_for_another_host(self):
+        out = self.verify(
+            'chk inbound-test-user inbound u@stage-thundermail.com', self.wrong_cert_on_25()
+        )
+        self.assertRegex(out, r'FAIL  inbound-test-user +swaks to u@stage-thundermail.com failed')
+        self.assertEqual([r for r in self.mock_log() if r.get('port') == 25], [])
+
     def test_inbound_sends_from_inbound_from(self):
         self.verify('chk inbound-test-user inbound u@stage-thundermail.com', self.UP)
         sent = [r for r in self.mock_log() if r.get('port') == 25]
@@ -514,9 +732,31 @@ class W7Verify(Harness):
 
     def test_unset_inbound_from_stops_before_any_mail(self):
         out = self.verify('INBOUND_FROM=""; mail; echo "rc=$?"', self.UP)
-        self.assertIn('NEED  INBOUND_FROM is empty or TEST_MAILBOX', out)
+        self.assertIn('NEED  INBOUND_FROM is empty or in the domain of', out)
         self.assertIn('rc=1', out)
         self.assertEqual([r for r in self.mock_log() if r.get('port') == 25], [])
+
+    def test_inbound_from_equal_to_test_mailbox_stops_before_any_mail(self):
+        out = self.verify('INBOUND_FROM=box@example.test; mail; echo "rc=$?"', self.UP)
+        self.assertIn('NEED  INBOUND_FROM is empty or in the domain of', out)
+        self.assertIn('rc=1', out)
+        self.assertEqual([r for r in self.mock_log() if r.get('port') == 25], [])
+
+    def test_inbound_from_in_a_test_or_gate_domain_stops_before_any_mail(self):
+        for user, sender in (
+            ('u@stage-thundermail.com', 'Box@Example.TEST'),
+            ('u@stage-thundermail.com', 'other@example.test'),
+            ('u@stage-thundermail.com', 'w7@Stage-Thundermail.com'),
+            ('u@user.example.org', 'ops@USER.example.org'),
+        ):
+            with self.subTest(sender=sender):
+                self.setUp()
+                out = self.verify(
+                    'TEST_USER=%s INBOUND_FROM=%s; mail; echo "rc=$?"' % (user, sender), self.UP
+                )
+                self.assertEqual([r['from'] for r in self.mock_log() if r.get('port') == 25], [])
+                self.assertIn('NEED  INBOUND_FROM is empty or in the domain of', out)
+                self.assertIn('rc=1', out)
 
     def test_no_forged_sender_in_util_migration(self):
         hits = [
@@ -537,8 +777,17 @@ class W7Verify(Harness):
         mock = {'https': {}, 'jmap': jmap}
         return self.verify('TEST_SENDER_APP_PASSWORD=app-pw; chk first-delivery delivery', mock)
 
-    TLS = ['from w7-check.local (host [192.0.2.7]) by mail (Stalwart SMTP) with ESMTPS id 1; Thu']
-    PLAIN = ['from w7-check.local (host [192.0.2.7]) by mail (Stalwart SMTP) with ESMTP id 1; Thu']
+    HOP = 'from w7-check.local (unknown [192.0.2.7])'
+    DATE = 'Thu, 12 Nov 2026 00:00:00 +0000'
+    TLS = [
+        HOP + '\t(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384)'
+        '\tby %s (Stalwart SMTP) with ESMTPS id 19A2B3C4D5E;\t%s' % (M, DATE)
+    ]
+    PLAIN = [HOP + '\tby %s (Stalwart SMTP) with ESMTP id 19A2B3C4D5E;\t%s' % (M, DATE)]
+
+    def test_tls_on_an_earlier_hop_only_fails(self):
+        out = self.delivery('inbox1', self.PLAIN + self.TLS)
+        self.assertRegex(out, r'FAIL  first-delivery +.*no TLS in its top Received header')
 
     def test_delivery_to_junk_fails(self):
         out = self.delivery('junk1', self.TLS)
@@ -555,6 +804,24 @@ class W7Verify(Harness):
     def test_delivery_to_the_inbox_over_tls_passes(self):
         out = self.delivery('inbox1', self.TLS)
         self.assertRegex(out, r'PASS  first-delivery +delivered to the Inbox')
+
+
+class W7Flip(Harness):
+    def test_apply_flip_restarts_stalwart_after_the_config_job(self):
+        setup = (
+            'TMD=o/r FLIP_PR=3 PROMOTION=%s/promotion.yaml FREIGHT=""\n'
+            'merge_pr() { :; }; freight_for() { FREIGHT_FOUND=f1; }; setenv() { :; }\n'
+            'restart_stalwart() { echo "restart_stalwart called"; }' % self.t
+        )
+        rules = [
+            {'tool': 'gh', 'match': 'mergeCommit', 'out': 'c1\n'},
+            {'tool': 'kubectl', 'match': 'create -f'},
+            {'tool': 'kubectl', 'match': 'startTime', 'out': '2099-01-01T00:00:00Z'},
+            {'tool': 'kubectl', 'match': 'wait --for=condition=complete'},
+            {'tool': 'kubectl', 'match': 'status.succeeded', 'out': '1'},
+        ]
+        out = self.fn('w7.sh', 'flip; echo "rc=$?"', setup, rules=rules)
+        self.assertIn('restart_stalwart called\nrc=0', out)
 
 
 class W6Verify(Harness):
@@ -703,6 +970,11 @@ class Mock:
         self.cfg, self.lock = cfg, threading.Lock()
         self.ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.ctx.load_cert_chain(cfg['cert'], cfg['key'])
+        self.bad = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.bad.load_cert_chain(cfg['badcert'], cfg['badkey'])
+
+    def tls_for(self, conf):
+        return self.bad if conf.get('badcert') else self.ctx
 
     def log(self, **rec):
         with self.lock, open(self.cfg['log'], 'a') as f:
@@ -802,7 +1074,7 @@ class Mock:
             def handle(self):
                 sock = self.request
                 if conf.get('implicit'):
-                    sock = mock.ctx.wrap_socket(sock, server_side=True)
+                    sock = mock.tls_for(conf).wrap_socket(sock, server_side=True)
                 fn(sock, conf, port)
 
         return socketserver.ThreadingTCPServer(('0.0.0.0', port), H)
@@ -827,7 +1099,7 @@ class Mock:
                 send(*['250-mock'] + ['250-' + x for x in ext] + ['250 8BITMIME'])
             elif cmd == 'STARTTLS' and conf.get('starttls') and not tls:
                 send('220 go ahead')
-                sock = self.ctx.wrap_socket(sock, server_side=True)
+                sock = self.tls_for(conf).wrap_socket(sock, server_side=True)
                 f, tls = sock.makefile('rwb'), True
             elif cmd.startswith('AUTH PLAIN'):
                 arg = line.split()[2] if len(line.split()) > 2 else None

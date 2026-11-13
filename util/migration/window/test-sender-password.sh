@@ -9,9 +9,9 @@ printf 'n/a: stores one value in the env file\n' > "$RESTORE"
 
 capture() {
   local pw ip code imap src=stdin bad=""
-  printf '  + read the app password created for %s in the Accounts UI from TEST_SENDER_APP_PASSWORD in %s, else stdin; check JMAP 443, IMAP LOGIN 993 and SMTP AUTH 587 through %s; append TEST_SENDER_APP_PASSWORD\n' "$TEST_USER" "$OPERATOR_ENV" "$TARGET_NLB_DNS"
+  printf '  + read the app password created for %s in the Accounts UI from TEST_SENDER_APP_PASSWORD (or TEST_USER_APP_PASSWORD) in %s, else stdin; check JMAP 443, IMAP LOGIN 993 and SMTP AUTH 587 through %s; append TEST_SENDER_APP_PASSWORD\n' "$TEST_USER" "$OPERATOR_ENV" "$TARGET_NLB_DNS"
   [ "$APPLY" = 1 ] || return 0
-  pw=$(unset TEST_SENDER_APP_PASSWORD; load_operator_env "$OPERATOR_ENV"; printf '%s' "${TEST_SENDER_APP_PASSWORD:-}") || return 1
+  pw=$(unset TEST_SENDER_APP_PASSWORD TEST_USER_APP_PASSWORD; load_operator_env "$OPERATOR_ENV"; printf '%s' "${TEST_SENDER_APP_PASSWORD:-${TEST_USER_APP_PASSWORD:-}}") || return 1
   if [ -n "$pw" ]; then
     src=$OPERATOR_ENV
   else
@@ -19,7 +19,7 @@ capture() {
     IFS= read -rs pw || true
     [ -t 0 ] && printf '\n' >&2
   fi
-  [ -n "$pw" ] || { echo "no TEST_SENDER_APP_PASSWORD in $OPERATOR_ENV and no password on stdin"; return 1; }
+  [ -n "$pw" ] || { echo "no TEST_SENDER_APP_PASSWORD or TEST_USER_APP_PASSWORD in $OPERATOR_ENV and no password on stdin"; return 1; }
   ip=$(doh "$TARGET_NLB_DNS")
   [ -n "$ip" ] || { echo "no A record for $TARGET_NLB_DNS"; return 1; }
   code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -K <(curl_user "$TEST_USER" "$pw") --resolve "$M:443:$ip" "https://$M/jmap/session")

@@ -190,13 +190,14 @@ accounts_check() {
   id=$(sed '$d' <<<"$out" | jq -r '.primaryAccounts["urn:stalwart:jmap"] // empty' 2>/dev/null || true)
   echo "Accounts -> Stalwart GET /jmap/session: $VALUE urn:stalwart:jmap account ${id:+present}${id:-missing}"
   [ "$VALUE" = 200 ] && [ -n "$id" ] && return 0
+  [ "$VALUE" != 200 ] || VALUE=200-no-account
   [ -z "$(after_cut put-accounts-bundle)" ] || return 1
-  printf 'PENDING  the #1539 Accounts bundle write: no put-accounts-bundle row for this cut in %s; write the bundle, record the row, rerun with --apply --go\n' "$TIMING_TSV"
+  printf 'PENDING  the #1539 Accounts bundle write: no put-accounts-bundle row for this cut in %s; write the bundle, rerun with --apply --go, and W7 --apply stops until this check is 200; record the row with: %s\n' "$TIMING_TSV" "printf 'put-accounts-bundle\\t%s\\t%s\\t\\t\\n' \"\$(date -u +%FT%TZ)\" \"\$(date -u +%FT%TZ)\" >> $(shq "$TIMING_TSV")"
   NEEDS=$((NEEDS + 1))
 }
 
 prereqs
-helpers snapshot-settings.sh quota-reset.sh quota-reset.json.tpl apply_unmigrated.py promotion.yaml.tpl stalwart-cli "$PY"
+helpers snapshot-settings.sh quota-reset.sh quota-reset.json.tpl apply_unmigrated.py promotion.yaml.tpl stalwart-cli "$PY" openssl ss timeout
 if [ "$APPLY" = 1 ]; then port_forward || stop "no port-forward to Stalwart"; else port_forward || echo "no port-forward to Stalwart: live reads skipped"; fi
 if [ "$PHASE" = 1 ]; then
   step snap-settings "" snap_settings

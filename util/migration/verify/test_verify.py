@@ -42,7 +42,7 @@ class Jmap(http.server.BaseHTTPRequestHandler):
             obj, method = name.split('/')
             if obj == 'Email' and method == 'query':
                 want = (args.get('filter') or {}).get('subject')
-                ids = [i for i, e in self.emails.items() if want is None or want in e['subject']]
+                ids = [i for i, e in self.emails.items() if want in (None, e['subject'])]
                 page = ids[args.get('position', 0) :][: args.get('limit', 1000)]
                 out.append([name, {'ids': page, 'total': len(ids)}, tag])
             elif obj == 'Email':
@@ -145,6 +145,41 @@ class Verify(unittest.TestCase):
         rc, out = self.run_check('04_collections.py', {'a': email('one', 'b0')})
         self.assertEqual(rc, 1, out)
         self.assertIn('FAIL  emails: source 2, target 1; differing accounts 1', out)
+
+    def test_04_a_lost_message_beside_inbound_growth_still_fails(self):
+        (self.t / 'principals.json').write_text(
+            json.dumps(
+                [
+                    {'id': 1, 'type': 'individual', 'name': 'alice'},
+                    {'id': 2, 'type': 'individual', 'name': 'bob'},
+                ]
+            )
+        )
+        source = json.loads((self.t / 'source.json').read_text())
+        source['accounts']['2'] = {'emails': 5, 'mailboxes': 6}
+        (self.t / 'source.json').write_text(json.dumps(source))
+        rc, out = self.run_check('04_collections.py', self.LIVE)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('FAIL  emails: source 7, target 6; differing accounts 2', out)
+
+    def test_04_gate_mail_alone_is_a_pass(self):
+        live = {k: v for k, v in self.LIVE.items() if k != 'd'}
+        rc, out = self.run_check('04_collections.py', live)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('PASS  emails: source 2, target 2', out)
+
+    def test_04_one_lost_and_one_received_fails(self):
+        rc, out = self.run_check(
+            '04_collections.py', {'a': email('one', 'b0'), 'd': email('hello', 'b3')}
+        )
+        self.assertEqual(rc, 1, out)
+        self.assertIn('FAIL  emails: source messages missing on the target: 1', out)
+
+    def test_04_one_lost_and_two_received_is_not_a_warning(self):
+        live = {'a': email('one', 'b0'), 'd': email('hello', 'b3'), 'e': email('hi', 'b4')}
+        rc, out = self.run_check('04_collections.py', live)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn('received since the snapshot', out)
 
     def test_a_migrated_message_with_a_gate_subject_still_counts(self):
         live = {'a': email('w7-verify-old', 'b0'), 'b': email('two', 'b1')}

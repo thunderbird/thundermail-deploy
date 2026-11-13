@@ -162,10 +162,12 @@ gated() {
 }
 
 prereqs
-helpers snapshot-zone.sh restore-zone.sh restore-redirect.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh
+helpers snapshot-zone.sh restore-zone.sh restore-redirect.sh cf-record.sh promotion.yaml.tpl window/w7-verify.sh openssl ss timeout
 NEXT=$(next_step)
 if [ "$APPLY" = 1 ]; then
   [ "$SPF_FINAL_TXT" = "$SPF_DECIDED_TXT" ] || stop "SPF_FINAL_TXT is not the #1535 text '$SPF_DECIDED_TXT'"
+  ACCOUNTS=$(after_cut accounts-stalwart-check | cut -f5)
+  [ "$ACCOUNTS" = 200 ] || stop "the latest accounts-stalwart-check for this cut is '${ACCOUNTS:-none}', not 200: write the Accounts bundle, record put-accounts-bundle, rerun w5-promote.sh --apply --go"
 fi
 [ "$APPLY" = 0 ] || [ "$NEXT" != 6 ] || { echo "W7 steps 1-4 and verification are done for this cut"; finish; exit 0; }
 [ "$APPLY" = 0 ] || [ "$NEXT" != 1 ] || step snap-zone records snap_zone

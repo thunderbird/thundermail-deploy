@@ -193,10 +193,13 @@ probes() {
   VALUE=$FAILS
 }
 
+dom() { local d=${1##*@}; printf '%s' "${d,,}"; }
+forged_from() { local d; d=$(dom "$INBOUND_FROM"); [ "$d" = "${Z,,}" ] || [ "$d" = "$(dom "$TEST_MAILBOX")" ] || [ "$d" = "$(dom "$TEST_USER")" ]; }
+
 mail() {
-  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 from INBOUND_FROM (STARTTLS required, certificate verified for mail.stage-thundermail.com, subject %s), JMAP poll 300s for it in the Inbox with TLS in its top Received header, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$SUBJECT"
-  if [ -z "${INBOUND_FROM:-}" ] || [ "$INBOUND_FROM" = "$TEST_MAILBOX" ]; then
-    printf 'NEED  INBOUND_FROM is empty or TEST_MAILBOX in %s: set it to an address the sending host is authorised for (SPF or DKIM), never TEST_MAILBOX or a production address\n' "$ENV_FILE"
+  printf '  + swaks --helo w7-check.local inbound to TEST_USER and postmaster@%s via %s:25 from INBOUND_FROM (STARTTLS required, certificate verified for %s, subject %s), JMAP poll 300s for it in the Inbox with TLS in its top Received header, swaks --helo w7-check.local 587 AUTH PLAIN as TEST_SENDER\n' "$Z" "$TARGET_NLB_DNS" "$M" "$SUBJECT"
+  if [ -z "${INBOUND_FROM:-}" ] || forged_from; then
+    printf 'NEED  INBOUND_FROM is empty or in the domain of %s, TEST_MAILBOX or TEST_USER (%s): set it to an address in a domain whose SPF passes for this host\n' "$Z" "$ENV_FILE"
     [ "$APPLY" = 1 ] && return 1
     NEEDS=$((NEEDS + 1))
   fi

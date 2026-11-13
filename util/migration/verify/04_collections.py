@@ -10,12 +10,14 @@ r = Report("04 collections and content")
 src_acc, _ = principals()
 S = json.load(open(f"{OUT}/source.json"))
 src = {int(k): v for k, v in S["accounts"].items()}
-src_msgs = set(S["messages"])
+src_msgs = {}
+for key in S["messages"]:
+    src_msgs.setdefault(int(key.split(":")[0]), set()).add(key)
 
 # Identity/get is left out on purpose: on 0.16 it creates missing identities and deletes ones whose address no
 # longer resolves to the account, so reading it changes the target.
 GET = {"mailboxes": "Mailbox", "calendars": "Calendar", "addressbooks": "AddressBook"}
-QUERY = {"emails": "Email", "events": "CalendarEvent", "contacts": "ContactCard", "files": "FileNode", "sieve": "SieveScript"}
+QUERY = {"events": "CalendarEvent", "contacts": "ContactCard", "files": "FileNode", "sieve": "SieveScript"}
 
 
 def account(lid):
@@ -28,9 +30,11 @@ def account(lid):
         out[k] = len(x[1]["list"])
     for k, obj in QUERY.items():
         out[k] = len(ids_of(who, aid, obj))
-    gate = get_paged(who, aid, "Email", ids_of(who, aid, "Email", {"filter": {"subject": GATE_SUBJECT}}), ["id", "subject"])
-    out["emails"] -= sum(1 for e in gate if (e.get("subject") or "").startswith(GATE_SUBJECT)
-                         and f"{lid}:{dec(e['id']) & 0xFFFFFFFF}" not in src_msgs)
+    emails = get_paged(who, aid, "Email", ids_of(who, aid, "Email"), ["id", "subject"])
+    keys = {f"{lid}:{dec(e['id']) & 0xFFFFFFFF}": e.get("subject") or "" for e in emails}
+    mine = src_msgs.get(lid, set())
+    out["emails"] = len(keys) - sum(1 for k, s in keys.items() if k not in mine and s.startswith(GATE_SUBJECT))
+    out["emails_lost"] = len(mine - set(keys))
     files = get_paged(who, aid, "FileNode", ids_of(who, aid, "FileNode"), ["blobId", "size"]) if out["files"] else []
     out["file_bad"] = 0
     for f in files:
@@ -61,10 +65,12 @@ for k in ("emails", "mailboxes", "events", "contacts", "files", "sieve"):
             r.warn(msg + " (all had none and got the default set)")
         else:
             r.fail(msg + f" {diff[:4]}")
-    elif k == "emails" and diff and all(t_ > s_ for _, s_, t_ in diff):
+    elif k == "emails" and diff and all(t_ > s_ for _, s_, t_ in diff) and not any(v["emails_lost"] for v in tgt.values()):
         r.warn(f"{k}: source {s}, target {t}; accounts with mail received since the snapshot {len(diff)} {diff[:4]}")
     else:
         r.check(not diff, f"{k}: source {s}, target {t}; differing accounts {len(diff)} {diff[:4]}")
+lost = [(short(src_acc[a]["name"]), v["emails_lost"]) for a, v in tgt.items() if v["emails_lost"]]
+r.check(not lost, f"emails: source messages missing on the target: {sum(n for _, n in lost)} in {len(lost)} accounts {lost[:4]}")
 for k in ("calendars", "addressbooks"):
     lower = [(short(src_acc[a]["name"]), src.get(a, {}).get(k, 0), v[k]) for a, v in tgt.items() if (v[k] or 0) < src.get(a, {}).get(k, 0)]
     added = sum((v[k] or 0) - src.get(a, {}).get(k, 0) for a, v in tgt.items())

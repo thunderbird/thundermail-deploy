@@ -168,11 +168,15 @@ the keying for the real hosts.
 - W5 `accounts-stalwart-check` needs the #1539 Accounts bundle write, which happens outside the
   script. While the cut has no `put-accounts-bundle` row in `$TIMING_TSV`, a failed check prints
   `PENDING` and W5 exits 2 instead of stopping; write the bundle, record that row, and rerun
-  `--apply --go`. With the row present, a failed check is a STOP.
+  `--apply --go`. With the row present, a failed check is a STOP. Record the row with
+  `printf 'put-accounts-bundle\t%s\t%s\t\t\n' "$(date -u +%FT%TZ)" "$(date -u +%FT%TZ)" >> "$TIMING_TSV"`
+  (the PENDING line prints it with the path filled in). A 200 without the admin account is
+  recorded as `200-no-account`. W7 `--apply` stops unless the latest `accounts-stalwart-check`
+  value for the cut is 200.
 - After every stalwart-configs promote (W5 phase 1 `settings-promote`, W7 step 3) the script
   restarts Stalwart (`restart_stalwart` in window/lib.sh: `rollout restart deploy/stalwart`, then
-  `rollout status`), because 0.16 does not rebind listeners or reload certificates after the config
-  Job. It then port-forwards a Running `stalwart-nginx` pod (local 10025, 10465, 10587, 10993; it
+  `rollout status`), because 0.16 reloads certificates but does not rebind its listeners after
+  the config Job. It then port-forwards a Running `stalwart-nginx` pod (local 10025, 10465, 10587, 10993; it
   refuses to start when one is already in use and waits until kubectl owns all four) and
   needs TLS verified for `mail.stage-thundermail.com` on 25, 465, 587 and 993 (STARTTLS on 25 and
   587) within 60 s per port, else the step stops. This works from the operator host without port
@@ -194,8 +198,9 @@ the keying for the real hosts.
   port 25 on the new NLB. The `smtp-25-starttls` probe needs EHLO on 25 to list STARTTLS and
   the certificate to verify for `mail.stage-thundermail.com`; the inbound sends use `swaks --tls
   --tls-verify` and fail on a server without STARTTLS. They send from `INBOUND_FROM` (operator env file, carried by
-  `build-cutover-env.sh`), an address the sending host is authorised for; it has no default, and an
-  empty value or `TEST_MAILBOX` stops W7 before any mail is sent. `first-delivery` passes only
+  `build-cutover-env.sh`), an address in a domain whose SPF passes for the sending host; it has no
+  default, and an empty value or an address in the domain of the zone, `TEST_MAILBOX` or `TEST_USER`
+  (any case) stops W7 before any mail is sent. `first-delivery` passes only
   when the message is in `TEST_USER`'s Inbox and its top `Received` header shows TLS (`with
   ESMTPS`).
 - W8 disables thunderbird-accounts `merge.yml` (deploy-stage) after the go and before the thaw,
@@ -215,10 +220,12 @@ the keying for the real hosts.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
   `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
   start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
-  created in the Accounts UI from `TEST_SENDER_APP_PASSWORD` in `$OPERATOR_ENV` (default
+  created in the Accounts UI from `TEST_SENDER_APP_PASSWORD` (or `TEST_USER_APP_PASSWORD`) in `$OPERATOR_ENV` (default
   `~/.local/state/talos/cutover-operator.env`, mode 600), else from stdin, never from an argument.
   It stores the value (appends `TEST_SENDER_APP_PASSWORD`) only after a JMAP session on 443, an
-  IMAP LOGIN on 993 and an SMTP AUTH on 587 all succeed, and names the ports that failed.
+  IMAP LOGIN on 993 and an SMTP AUTH on 587 all succeed, and names the ports that failed. `build-cutover-env.sh` carries
+  `TEST_SENDER_APP_PASSWORD` only from the previous cutover env file, never from the operator file,
+  so run this script after W5 to set it.
 - `cf-record.sh ZONE_ID upsert|delete NAME TYPE [CONTENT]` is dry-run by default; an SPF upsert edits
   the one `v=spf1` TXT at NAME in place, empty content is refused, and it refuses to delete `spf.*`
   or touch `_externaldns.*`.

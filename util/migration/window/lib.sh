@@ -38,10 +38,11 @@ LOG=$EVIDENCE_DIR/$W-$(mode)-$TS.log
 NEEDS=0
 PF=""
 PF_OK=0
+MAIL_PF=""
 exec > >(exec setsid tee -a "$LOG") 2>&1
 trap 'stop "command failed at line $LINENO"' ERR
 trap 'stop "interrupted by signal"' INT TERM HUP
-trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null || true' EXIT
+trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null; [ -z "$MAIL_PF" ] || kill "$MAIL_PF" 2>/dev/null || true' EXIT
 
 sn() { if [ "$APPLY" = 1 ]; then printf '%s' "$1"; else printf 'dryrun-%s' "$1"; fi; }
 row() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(printf '%s' "$5" | tr '\t\n\r' '   ')" >> "$TIMING_TSV"; }
@@ -55,7 +56,7 @@ again() {
 after_cut() { awk -F'\t' -v s="$1" '$1 == "cut-ecs" {l = ""} $1 == s {l = $0} END {if (l != "") print l}' "$TIMING_TSV" 2>/dev/null; }
 restore_staged() { [ "$APPLY" = 1 ] && [ -s "$RESTORE" ] && [ -n "$(after_cut "restore-$KEY")" ]; }
 mark_restore() { [ "$APPLY" = 0 ] || mark "restore-$KEY" file "$RESTORE"; }
-cq() { local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
+cq() { case $1 in *[$'\n\r']*) return 1 ;; esac; local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
 curl_user() { printf 'user = "%s:%s"\n' "$(cq "$1")" "$(cq "$2")"; }
 doh() { curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data][0] // empty'; }
 
@@ -228,7 +229,7 @@ port_forward() {
     PF_OK=1
     return 0
   fi
-  pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart --field-selector=status.phase=Running -o name | head -1)
+  pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart --field-selector=status.phase=Running -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | "pod/" + .metadata.name][0] // empty')
   [ -n "$pod" ] || { echo "no Running Stalwart pod"; return 1; }
   "${KS[@]}" -n thundermail port-forward "$pod" "$port:8080" >/dev/null 2>&1 &
   PF=$!
@@ -243,10 +244,12 @@ mail_tls() {
   timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername mail.stage-thundermail.com -verify_return_error -verify_hostname mail.stage-thundermail.com "${st[@]}" </dev/null >/dev/null 2>&1
 }
 
+port_free() { [ -z "$(listener "$1")" ]; }
+
 mail_forwarded() { local p; for p in 25 465 587 993; do owned_by $((10000 + p)) kubectl || return 1; done; }
 
 restart_stalwart() {
-  local pod pf p bad="" fwd=()
+  local pod p pid sport bad="" fwd=()
   run "${KS[@]}" -n thundermail rollout restart deploy/stalwart || return 1
   run "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s || return 1
   printf '  + port-forward a Running stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993, then up to 60s per port for TLS verified for mail.stage-thundermail.com (STARTTLS on 25 and 587)\n'
@@ -258,16 +261,24 @@ restart_stalwart() {
     fwd+=("$((10000 + p)):$p")
   done
   "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
-  pf=$!
-  until_ok 30 mail_forwarded || { kill "$pf" 2>/dev/null || true; echo "port-forward to $pod did not open 10025 10465 10587 10993"; return 1; }
+  MAIL_PF=$!
+  until_ok 30 mail_forwarded || { kill "$MAIL_PF" 2>/dev/null || true; MAIL_PF=""; echo "port-forward to $pod did not open 10025 10465 10587 10993"; return 1; }
   for p in 25 465 587 993; do until_ok 60 mail_tls "$p" || bad="$bad $p"; done
-  kill "$pf" 2>/dev/null || true
+  kill "$MAIL_PF" 2>/dev/null || true
+  MAIL_PF=""
   [ -z "$bad" ] || { echo "after the Stalwart restart, no verified TLS through $pod on:$bad"; return 1; }
   echo "Stalwart restarted; 25 465 587 993 answer through $pod with TLS verified for mail.stage-thundermail.com"
   [ "$PF_OK" = 1 ] || return 0
-  [ -z "$PF" ] || { kill "$PF" && wait "$PF"; } 2>/dev/null || true
+  sport=${STALWART_URL##*:}
+  if [ -n "$PF" ]; then
+    { kill "$PF" && wait "$PF"; } 2>/dev/null || true
+  elif owned_by "$sport" kubectl; then
+    for pid in $(listener "$sport" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do kill "$pid" 2>/dev/null || true; done
+    echo "stopped the reused kubectl port-forward on :$sport (it pointed at the replaced pod)"
+  fi
   PF=""
   PF_OK=0
+  until_ok 30 port_free "$sport" || { echo "local port $sport is still in use after the restart"; return 1; }
   port_forward
 }
 

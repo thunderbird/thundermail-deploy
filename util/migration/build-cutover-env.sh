@@ -169,7 +169,7 @@ build() {
   put TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
   put TEST_USER "$(op TEST_USER)" "operator: migrated stage mailbox the operator owns"
   put TEST_SENDER "$(op TEST_USER)" "same as TEST_USER"
-  put INBOUND_FROM "$(op INBOUND_FROM)" "operator: sender of the W7 inbound test, an address the sending host is authorised for (SPF or DKIM); no default"
+  put INBOUND_FROM "$(op INBOUND_FROM)" "operator: sender of the W7 inbound test, in a domain whose SPF passes for the W7 host and not the domain of the zone, TEST_MAILBOX or TEST_USER; no default"
   put SPF_FINAL_TXT "$(op SPF_FINAL_TXT)" "operator: spf. TXT from the #1535 decision (SPF_FINAL_TXT in the environment)"
   put SUPPORT_CHANNEL "$(op SUPPORT_CHANNEL)" "operator: support announcement channel"
   for v in KUBECONFIG_STAGE KUBECONFIG_HUB KUBECONFIG_DEV; do
@@ -189,6 +189,7 @@ build() {
   done
   for name in $CARRY; do
     local v; v=$(op "$name")
+    [ "$name" != TEST_SENDER_APP_PASSWORD ] || v=$(prev "$name")
     [ -n "$v" ] || continue
     printf '# carried over from the previous env file\n%s=%s\n' "$name" "'$(printf '%s' "$v" | sed "s/'/'\\\\''/g")'" >> "$tmp"
     printf '%-30s len=%s (carried)\n' "$name" "${#v}"
