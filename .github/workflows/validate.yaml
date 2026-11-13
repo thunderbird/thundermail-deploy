@@ -1,7 +1,7 @@
 name: validate
 
 concurrency:
-  group: validate
+  group: validate-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 on:
@@ -10,6 +10,14 @@ on:
       - '**'
       - '!main'
       - '!**stalwart-configs-preview**'
+  pull_request:
+    paths:
+      - 'overlays/*/nginx/**'
+      - 'overlays/*/kustomization.yaml'
+      - 'bases/nginx/**'
+      - 'bases/kustomization.yaml'
+      - 'components/nginx-jmap-filter/**'
+      - '.github/workflows/validate.yaml'
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -19,6 +27,7 @@ permissions:
 
 jobs:
   kustomize-build:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: staging
@@ -35,3 +44,32 @@ jobs:
             kustomize build "$overlay" > /dev/null
           done
           ! grep -rEn '\$\{[A-Z0-9_]+\}' overlays/*/stalwart-configs
+
+  nginx-jmap-filter:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install yq
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          echo "654d2943ca1d3be2024089eb4f270f4070f491a0610481d128509b2834870049  /usr/local/bin/yq" | sha256sum -c -
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Run the JMAP filter test for every overlay that uses the component
+        env:
+          CONTAINER_ENGINE: docker
+        run: |
+          overlays=$(grep -l 'components/nginx-jmap-filter' overlays/*/kustomization.yaml | xargs -n1 dirname)
+          test -n "${overlays}"
+          for overlay in ${overlays}; do
+            echo "::group::${overlay}"
+            components/nginx-jmap-filter/test-jmap-filter.sh "${overlay}"
+            echo "::endgroup::"
+          done
