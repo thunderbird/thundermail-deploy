@@ -27,6 +27,13 @@ spec:
               yq -e \
                 '(.dnsManagement // "Manual") | test("^(Manual|Automatic)$")' \
                 /etc/stalwart-values/values.yaml > /dev/null
+              yq -e \
+                '(has("postmasterRecipient") | not)
+                or ((.postmasterRecipient // "") | test("^[^@[:space:]]+@[^@[:space:]]+$"))' \
+                /etc/stalwart-values/values.yaml > /dev/null || {
+                echo "postmasterRecipient must be set to an email address" >&2
+                exit 1
+              }
               yq eval \
                 --output-format=json \
                 --indent=0 \
@@ -37,6 +44,7 @@ spec:
                   == (($values.dnsManagement // "Manual") == "Automatic")
                 )
                 | select(.object != "WebHook" or $values.webhookURL != null)
+                | select(.object != "MailingList" or ($values | has("postmasterRecipient")))
                 | (
                   .. | select(tag == "!!map")
                 ) |= with_entries(
@@ -84,6 +92,10 @@ spec:
                 (
                   .. | select(. == "__ADDRESS_BOOK_NAME__")
                 ) = $values.addressBookName
+                |
+                (
+                  .. | select(. == "__POSTMASTER_RECIPIENTS__")
+                ) = {$values.postmasterRecipient: true}
                 |
                 (
                   select(.object == "AllowedIp") | .value
