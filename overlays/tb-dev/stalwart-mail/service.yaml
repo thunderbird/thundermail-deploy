@@ -1,5 +1,5 @@
-# This file contains no overlays for the stalwart-mail and stalwart-https services, which are
-# cluster-internal and do not require additional environment configuration.
+# This file contains no overlays for the stalwart-https service, which is cluster-internal and
+# does not require additional environment configuration.
 
 ---
 apiVersion: v1
@@ -20,3 +20,13 @@ kind: Service
 metadata:
   name: stalwart-mail-private
   namespace: thundermail
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-mail
+spec:
+  ports:
+    - port: 587
+      targetPort: starttls
