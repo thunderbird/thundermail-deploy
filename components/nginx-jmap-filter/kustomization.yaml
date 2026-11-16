@@ -1,0 +1,19 @@
+---
+# Public JMAP filter for nginx: adds the jmap.js key to the base nginx-config ConfigMap.
+# An overlay that lists this component must also, in its own files:
+#   - load and route to it in nginx/configmap.yaml (js_import jmap from /etc/nginx/jmap.js), and
+#   - project the jmap.js key in nginx/deployment.yaml. The overlay's Deployment patch runs after
+#     this component and replaces the projected sources list, so the item cannot be added here.
+# Test: components/nginx-jmap-filter/test-jmap-filter.sh overlays/<name> (CI runs it for every
+# overlay whose kustomization.yaml lists this component).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+configMapGenerator:
+  - name: nginx-config
+    namespace: thundermail
+    behavior: merge
+    files:
+      - jmap.js
+    options:
+      disableNameSuffixHash: true

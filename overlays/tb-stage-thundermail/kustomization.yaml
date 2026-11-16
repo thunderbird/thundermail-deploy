@@ -7,6 +7,9 @@ resources:
   - ../../bases
   - stalwart-mail/cloudflare-api-token.yaml
 
+components:
+  - ../../components/nginx-jmap-filter
+
 namespace: "thundermail"
 
 images:
