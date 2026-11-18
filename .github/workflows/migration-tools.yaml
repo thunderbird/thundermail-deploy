@@ -1,0 +1,62 @@
+name: migration-tools
+
+concurrency:
+  group: migration-tools-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-tool-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install swaks and shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends swaks libnet-ssleay-perl libio-socket-ssl-perl
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+          echo "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          sudo tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C /usr/local/bin --strip-components=1 shellcheck-v0.10.0/shellcheck
+          shellcheck --version
+
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          unshare -rnm true
+
+      - name: bash -n
+        run: find util/migration -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: shellcheck
+        run: find util/migration -name '*.sh' -print0 | xargs -0 shellcheck --shell=bash --severity=error
+
+      - name: Python tests
+        run: |
+          fail=0
+          while IFS= read -r t; do
+            echo "::group::${t}"
+            python3 "${t}" -v 2>&1 | tee "$RUNNER_TEMP/test.log" || fail=1
+            echo "::endgroup::"
+            if grep -q 'skipped=' "$RUNNER_TEMP/test.log"; then
+              echo "::error file=${t}::tests were skipped"
+              fail=1
+            fi
+          done < <(find util/migration -name 'test_*.py' | sort)
+          exit "${fail}"
