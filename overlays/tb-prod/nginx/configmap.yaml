@@ -324,4 +324,14 @@ data:
           return 404;
         }
       }
+
+      server {
+        listen 8081;
+        location = / {
+          return 200;
+        }
+        location / {
+          return 404;
+        }
+      }
     }
