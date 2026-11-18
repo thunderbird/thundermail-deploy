@@ -372,6 +372,13 @@ data:
         else: 'false'
     ---
     '@type': update
+    object: MtaStageData
+    value:
+      maxMessages:
+        match: {}
+        else: '1000'
+    ---
+    '@type': update
     object: MtaSts
     value:
       mxHosts:
@@ -490,5 +497,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-27kct5486d
+  name: stalwart-config-base-tpl-kd4c7tkghd
   namespace: thundermail
