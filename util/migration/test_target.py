@@ -226,7 +226,7 @@ class Builder(Sandbox):
     def test_prod_marks_placeholders_and_writes_the_window_names(self):
         rc, out = self.build(HERE, **self.prod_env())
         self.assertNotEqual(rc, 0)
-        self.assertRegex(out, r'KARGO_STAGE_CONFIGS +len=\d+ NEED \(placeholder\)')
+        self.assertRegex(out, r'LEGACY_PG_SECRET_NAME +len=\d+ NEED \(placeholder\)')
         for name in (
             'TARGET_NLB_IPS',
             'TBPROD_AUTH_ALB',
@@ -872,7 +872,8 @@ class Runner(Sandbox):
     def test_prod_refuses_until_the_placeholders_are_filled(self):
         rc, out = self.run_sh([str(HERE / 'runner-pod.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 1)
-        self.assertIn('RUNNER_SGP_LABEL', out)
+        self.assertIn('fill it before rendering the runner', out)
+        self.assertEqual(out.count('\n'), 1, out)
 
     def test_prod_render_with_values(self):
         defs = self.t / 'mig'
@@ -880,13 +881,12 @@ class Runner(Sandbox):
         p = defs / 'targets' / 'tb-prod.sh'
         p.write_text(
             p.read_text()
-            .replace('REPLACE_ME_RUNNER_SGP_LABEL', 'runner-sgp')
             .replace('REPLACE_ME_RUNNER_WORK_SIZE', '64Gi')
             .replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
         )
         rc, out = self.run_sh([str(defs / 'runner-pod.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 0, out)
-        self.assertIn('    app.kubernetes.io/name: runner-sgp\n', out)
+        self.assertIn('    app.kubernetes.io/name: stalwart-config-applier\n', out)
         self.assertIn('secretName: legacy-pg\n', out)
         self.assertIn('legacy-pg has no $k key', out)
         self.assertIn('      emptyDir:\n        sizeLimit: 64Gi\n', out)
@@ -969,10 +969,10 @@ def filled(src, dst, keep=None, value=None):
         lines = []
         for line in p.read_text().splitlines():
             name, sep, rest = line.partition('=')
-            if sep and 'REPLACE_ME' in rest:
-                if name == keep:
-                    rest = value
-                elif name == 'INTERNAL_CIDRS':
+            if sep and name == keep:
+                rest = value
+            elif sep and 'REPLACE_ME' in rest:
+                if name == 'INTERNAL_CIDRS':
                     rest = '10.0.0.0/16'
                 elif name == 'RUNNER_WORK_SIZE':
                     rest = '64Gi'
@@ -1036,8 +1036,17 @@ class Placeholders(Sandbox):
             KUBECONFIG_DEV=str(self.t / 'kc-dev'),
         )
         self.assertNotEqual(rc, 0)
-        for name in ('THAW_BRANCH', 'SPF_DECIDED_TXT', 'verify/tb-prod.env:SOURCE_PG_SECRET_ID'):
+        for name in ('THAW_BRANCH', 'SPF_DECIDED_TXT'):
             self.assertRegex(out, r'(?m)^%s +NEED \(placeholder' % re.escape(name))
+        mig = filled(HERE, self.t / 'mig-verify', 'SOURCE_PG_SECRET_ID', 'REPLACE_ME_X')
+        rc, out = self.run_sh(
+            [str(mig / 'build-cutover-env.sh')],
+            TARGET_ENV='tb-prod',
+            KUBECONFIG_TARGET=str(self.t / 'kc-target'),
+            KUBECONFIG_HUB=str(self.t / 'kc-hub'),
+            KUBECONFIG_DEV=str(self.t / 'kc-dev'),
+        )
+        self.assertRegex(out, r'(?m)^verify/tb-prod.env:SOURCE_PG_SECRET_ID +NEED \(placeholder')
 
     def test_runner_refuses_each_of_its_names_in_any_case(self):
         for name in ('RUNNER_SGP_LABEL', 'RUNNER_WORK_SIZE', 'LEGACY_PG_SECRET_NAME'):
@@ -1048,9 +1057,10 @@ class Placeholders(Sandbox):
                 self.assertIn(name, out)
 
     def test_run_all_refuses_a_verify_placeholder(self):
-        rc, out = self.run_sh([str(HERE / 'verify' / 'run_all.sh')], TARGET_ENV='tb-prod')
+        mig = filled(HERE, self.t / 'mig', 'INTERNAL_CIDRS', 'REPLACE_ME_X')
+        rc, out = self.run_sh([str(mig / 'verify' / 'run_all.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 99, out)
-        self.assertIn('SOURCE_PG_SECRET_ID INTERNAL_CIDRS', out)
+        self.assertIn('placeholder in verify/tb-prod.env:INTERNAL_CIDRS', out)
         self.assertEqual(self.log(), '')
 
 
