@@ -339,12 +339,13 @@ check() {
   target_health() { [ -n "${STALWART_URL:-}" ] || { echo "STALWART_URL empty: rebuild the env file"; return 1; }; http200 "$STALWART_URL/healthz/live"; }
   count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
-    local out snap
+    local out snap rc=0
     out=$("$MIG_DIR/snapshot-$1.sh" ${3:-} 2>&1) || { echo "snapshot-$1.sh failed: $(tail -1 <<<"$out")"; return 1; }
     snap=$(tail -1 <<<"$out")
     [ -f "$snap" ] || { echo "snapshot-$1.sh wrote no file"; return 1; }
-    "$MIG_DIR/restore-$2.sh" "$snap" ${4:-} --dry-run | tail -1
-    mkdir -p "$(dirname "$snap")/env-check" && mv "$snap" "$(dirname "$snap")/env-check/"
+    "$MIG_DIR/restore-$2.sh" "$snap" ${4:-} --dry-run | tail -1 || rc=$?
+    mkdir -p "$(dirname "$snap")/env-check" && mv "$snap" "$(dirname "$snap")/env-check/" || return 1
+    return "$rc"
   }
   target_db() {
     if pod sh -c 'test -s /work/target-before.dump' 2>/dev/null; then "$MIG_DIR/restore-target-db.sh" /work/target-before.dump --dry-run | tail -1

@@ -585,7 +585,7 @@ class RestartProbe(Harness):
         self.assertIn('port-forward pod/stalwart-new -> http://127.0.0.1:18080', out)
         self.assertIn('rc=0 pf_ok=1', out)
 
-    def reuse_in_prod(self, kubeconfig):
+    def reuse_in_prod(self, kubeconfig, target_env='tb-prod'):
         rules = [
             {
                 'tool': 'kubectl',
@@ -600,7 +600,7 @@ class RestartProbe(Harness):
             'STALWART_URL=http://127.0.0.1:18080 PF_OK=0 PF=""' % kubeconfig
         )
         body = 'port_forward; echo "rc=$? pf_ok=$PF_OK"'
-        return self.fn('lib.sh', body, setup, rules=rules, env=self.env(TARGET_ENV='tb-prod'))
+        return self.fn('lib.sh', body, setup, rules=rules, env=self.env(TARGET_ENV=target_env))
 
     def test_a_reused_prod_port_forward_with_another_kubeconfig_is_refused(self):
         (self.t / 'kc-other').write_text('')
@@ -608,6 +608,12 @@ class RestartProbe(Harness):
         self.assertIn('was not started with --kubeconfig /dev/null: credentials not sent', out)
         self.assertIn('rc=1 pf_ok=0', out)
         self.assertNotIn('reusing', out)
+
+    def test_a_stage_run_refuses_a_port_forward_of_another_kubeconfig(self):
+        (self.t / 'kc-prod').write_text('')
+        out = self.reuse_in_prod(self.t / 'kc-prod', 'tb-stage')
+        self.assertIn('was not started with --kubeconfig /dev/null: credentials not sent', out)
+        self.assertIn('rc=1 pf_ok=0', out)
 
     def test_a_reused_prod_port_forward_with_the_target_kubeconfig_is_reused(self):
         out = self.reuse_in_prod('/dev/null')

@@ -24,8 +24,8 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   values from the env file first, then the environment, and never prints a value.
 - `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
   `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
-  or when `--context`, `--cluster`, `--server`, `--token` or `--user` is passed, so no script falls
-  back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
+  or when a flag picks another cluster or credential (`--context`, `--cluster`, `--server`, `--user`,
+  `--token`, `--as`, the client certificate and TLS flags), so no script falls back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
   cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
   name is still read.
 - Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`

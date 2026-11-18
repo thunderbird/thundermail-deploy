@@ -33,7 +33,7 @@ kube_args_ok() {
   for a in "$@"; do
     [ "$a" != -- ] || break
     case $a in
-      --context|--context=*|--cluster|--cluster=*|--server|--server=*|-s|-s?*|--token|--token=*|--user|--user=*)
+      --context|--context=*|--cluster|--cluster=*|--server|--server=*|-s|-s?*|--token|--token=*|--user|--user=*|--username|--username=*|--password|--password=*|--as|--as=*|--as-group|--as-group=*|--as-uid|--as-uid=*|--client-certificate|--client-certificate=*|--client-key|--client-key=*|--certificate-authority|--certificate-authority=*|--insecure-skip-tls-verify|--insecure-skip-tls-verify=*|--tls-server-name|--tls-server-name=*|--proxy-url|--proxy-url=*)
         echo "refusing kubectl: $a picks a cluster or credential the --kubeconfig check did not see" >&2; return 64 ;;
     esac
     case $prev:$a in
@@ -53,8 +53,15 @@ kube_args_ok() {
   [ "$prev" != --kubeconfig ] || { echo "refusing kubectl: --kubeconfig has no value" >&2; return 64; }
 }
 kubectl() { kube_args_ok "$@" || return 64; command kubectl "$@"; }
+env_path_ok() {
+  local f=$1 d
+  d=$(dirname "$1")
+  [ ! -L "$d" ] && [ -O "$d" ] && [ -z "$(find "$d" -maxdepth 0 -perm /022)" ] || return 1
+  [ ! -e "$f" ] || { [ ! -L "$f" ] && [ -O "$f" ] && [ -z "$(find "$f" -maxdepth 0 -perm /022)" ]; }
+}
 env_target_ok() {
   local f
+  env_path_ok "$1" || { echo "refusing $1: it or its directory is a symlink, not owned by $(id -un), or writable by group or others" >&2; return 64; }
   f=$(unset TARGET_ENV; set +eu; . "$1" >/dev/null 2>&1; printf '%s' "${TARGET_ENV:-}")
   [ "$f" = "$TARGET_ENV" ] || { [ -z "$f" ] && [ "$TARGET_ENV" = tb-stage ]; } || { echo "refusing $1: it was built for TARGET_ENV=${f:-<none>}, not $TARGET_ENV" >&2; return 64; }
 }
@@ -78,6 +85,7 @@ load_cutover_env() {
     env_target_ok "$ENV_FILE" || exit 64
     set -a; eval "$(< "$ENV_FILE")"; set +a
     TARGET_ENV=$want
+    [ "$TARGET_ENV" != tb-stage ] || : "${KUBECONFIG_TARGET:=${KUBECONFIG_STAGE:-}}"
   fi
   [ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
   CUTOVER_ENV_LOADED=1

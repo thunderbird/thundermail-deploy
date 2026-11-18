@@ -377,6 +377,10 @@ class CheckSnapshots(Sandbox):
         self.assertEqual(list((self.t / 'secret').glob('realm-before-*')), [])
         self.assertTrue((self.t / 'ev' / 'env-check' / 'zone-before-z1-1.json').is_file())
         self.assertTrue((self.t / 'secret' / 'env-check' / 'realm-before-1.json').is_file())
+        (mig / 'restore-zone.sh').write_text('echo "create=1 failed=1"; exit 1\n')
+        rc, out = self.run_sh(['-c', 'set -o pipefail\n%s\npair zone zone z1; echo "rc=$?"' % body.split('\npair')[0]])
+        self.assertIn('create=1 failed=1\nrc=1\n', out)
+        self.assertEqual(list((self.t / 'ev').glob('zone-before-*')), [])
 
 class HeldReplicas(Sandbox):
     def repo(self, replicas):
@@ -524,6 +528,12 @@ class KubeconfigGuard(Sandbox):
             '--cluster c',
             '--token t',
             '--user u',
+            '--as admin',
+            '--client-key=k',
+            '--insecure-skip-tls-verify',
+            '--certificate-authority ca',
+            '--username u',
+            '--proxy-url http://p',
         ):
             with self.subTest(flag=flag):
                 rc, out = self.guard(
@@ -605,6 +615,13 @@ class TargetEnv(Sandbox):
                         LANE_PF_PORT=port,
                     )
                     self.assertIn(want + '\n', out)
+
+    def test_a_stage_env_file_with_the_old_kubeconfig_name_still_works(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text("KUBECONFIG_STAGE='%s'\n" % (self.t / 'kc-target'))
+        f.chmod(0o600)
+        rc, out = self.run_sh(['-c', '. %s/lib.sh\necho "kc=$KUBECONFIG_TARGET"' % HERE], TARGET_ENV='tb-stage')
+        self.assertEqual(out, 'kc=%s\n' % (self.t / 'kc-target'))
 
     def test_an_empty_stalwart_url_names_its_source(self):
         f = self.t / 'shm' / 'cutover.env'
@@ -1073,6 +1090,23 @@ class CrossEnvironment(Sandbox):
         f.write_text("TARGET_ENV='tb-prod'\nADMIN_MERGE='1'\n")
         self.prod_build()
         self.assertIn("ADMIN_MERGE='1'", (self.t / 'shm' / 'cutover.env').read_text())
+
+    def test_prereqs_never_source_an_env_file_others_can_write(self):
+        plant = self.t / 'plant'
+        plant.mkdir()
+        plant.chmod(0o777)
+        f = plant / 'cutover.env'
+        f.write_text("touch %s/PWNED; TARGET_ENV='tb-prod'\n" % self.t)
+        f.chmod(0o666)
+        for args in (
+            [str(HERE / 'check-prereqs.sh'), '--for', 'start'],
+            [str(HERE / 'thaw.sh'), '--dry-run'],
+        ):
+            with self.subTest(script=args[0]):
+                rc, out = self.run_sh(args, TARGET_ENV='tb-prod', CUTOVER_ENV=str(f), FREEZE_PR='7', PI_DIR=str(self.t))
+                self.assertIn(rc, (1, 64), out)
+                self.assertIn('writable by group or others', out)
+                self.assertFalse((self.t / 'PWNED').exists())
 
     def test_thaw_and_prereqs_refuse_an_env_file_of_the_other_environment(self):
         f = self.t / 'shm' / 'cutover.env'

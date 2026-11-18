@@ -238,7 +238,7 @@ port_forward() {
   local pod port=${STALWART_URL##*:}
   if [ -n "$(listener "$port")" ]; then
     owned_by "$port" kubectl || { echo "a listener on :$port is not a kubectl owned by $(id -un): credentials not sent"; return 1; }
-    [ "$TARGET_ENV" != tb-prod ] || forward_kubeconfig_ok "$port" || { echo "the kubectl on :$port was not started with --kubeconfig ${KS[2]}: credentials not sent"; return 1; }
+    forward_kubeconfig_ok "$port" || { echo "the kubectl on :$port was not started with --kubeconfig ${KS[2]}: credentials not sent"; return 1; }
     curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "kubectl listener on :$port does not answer"; return 1; }
     echo "reusing the kubectl port-forward on $STALWART_URL"
     PF_OK=1
