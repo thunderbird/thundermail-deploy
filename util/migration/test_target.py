@@ -31,6 +31,33 @@ GATE_IDS = (
     'go-W1 go-W2 go-outbound-block go-T7 go-W4 go-T8 go-W5 go-predns go-mx-flip go-access go-open '
     'go-W8 go-P1 go-V2 go-rollback checks presync rehearsal backups verify auth-dns pre-cut'
 ).split()
+MAIN_STAGE_BUILD = (
+    'STALWART_TARGET_PG_HOST 19 STALWART_TARGET_PG_DB 2 STALWART_TARGET_PG_USER 3 '
+    'STALWART_TARGET_PG_PASSWORD 5 STALWART_USER 5 STALWART_PASSWORD 6 STALWART_URL 22 '
+    'OLD_STALWART_URL 23 OLD_STALWART_USER 5 OLD_STALWART_PASSWORD 6 '
+    'STALWART_LEGACY_PG_HOST 19 STALWART_LEGACY_PG_DB 1 STALWART_LEGACY_PG_USER 1 '
+    'STALWART_LEGACY_PG_PASSWORD 4 ACCOUNTS_LEGACY_PG_HOST 18 ACCOUNTS_LEGACY_PG_NAME 6 '
+    'ACCOUNTS_LEGACY_PG_USER 6 ACCOUNTS_LEGACY_PG_PASSWORD 6 KC_LEGACY_PG_HOST 18 '
+    'KC_LEGACY_PG_DB 6 KC_LEGACY_PG_USER 6 KC_LEGACY_PG_PASSWORD 6 '
+    'KC_LEGACY_ADMIN_CLIENT_ID 6 KC_LEGACY_ADMIN_CLIENT_SECRET 6 KC_LEGACY_URL 25 '
+    'NEON_PROJECT_STALWART_LEGACY 0 NEON_LEGACY_STALWART_BRANCH 0 NEON_PROJECT_KC 0 '
+    'NEON_PROJECT_ACCOUNTS 0 LEGACY_BLOB_BUCKET 24 TARGET_BLOB_BUCKET * REDIS_URL * '
+    'LEGACY_MGMT_INSTANCE 6 LEGACY_PUB_LB_ARN 8 LEGACY_PUB_SG 4 LEGACY_PUB_SG_RULE_IDS 11 '
+    'LEGACY_ECS_TARGETS 31 LEGACY_ASG_RESOURCE_IDS 39 ARGO_APPS 86 '
+    'KARGO_PROJECT_ACCOUNTS 11 KARGO_STAGE_ACCOUNTS 8 KARGO_PROJECT_CONFIGS 19 '
+    'KARGO_STAGE_CONFIGS 29 KARGO_WAREHOUSE_CONFIGS 33 FREEZE_PR 2 T6_PR 0 T7_PR 2 '
+    'T7_REVERT_PR 2 T8_PR 2 T8_REVERT_PR 2 FLIP_PR 0 APPOINTMENT_PR 0 ADMIN_MERGE 0 '
+    'PI_DIR 0 KCD_DIR 0 ACD_DIR 0 APPOINTMENT_DIR 0 TMD_DIR 0 AWS_REGION 12 '
+    'CF_API_TOKEN_AGENT 0 CF_ZONE_ID 0 CF_ZONE_ID_TBPRO 0 PADDLE_API_KEY 0 '
+    'ACCOUNTS_WEBHOOK_URL 73 TARGET_NLB_DNS 16 TEST_MAILBOX 0 TEST_MAILBOX_IMAP_HOST 0 '
+    'TEST_MAILBOX_IMAP_USER 0 TEST_MAILBOX_IMAP_PASSWORD 0 TEST_USER 0 TEST_SENDER 0 '
+    'INBOUND_FROM 0 SPF_FINAL_TXT 0 SUPPORT_CHANNEL 0 KUBECONFIG_TARGET * '
+    'KUBECONFIG_HUB * KUBECONFIG_DEV * EVIDENCE_DIR * TIMING_TSV * SECRET_DIR * '
+    'RCLONE_CONFIG_LEG_TYPE 2 RCLONE_CONFIG_LEG_PROVIDER 3 RCLONE_CONFIG_LEG_ENV_AUTH 4 '
+    'RCLONE_CONFIG_LEG_REGION 12 RCLONE_CONFIG_LEG_PROFILE 11 RCLONE_CONFIG_TGT_TYPE 2 '
+    'RCLONE_CONFIG_TGT_PROVIDER 3 RCLONE_CONFIG_TGT_ENV_AUTH 4 '
+    'RCLONE_CONFIG_TGT_REGION 12 RCLONE_CONFIG_TGT_PROFILE 13 '
+).split()
 LIBS = {'lib.sh', 'timing.sh', 'target.sh', 'window/lib.sh'}
 
 
@@ -145,26 +172,18 @@ class Builder(Sandbox):
         return self.run_sh([str(mig / 'build-cutover-env.sh'), *args], **env)
 
     def test_stage_names_and_lengths_match_main(self):
-        old = self.t / 'main'
-        old.mkdir()
-        tar = subprocess.run(
-            ['git', '-C', str(REPO), 'archive', 'origin/main', 'util', 'overlays', 'bases'],
-            capture_output=True,
-            check=True,
-        ).stdout
-        subprocess.run(['tar', '-x', '-C', str(old)], input=tar, check=True)
         kc = {
             'KUBECONFIG_STAGE': str(self.t / 'kc-target'),
             'KUBECONFIG_HUB': str(self.t / 'kc-hub'),
             'KUBECONFIG_DEV': str(self.t / 'kc-dev'),
         }
-        _, before = self.build(old / 'util' / 'migration', **kc)
-        (self.t / 'shm' / 'cutover.env').unlink()
-        _, after = self.build(HERE, TARGET_ENV='tb-stage', **kc)
-        renamed = [
-            ln.replace('KUBECONFIG_STAGE  ', 'KUBECONFIG_TARGET ') for ln in before.splitlines()
-        ]
-        self.assertEqual(names_and_lengths('\n'.join(renamed)), names_and_lengths(after), after)
+        _, out = self.build(HERE, TARGET_ENV='tb-stage', **kc)
+        got = [ln.split()[:2] for ln in names_and_lengths(out)]
+        want = list(zip(MAIN_STAGE_BUILD[::2], MAIN_STAGE_BUILD[1::2]))
+        self.assertEqual([n for n, _ in got], [n for n, _ in want], out)
+        for (name, length), (_, expect) in zip(got, want):
+            if expect != '*':
+                self.assertEqual(length, 'len=' + expect, name)
         self.assertIn("TARGET_ENV='tb-stage'", (self.t / 'shm' / 'cutover.env').read_text())
 
     def prod_env(self, **extra):

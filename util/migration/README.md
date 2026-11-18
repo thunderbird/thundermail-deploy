@@ -1,7 +1,7 @@
 # Cutover tooling
 
 Scripts for the tb-stage cutover (platform-infrastructure milestone 1536) and the tb-prod
-cutover (milestone 1719). Every script needs `TARGET_ENV` set to `tb-stage` or `tb-prod` and
+cutover (milestone 1719). Every shell script needs `TARGET_ENV` set to `tb-stage` or `tb-prod` and
 exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environment (cluster,
 profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
 and secrets are looked up at build time. A `REPLACE_ME_*` value is one a later change fills in.
@@ -20,8 +20,8 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   `checks`, `presync`, `rehearsal`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
   block per id. It never prints a value.
 - `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
-  `--kubeconfig` value is empty or names a missing file, so no script falls back to the current
-  context. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
+  `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
+  so no script falls back to the current context. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
   name is still read.
 - Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator.env`
   (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
