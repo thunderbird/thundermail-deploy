@@ -31,4 +31,3 @@ webhookEvents:
   message-ingest.ham: true
   message-ingest.spam: true
   queue.authenticated-message-queued: true
-postmasterRecipient:
