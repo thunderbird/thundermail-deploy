@@ -14,17 +14,26 @@ PRINCIPAL_WARN='WARN (failed to fetch|skipping principal type)'
 TENANT_SKIP="WARN skipping principal type 'tenant': .*'Enterprise feature'"
 DROP_RE='^warning: (dropping|renaming) (User|Group) '
 DROP_BASELINE=$SECRET_DIR/convert-dropped-baseline.txt
+RECOVERY_PR="thundermail-deploy PR ${TM_RECOVERY_PR:-<TM_RECOVERY_PR>}"
+RECOVERY_WAIT=${RECOVERY_WAIT:-1800}
+REVERT="revert the recovery-mode PR ($RECOVERY_PR) with a revert PR, merge it, and wait until Argo CD has synced deploy/stalwart to 0 replicas and no stalwart pod is left"
 
 printf '%s\n' \
-  "$(shq "${KS[@]}" "${NS[@]}" scale deploy/stalwart --replicas=0)" \
+  "$REVERT: $(shq "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}') prints 0 and $(shq "${KS[@]}" "${NS[@]}" get pods -l app=stalwart) lists no pod" \
   "bash $MIG_DIR/restore-target-db.sh /work/target-before.dump --dry-run" \
   "bash $MIG_DIR/restore-target-db.sh /work/target-before.dump --apply" \
-  "$(shq "${KS[@]}" "${NS[@]}" set env deploy/stalwart STALWART_RECOVERY_MODE-)" \
-  "retry instead (DROP SCHEMA and copy again): bash $0 --apply --go '<operator confirmation from Decisions and forks>'" > "$RESTORE"
+  "retry instead (DROP SCHEMA and copy again): $REVERT, then bash $0 --apply --go '<operator confirmation from Decisions and forks>', and merge a new recovery-mode PR when it waits for the recovery-mode pod" > "$RESTORE"
 
 replicas() { "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}'; }
 runner_up() { [ "$("${KS[@]}" "${NS[@]}" get pod runner -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
-stalwart_up() { local p; p=$(stalwart_pods | head -1); [ -n "$p" ] && [ "$("${KS[@]}" "${NS[@]}" get "$p" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
+RECOVERY_OK="deploy replicas=1 ready=1 updated=1 total=1 observed=true recovery_env=true pods=1 ready=1 recovery=1"
+recovery_state() {
+  local d p
+  d=$("${KS[@]}" "${NS[@]}" get deploy/stalwart -o json | jq -r '"deploy replicas=\(.spec.replicas // 0) ready=\(.status.readyReplicas // 0) updated=\(.status.updatedReplicas // 0) total=\(.status.replicas // 0) observed=\((.status.observedGeneration // 0) >= .metadata.generation) recovery_env=\([.spec.template.spec.containers[] | select(.name == "stalwart") | .env[]? | select(.name == "STALWART_RECOVERY_MODE") | .value] | join(",") | if . == "" then "unset" else . end)"') || { STATE="deploy/stalwart not readable"; return 1; }
+  p=$("${KS[@]}" "${NS[@]}" get pods -l app=stalwart -o json | jq -r '(.items | length) as $all | [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "ReplicaSet" and (.name | startswith("stalwart-"))))] | "pods=\($all) ready=\(map(select(.metadata.deletionTimestamp == null and any(.status.conditions[]?; .type == "Ready" and .status == "True"))) | length) recovery=\(map(select(any(.spec.containers[] | select(.name == "stalwart") | .env[]?; .name == "STALWART_RECOVERY_MODE" and .value == "true"))) | length)"') || { STATE="stalwart pods not readable"; return 1; }
+  STATE="$d $p"
+  [ "$STATE" = "$RECOVERY_OK" ]
+}
 schema_ok() { [ "$(bash "$MIG_DIR/schema-version.sh" 2>/dev/null)" = 00000006 ]; }
 blob_ok() { awk -F'\t' '$1 == "cut-ecs" {c = NR} $1 == "snap-blobs" {s = NR; v = ""} $1 == "stop-W3" {v = ""} $1 == "blob-check" && $4 == "differences" {v = $5; b = NR} END {exit !(c > 0 && s > c && b > s && v == "0")}' "$TIMING_TSV"; }
 show_to() { local f=$1; shift; printf '  + %s >> %s\n' "$(shq "$@")" "$f"; }
@@ -69,7 +78,7 @@ preflight() {
     printf '  + bash %s /work/target-before.dump --dry-run\n' "$MIG_DIR/restore-target-db.sh"
     return 0
   fi
-  [ "$r" = 0 ] || { echo "deploy/stalwart must be at 0 replicas before the DROP"; return 1; }
+  [ "$r" = 0 ] || { echo "deploy/stalwart must be at 0 replicas before the DROP: if the recovery-mode PR is merged, $REVERT, then rerun"; return 1; }
   bash "$MIG_DIR/restore-target-db.sh" --assert-only || return 1
   state=$("${POD[@]}" sh -c "$PROBE") || { echo "could not read the target-before.dump state from the runner"; return 1; }
   echo "target-before.dump: $state"
@@ -104,14 +113,22 @@ account_ids() {
 }
 
 blob_recheck() {
-  local out rc=0
-  printf '  + after the W3 blob-check: rclone copy and rclone check leg:%s tgt:%s again, so blobs written before the legacy dump are in the target\n' "$LEGACY_BLOB_BUCKET" "$TARGET_BLOB_BUCKET"
+  local out rc=0 d
+  printf '  + after the W3 blob-check: the delta copy and check of blob-delta.sh again, so blobs written before the legacy dump are in the target\n'
+  if [ "$APPLY" = 1 ]; then
+    until_ok 3600 blob_ok || { echo "no blob-check differences=0 row for the current cut after 3600s; stay in recovery mode"; return 1; }
+  fi
+  bash "$MIG_DIR/blob-delta.sh" copy "$S/rclone-recopy-$TS" "--$(mode)" || { echo "delta rclone copy failed; log $S/rclone-recopy-$TS.log"; return 1; }
+  out=$(bash "$MIG_DIR/blob-delta.sh" check "$EVIDENCE_DIR/blobs-recheck-$TS" "--$(mode)") || rc=$?
+  printf '%s\n' "$out"
   [ "$APPLY" = 1 ] || return 0
-  until_ok 3600 blob_ok || { echo "no blob-check differences=0 row for the current cut after 3600s; stay in recovery mode"; return 1; }
-  rclone copy "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" --transfers 64 --checkers 64 --s3-no-check-bucket --fast-list --retries 5 --low-level-retries 20 --log-level NOTICE --log-file "$S/rclone-recopy-$TS.log" || { echo "incremental rclone copy failed"; return 1; }
-  out=$(rclone check --one-way "leg:$LEGACY_BLOB_BUCKET" "tgt:$TARGET_BLOB_BUCKET" 2>&1) || rc=$?
-  printf '%s\n' "$out" > "$S/rclone-recheck-$TS.log"
-  if [ "$rc" = 0 ]; then VALUE=0; else VALUE=errors-exit-$rc; echo "rclone check after the dump failed (exit $rc); see $S/rclone-recheck-$TS.log"; return 1; fi
+  if [ "$rc" != 0 ]; then
+    d=$(sed -n 's/.* differences=\([0-9]*\) .*/\1/p' <<<"$out")
+    if [ -n "$d" ] && [ "$d" != 0 ]; then VALUE=$d; else VALUE=errors-exit-$rc; fi
+    echo "rclone check after the dump failed (exit $rc); see $EVIDENCE_DIR/blobs-recheck-$TS-*.txt"
+    return 1
+  fi
+  VALUE=0
   echo "blobs match after the legacy dump"
 }
 
@@ -142,12 +159,26 @@ dump() {
   bash "$MIG_DIR/dump-check.sh" "$S/principals.json" || { echo "dump-check.sh: the dump does not match the server's principal totals"; return 1; }
 }
 
+first_error() { sed -n 's/^error: //p' "$1" | head -1 | sed -E "s/'[^']*'|\"[^\"]*\"/'<value>'/g; s/((User|Group|MailingList|Account) [^ ]+ )\([^)]*\)/\1(<name>)/g; s/[^[:space:]]+@[^[:space:]]+/<address>/g"; }
+
+duplicates() {
+  local rc=0
+  run_to "$S/duplicates.txt" "$PY" "$MIG_DIR/dup_check.py" --principals "$S/principals.json" --settings "$S/settings.json" || rc=$?
+  [ "$APPLY" = 1 ] || return 0
+  grep -E $'^(class|total)\t' "$S/duplicates.txt" | tr '\t' ' ' | sed 's/^/  /' || true
+  VALUE=$(sed -n $'s/^total\t//p' "$S/duplicates.txt")
+  case "$rc" in
+    0) ;;
+    3) echo "$VALUE duplicate address(es) by class above; each address and its claimants is in $S/duplicates.txt. convert would stop on the first: resolve them on legacy, then rerun from the dump"; return 1 ;;
+    *) echo "dup_check.py exit $rc: $(first_error "$S/duplicates.txt"); full text in $S/duplicates.txt"; return 1 ;;
+  esac
+}
+
 convert() {
   local rc=0
   run_err "$S/convert.stderr" "$PY" "$MIG_DIR/migrate_v016.py" convert --settings "$S/settings.json" --principals "$S/principals.json" --config "$S/config.json" --output "$S/export.json" --unmigrated-output "$S/unmigrated.txt" || rc=$?
   [ "$APPLY" = 1 ] || return 0
-  [ "$rc" != 1 ] || { echo "convert exit 1 (#1166 fork): apply the pre-recorded remediation, then rerun"; return 1; }
-  [ "$rc" = 0 ] || { echo "convert exit $rc"; return 1; }
+  [ "$rc" = 0 ] || { echo "convert exit $rc: $(first_error "$S/convert.stderr"); full text in $S/convert.stderr"; return 1; }
   [ -s "$S/export.json" ] || { echo "convert wrote no export.json"; return 1; }
   VALUE=$(grep -c . "$S/export.json")
   grep -E "$DROP_RE" "$S/convert.stderr" > "$S/convert-dropped.txt" || true
@@ -203,11 +234,14 @@ restore() {
 }
 
 recovery_boot() {
-  run "${KS[@]}" "${NS[@]}" set env deploy/stalwart STALWART_RECOVERY_MODE=true || return 1
-  run "${KS[@]}" "${NS[@]}" scale deploy/stalwart --replicas=1 || return 1
-  printf '  + wait 120s for the stalwart pod Running, then 900s for schema-version.sh = 00000006\n'
-  [ "$APPLY" = 1 ] || return 0
-  until_ok 120 stalwart_up || { echo "stalwart pod not Running after 120s"; return 1; }
+  printf '  + merge the recovery-mode PR (%s) now; wait up to %ss for: %s; then 900s for schema-version.sh = 00000006\n' "$RECOVERY_PR" "$RECOVERY_WAIT" "$RECOVERY_OK"
+  if [ "$APPLY" = 0 ]; then
+    recovery_state || true
+    echo "  now: $STATE"
+    return 0
+  fi
+  until_ok "$RECOVERY_WAIT" recovery_state || { echo "after ${RECOVERY_WAIT}s not one Ready stalwart pod in recovery mode: $STATE; is $RECOVERY_PR merged and synced by Argo CD?"; return 1; }
+  echo "$STATE"
   until_ok 900 schema_ok || { echo "schema version is $(bash "$MIG_DIR/schema-version.sh" 2>/dev/null || echo unreadable), not 00000006, after 900s"; return 1; }
   VALUE=00000006
 }
@@ -237,18 +271,25 @@ admin_id() {
 
 recheck_ok() { awk -F'\t' '$1 == "db-dump-legacy" {d = NR} $1 == "blob-recheck" && $4 == "differences" {v = $5; b = NR} END {exit !(d > 0 && b > d && v == "0")}' "$TIMING_TSV"; }
 
-leave_recovery() {
+recovery_hold() {
   if [ "$APPLY" = 0 ]; then
     if blob_ok; then echo "blob-check differences=0 for the current cut is in $TIMING_TSV"; else echo "no blob-check differences=0 row after the latest cut-ecs and snap-blobs rows in $TIMING_TSV yet (W2 and W3 write them)"; fi
-  else
-    recheck_ok || { echo "no blob-recheck differences=0 row after the latest db-dump-legacy row; stay in recovery mode"; return 1; }
+    printf '  + check again: %s\n' "$RECOVERY_OK"
+    return 0
   fi
-  run "${KS[@]}" "${NS[@]}" set env deploy/stalwart STALWART_RECOVERY_MODE- || return 1
-  run "${KS[@]}" "${NS[@]}" rollout status deploy/stalwart --timeout=600s
+  recheck_ok || { echo "no blob-recheck differences=0 row after the latest db-dump-legacy row; stay in recovery mode"; return 1; }
+  recovery_state || { echo "the recovery-mode state changed before the end of W4: $STATE"; return 1; }
+  echo "$STATE"
+  echo "W4 ends in recovery mode; leaving it is a PR (W 5.1), merged only after the blob-recheck differences=0 row above"
 }
 
 prereqs
-helpers migrate_v016.py dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli rclone "$PY"
+helpers migrate_v016.py dup_check.py blob-delta.sh dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli rclone "$PY"
+if [ -z "${TM_RECOVERY_PR:-}" ]; then
+  printf 'NEED  TM_RECOVERY_PR is empty: export the number of the recovery-mode PR before W4\n'
+  [ "$APPLY" = 1 ] && stop "TM_RECOVERY_PR is empty"
+  NEEDS=$((NEEDS + 1))
+fi
 if [ "$APPLY" = 1 ] && [ -n "$(after_cut drop-schema)" ]; then
   [ -n "$GO" ] || stop "DROP SCHEMA already started for this cut: a second DROP needs the operator's confirmation (--go)"
   go_gate
@@ -257,6 +298,7 @@ step w4-preflight "" preflight
 step queue-drain queued queue_drain
 step task-queue tasks task_queue
 step dump "" dump
+step duplicates duplicates duplicates
 step convert export_lines convert
 if [ "$APPLY" = 1 ]; then
   again convert dropped_accounts "$DROPPED" || stop "could not write the convert dropped_accounts row"
@@ -270,5 +312,5 @@ step apply errors apply_export
 step admin-account-id "" admin_id
 step account-ids fails account_ids
 step blob-recheck differences blob_recheck
-step leave-recovery "" leave_recovery
+step recovery-hold "" recovery_hold
 finish
