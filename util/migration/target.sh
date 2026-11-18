@@ -8,7 +8,7 @@ esac
 export TARGET_ENV
 . "$(dirname "${BASH_SOURCE[0]}")/targets/$TARGET_ENV.sh"
 OTHER_CLUSTER=$(unset TARGET_CLUSTER; . "$(dirname "${BASH_SOURCE[0]}")/targets/$([ "$TARGET_ENV" = tb-prod ] && echo tb-stage || echo tb-prod).sh" >/dev/null 2>&1; printf '%s' "$TARGET_CLUSTER")
-kubectl() {
+kube_args_ok() {
   local a prev=""
   for a in "$@"; do
     case $prev:$a in
@@ -22,8 +22,8 @@ kubectl() {
     prev=$a
   done
   [ "$prev" != --kubeconfig ] || { echo "refusing kubectl: --kubeconfig has no value" >&2; return 64; }
-  command kubectl "$@"
 }
+kubectl() { kube_args_ok "$@" || return 64; command kubectl "$@"; }
 env_target_ok() {
   local f
   f=$(unset TARGET_ENV; set +eu; . "$1" >/dev/null 2>&1; printf '%s' "${TARGET_ENV:-}")

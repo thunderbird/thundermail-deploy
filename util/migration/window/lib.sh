@@ -243,7 +243,8 @@ port_forward() {
   fi
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart --field-selector=status.phase=Running -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | "pod/" + .metadata.name][0] // empty')
   [ -n "$pod" ] || { echo "no Running Stalwart pod"; return 1; }
-  "${KS[@]}" -n thundermail port-forward "$pod" "$port:8080" >/dev/null 2>&1 &
+  kube_args_ok "${KS[@]:1}" || return 1
+  command "${KS[@]}" -n thundermail port-forward "$pod" "$port:8080" >/dev/null 2>&1 &
   PF=$!
   until_ok 30 curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "port-forward to $pod did not answer"; return 1; }
   echo "port-forward $pod -> $STALWART_URL"
@@ -272,7 +273,8 @@ restart_stalwart() {
     [ -z "$(listener $((10000 + p)))" ] || { echo "local port $((10000 + p)) is already in use: stop that listener, then rerun"; return 1; }
     fwd+=("$((10000 + p)):$p")
   done
-  "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
+  kube_args_ok "${KS[@]:1}" || return 1
+  command "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
   MAIL_PF=$!
   until_ok 30 mail_forwarded || { kill "$MAIL_PF" 2>/dev/null || true; MAIL_PF=""; echo "port-forward to $pod did not open 10025 10465 10587 10993"; return 1; }
   for p in 25 465 587 993; do until_ok 60 mail_tls "$p" || bad="$bad $p"; done
