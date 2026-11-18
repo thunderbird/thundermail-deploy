@@ -2,10 +2,12 @@ domainSlug: thundermail
 domainFQDN: thundermail.com
 blobStoreRegion: EuCentral1
 blobStoreBucket: mzla-tb-prod-thundermail-stalwart-blob-store
-inMemoryStoreURL: REPLACE_ME_IN_MEMORY_STORE_URL
+inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.cfoyzs.euc1.cache.amazonaws.com
 tracerSlug: stdout
 internalIPCIDR: 10.130.0.0/16
-tlsCertificateSANs: REPLACE_ME_TLS_CERTIFICATE_SANS
+tlsCertificateSANs:
+  '*.thundermail.com': true
+  '*.tb.pro': true
 oidcIssuerURL: https://auth.tb.pro/realms/tbpro
 stalwartPgHost: ep-still-resonance-b9c8rnw6-pooler.c-7.eu-central-1.aws.neon.tech
 stalwartPgDatabase: neondb
