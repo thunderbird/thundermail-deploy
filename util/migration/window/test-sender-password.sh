@@ -4,7 +4,7 @@ set -euo pipefail
 need TARGET_NLB_DNS
 pending TEST_USER
 M=$MAIL_HOST
-OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
+OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 printf 'n/a: stores one value in the env file\n' > "$RESTORE"
 
 capture() {

@@ -23,8 +23,8 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
   so no script falls back to the current context. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
   name is still read.
-- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator.env`
-  (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
+- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`
+  (mode 600, or both scripts stop; tb-stage falls back to `cutover-operator.env`; a tb-prod file needs a `TARGET_ENV=tb-prod` line); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
@@ -238,7 +238,7 @@ the keying for the real hosts.
   `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
   start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
   created in the Accounts UI from `TEST_SENDER_APP_PASSWORD` (or `TEST_USER_APP_PASSWORD`) in `$OPERATOR_ENV` (default
-  `~/.local/state/talos/cutover-operator.env`, mode 600), else from stdin, never from an argument.
+  `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`, mode 600), else from stdin, never from an argument.
   It stores the value (appends `TEST_SENDER_APP_PASSWORD`) only after a JMAP session on 443, an
   IMAP LOGIN on 993 and an SMTP AUTH on 587 all succeed, and names the ports that failed. `build-cutover-env.sh` carries
   `TEST_SENDER_APP_PASSWORD` only from the previous cutover env file, never from the operator file,

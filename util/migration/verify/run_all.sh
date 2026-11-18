@@ -4,6 +4,7 @@
 set -u
 cd "$(dirname "$0")" || exit 99
 . ../target.sh
+case "$PLACEHOLDERS" in *verify/*) echo "== refusing: placeholder in verify/$TARGET_ENV.env:$(tr ' ' '\n' <<<"$PLACEHOLDERS" | sed -n 's|^verify/[^:]*:||p' | tr '\n' ' ')"; exit 99 ;; esac
 usage() { echo "usage: run_all.sh [--group source|data|config]"; exit 99; }
 GROUP=all
 case "${1:-}" in

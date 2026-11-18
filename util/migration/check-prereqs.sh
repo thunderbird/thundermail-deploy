@@ -32,8 +32,10 @@ done
 
 WORK_DIR=${WORK_DIR:-$HOME/.local/state/talos}
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
-OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
+[ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
+OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 KC_TARGET=${KUBECONFIG_TARGET:-$WORK_DIR/$TARGET_KUBECONFIG_NAME}
+KUBECONFIG_TARGET=$KC_TARGET
 KC_HUB=${KUBECONFIG_HUB:-$WORK_DIR/kc-hub}
 KC_DEV=${KUBECONFIG_DEV:-$WORK_DIR/kc-dev}
 VENV_PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
@@ -54,6 +56,7 @@ load_operator_env() {
   local f=$1 name val
   [ -e "$f" ] || return 0
   [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  env_target_ok "$f" || exit 64
   while IFS= read -r name; do
     [ -z "${!name:-}" ] || continue
     val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")
@@ -238,6 +241,7 @@ c_git_transport() {
 }
 c_spf_final() { if [ "$(ev SPF_FINAL_TXT)" = "$SPF_DECIDED_TXT" ]; then echo "SPF_FINAL_TXT equals the #1535 text in the env file"; else echo "SPF_FINAL_TXT in $ENV_FILE is not the #1535 text '$SPF_DECIDED_TXT'"; return 1; fi; }
 c_support() { envfile_has SUPPORT_CHANNEL && echo "SUPPORT_CHANNEL named in the env file" || { echo "channel not named"; return 1; }; }
+c_placeholders() { [ -z "$PLACEHOLDERS" ] && echo "no REPLACE_ME value in targets/$TARGET_ENV.sh or verify/$TARGET_ENV.env" || { echo "fill:$PLACEHOLDERS"; return 1; }; }
 c_tool() { command -v "$1" >/dev/null 2>&1 && echo "$(command -v "$1")" || { echo "$1 missing"; return 1; }; }
 c_venv() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import requests, urllib3' 2>/dev/null && echo "$VENV_PY imports ok" || { echo "venv missing: $VENV_PY"; return 1; }; }
 c_checkout() {
@@ -245,7 +249,8 @@ c_checkout() {
   [ -n "$d" ] && [ -n "$sha" ] || { echo "TMD_CHECKOUT or WINDOW_SHA not in $ENV_FILE"; return 1; }
   [ "$(pwd -P)" = "$(cd "$d" 2>/dev/null && pwd -P)" ] || { echo "cwd is not TMD_CHECKOUT"; return 1; }
   [ "$(git rev-parse HEAD 2>/dev/null)" = "$sha" ] || { echo "HEAD is not WINDOW_SHA"; return 1; }
-  [ -z "$(git status --porcelain 2>/dev/null)" ] || { echo "checkout has changes"; return 1; }
+  local st; st=$(git status --porcelain 2>/dev/null) || { echo "git status failed in TMD_CHECKOUT"; return 1; }
+  [ -z "$st" ] || { echo "checkout has changes"; return 1; }
   echo "cwd is TMD_CHECKOUT at WINDOW_SHA, clean"
 }
 c_aws_reads() {
@@ -284,6 +289,7 @@ LEG="$R1 backups go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W4 auth-dn
 HUB="$R1 go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W5 go-predns go-access go-open go-W8 go-P1 verify go-rollback"
 rows() {
   [ "$TARGET_ENV" != tb-prod ] || [ -z "$FOR" ] || row "ALL" checkout c_checkout
+  [ "$TARGET_ENV" != tb-prod ] || row "ALL" placeholders c_placeholders
   row "ALL" "sso-$TARGET_AWS_PROFILE" c_sso "$TARGET_AWS_PROFILE"
   row "$LEG" "sso-$LEGACY" c_sso "$LEGACY"
   row "$HUB" sso-mzla-shared c_sso mzla-shared

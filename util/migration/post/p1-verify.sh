@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
+no_placeholders APPT_HOST CALDAV_HOST AUTH_HOST ACCOUNTS_HOST || exit 64
 OLD_AUTH_HOST=$LEGACY_AUTH_HOST
 OLD_ACCOUNTS_HOST=$LEGACY_ACCOUNTS_HOST
 OIDC_CLIENT_ID=thunderbird-appointment-frontend

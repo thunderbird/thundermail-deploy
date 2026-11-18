@@ -10,7 +10,7 @@ for a in "$@"; do
 done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 for v in RUNNER_SGP_LABEL RUNNER_WORK_SIZE LEGACY_PG_SECRET_NAME; do
-  case "${!v}" in ''|*REPLACE_ME*) die "$v in targets/$TARGET_ENV.sh is '${!v}': fill it before rendering the runner" ;; esac
+  [ -n "${!v}" ] && no_placeholders "$v" 2>/dev/null || die "$v in targets/$TARGET_ENV.sh is '${!v}': fill it before rendering the runner"
 done
 if [ "$SECRET" = 0 ]; then
   sed -e "s|^    app.kubernetes.io/name: stalwart-config-applier\$|    app.kubernetes.io/name: $RUNNER_SGP_LABEL|" \

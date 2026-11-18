@@ -18,6 +18,7 @@ for a in "$@"; do
   esac
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
+[ "$APPLY" != 1 ] || no_placeholders || exit 64
 mkdir -p "$EVIDENCE_DIR"
 
 die() { echo "$*" >&2; exit 1; }
@@ -48,6 +49,7 @@ load_operator_env() {
   local f=$1 name val
   [ -e "$f" ] || return 0
   [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  env_target_ok "$f" || exit 64
   while IFS= read -r name; do
     [ -z "${!name:-}" ] || continue
     val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")

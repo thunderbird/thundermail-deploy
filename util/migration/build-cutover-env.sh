@@ -12,7 +12,7 @@ for a in "$@"; do
 done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
-OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
+OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 load_operator_env "$OPERATOR_ENV"
 VALUES=$REPO_DIR/$CONFIGS_OVERLAY/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
@@ -122,7 +122,7 @@ build() {
     printf '# source: %s\n%s=%s\n' "$source" "$name" "'$q'" >> "$tmp"
     count=$((count + 1))
     PUT="$PUT$name "
-    if [[ $value == *REPLACE_ME_* ]]; then printf '%-30s len=%s NEED (placeholder)\n' "$name" "${#value}"; missing=$((missing + 1))
+    if [[ ${value,,} == *replace_me* ]]; then printf '%-30s len=%s NEED (placeholder)\n' "$name" "${#value}"; missing=$((missing + 1))
     elif [ "$TARGET_ENV" = tb-prod ] && [[ ${value,,} == *stage* ]]; then printf '%-30s len=%s CONTAINS stage\n' "$name" "${#value}"; missing=$((missing + 1))
     elif [ -n "$value" ]; then printf '%-30s len=%s\n' "$name" "${#value}"; else printf '%-30s len=0 NEED\n' "$name"; missing=$((missing + 1)); fi
   }
@@ -266,6 +266,7 @@ build() {
     printf '# carried over from the previous env file\n%s=%s\n' "$name" "'$(printf '%s' "$v" | sed "s/'/'\\\\''/g")'" >> "$tmp"
     printf '%-30s len=%s (carried)\n' "$name" "${#v}"
   done
+  for name in $PLACEHOLDERS; do printf '%-30s NEED (placeholder in targets/%s.sh or verify/%s.env)\n' "$name" "$TARGET_ENV" "$TARGET_ENV"; missing=$((missing + 1)); done
   chmod 600 "$tmp"
   mv "$tmp" "$ENV_FILE"
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
@@ -383,6 +384,7 @@ check() {
   chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/restore-secret-version.sh --check $1 >/dev/null && "$0"/snapshot-secret-versions.sh $1 >/dev/null && n=0 && while read -r id v; do "$0"/restore-secret-version.sh "$id" "$v" --dry-run >/dev/null && n=$((n + 1)) || exit 1; done < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && echo "secrets=$n checked, list and dry-run ok"' "$MIG_DIR" "$secret_ids"
   chk restore-target-db-dry-run target_db
   if [ "$TARGET_ENV" = tb-prod ]; then
+    chk no-placeholders bash -c '[ -z "$1" ] && echo "no REPLACE_ME value" || { echo "placeholders:$1"; exit 1; }' _ "$PLACEHOLDERS"
     chk no-stage-values no_stage
     chk watch-interval posint WATCH_INTERVAL
     chk lane-report-max lane_limit LANE_REPORT_MAX

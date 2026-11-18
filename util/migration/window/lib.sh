@@ -46,6 +46,7 @@ MAIL_PF=""
 exec > >(exec setsid tee -a "$LOG") 2>&1
 trap 'stop "command failed at line $LINENO"' ERR
 trap 'stop "interrupted by signal"' INT TERM HUP
+if [ -n "$PLACEHOLDERS" ]; then printf 'NEED  placeholders:%s\n' "$PLACEHOLDERS"; NEEDS=$((NEEDS + 1)); fi
 trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null || true; [ -z "$MAIL_PF" ] || kill "$MAIL_PF" 2>/dev/null || true' EXIT
 
 sn() { if [ "$APPLY" = 1 ]; then printf '%s' "$1"; else printf 'dryrun-%s' "$1"; fi; }

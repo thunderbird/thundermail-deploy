@@ -22,6 +22,8 @@ def need(var):
     v = os.environ.get(var)
     if not v:
         sys.exit(f"missing env var {var} (see README.md)")
+    if "replace_me" in v.lower():
+        sys.exit(f"env var {var} is a placeholder: fill verify/<env>.env")
     return v
 
 
@@ -69,7 +71,7 @@ def _pg_conn():
     global _pg
     if _pg is None:
         if os.environ.get("SOURCE_PG_SECRET_ID"):
-            out = subprocess.run(["aws", "secretsmanager", "get-secret-value", "--secret-id", os.environ["SOURCE_PG_SECRET_ID"],
+            out = subprocess.run(["aws", "secretsmanager", "get-secret-value", "--secret-id", need("SOURCE_PG_SECRET_ID"),
                                   "--profile", need("SOURCE_AWS_PROFILE"), "--region", need("AWS_REGION"),
                                   "--query", "SecretString", "--output", "text"], capture_output=True, text=True, check=True).stdout
             s = json.loads(out)

@@ -65,6 +65,27 @@ def b64(s):
     return base64.b64encode(s.encode()).decode()
 
 
+def kubeconfig(current, *clusters):
+    arn = 'arn:aws:eks:eu-central-1:1:cluster/%s'
+    return json.dumps(
+        {
+            'apiVersion': 'v1',
+            'clusters': [
+                {'name': arn % c, 'cluster': {'server': 'https://%s.example.test' % c}}
+                for c in clusters
+            ],
+            'contexts': [
+                {
+                    'name': 'kc-prod' if c.endswith('prod01') else 'hub',
+                    'context': {'cluster': arn % c, 'user': c},
+                }
+                for c in clusters
+            ],
+            'current-context': current,
+        }
+    )
+
+
 def sm(value):
     return json.dumps({'SecretString': value})
 
@@ -345,6 +366,24 @@ class KubeconfigGuard(Sandbox):
         self.assertIn('--kubeconfig is empty', out)
         self.assertEqual(self.log(), '')
 
+    def test_a_trailing_kubeconfig_flag_refuses(self):
+        rc, out = self.guard('kubectl get pods --kubeconfig')
+        self.assertEqual(rc, 64)
+        self.assertIn('--kubeconfig has no value', out)
+        self.assertEqual(self.log(), '')
+
+    def test_a_directory_or_unreadable_kubeconfig_refuses(self):
+        (self.t / 'kc-dir').mkdir()
+        kc = self.t / 'kc-locked'
+        kc.write_text('clusters:\n- name: arn:aws:eks:x:1:cluster/mzla-eks-tb-prod01\n')
+        kc.chmod(0)
+        for path in ('kc-dir', 'kc-locked'):
+            with self.subTest(path=path):
+                rc, out = self.guard('kubectl --kubeconfig %s/%s get pods' % (self.t, path))
+                self.assertEqual(rc, 64, out)
+                self.assertIn('cannot be checked', out)
+                self.assertEqual(self.log(), '')
+
     def test_missing_file_refuses(self):
         rc, out = self.guard('kubectl --kubeconfig=%s/nope get pods' % self.t)
         self.assertEqual(rc, 64)
@@ -356,14 +395,15 @@ class KubeconfigGuard(Sandbox):
         self.assertEqual((rc, out), (0, 'reached\n'))
 
     def test_every_library_entry_point_is_guarded(self):
-        for call in ('ktarget get pods', 'khub get pods', 'pod true', '"${KS[@]}" get pods'):
+        calls = ('ktarget get pods', 'khub get pods', 'pod true', '"${KS[@]}" get pods')
+        for call in (*calls, '"${KH[@]}" get pods'):
             with self.subTest(call=call):
                 self.setUp()
                 script = (
                     'set -u\nMIG_DIR=%s\n. %s/lib.sh\n. %s/timing.sh\n'
-                    'KS=(kubectl --kubeconfig "${KUBECONFIG_TARGET:-}")\n'
-                    'KUBECONFIG_TARGET=%s/gone KUBECONFIG_HUB=%s/gone\n%s\n'
-                ) % (HERE, HERE, HERE, self.t, self.t, call)
+                    'KUBECONFIG_TARGET=%s/gone KUBECONFIG_HUB=%s/gone\n'
+                    'eval "$(grep -E \'^K[SH]=\' %s/window/lib.sh)"\n%s\n'
+                ) % (HERE, HERE, HERE, self.t, self.t, HERE, call)
                 rc, out = self.guard(script)
                 self.assertEqual(rc, 64, out)
                 self.assertEqual(self.log(), '')
@@ -383,10 +423,58 @@ class KubeconfigGuard(Sandbox):
         script = '. %s/target.sh\nkubectl --kubeconfig "$KUBECONFIG_TARGET" get pods' % HERE
         rc, out = self.run_sh(['-c', script], TARGET_ENV='tb-prod', KUBECONFIG_TARGET=str(kc))
         self.assertEqual(rc, 64)
-        self.assertIn('does not name mzla-eks-tb-prod01', out)
-        kc.write_text('clusters:\n- name: arn:aws:eks:x:1:cluster/mzla-eks-tb-prod01\n')
+        self.assertIn('is not cluster mzla-eks-tb-prod01', out)
+        kc.write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
         rc, out = self.run_sh(['-c', script], TARGET_ENV='tb-prod', KUBECONFIG_TARGET=str(kc))
         self.assertEqual((rc, out), (0, 'reached\n'))
+
+    def test_prod_target_current_context_must_be_the_prod_cluster(self):
+        self.rules([{'tool': 'kubectl', 'match': '.', 'out': 'reached\n'}])
+        kc = self.t / 'kc-target'
+        kc.write_text(kubeconfig('hub', 'mzla-eks-tb-prod01', 'mzla-eks-hub01'))
+        script = '. %s/target.sh\nkubectl --kubeconfig "$KUBECONFIG_TARGET" get pods' % HERE
+        rc, out = self.run_sh(['-c', script], TARGET_ENV='tb-prod', KUBECONFIG_TARGET=str(kc))
+        self.assertEqual(rc, 64, out)
+        self.assertIn('is not cluster mzla-eks-tb-prod01', out)
+        self.assertEqual(self.log(), '')
+
+    def test_flags_that_pick_another_cluster_refuse(self):
+        for flag in (
+            '--context hub',
+            '--context=hub',
+            '--server https://x',
+            '--server=https://x',
+            '-s https://x',
+            '-shttps://x',
+            '--cluster c',
+            '--token t',
+            '--user u',
+        ):
+            with self.subTest(flag=flag):
+                rc, out = self.guard(
+                    'kubectl --kubeconfig %s/kc-target %s get pods' % (self.t, flag)
+                )
+                self.assertEqual(rc, 64, out)
+                self.assertEqual(self.log(), '')
+
+    def test_arguments_after_a_double_dash_belong_to_the_remote_command(self):
+        rc, out = self.guard(
+            'kubectl --kubeconfig %s/kc-target exec runner -- psql -s --user u' % self.t
+        )
+        self.assertEqual((rc, out), (0, 'reached\n'))
+
+    def test_prereqs_default_target_kubeconfig_is_checked(self):
+        self.rules([{'tool': 'kubectl', 'match': '.', 'out': 'yes\n'}])
+        work = self.t / 'work'
+        work.mkdir()
+        (work / 'kc-prod').write_text(kubeconfig('hub', 'mzla-eks-hub01'))
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'],
+            TARGET_ENV='tb-prod',
+            WORK_DIR=str(work),
+        )
+        self.assertRegex(out, r'(?m)^NEED  kube-tb-prod ')
+        self.assertNotIn('auth can-i', self.log())
 
     def test_the_stage_kubeconfig_name_still_works(self):
         rc, out = self.guard(
@@ -527,7 +615,9 @@ class Prereqs(Sandbox):
         subprocess.run([*g, 'commit', '-q', '--allow-empty', '-m', 'w'], check=True)
         sha = subprocess.run([*g, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout
         f = self.t / 'shm' / 'cutover.env'
-        f.write_text("TMD_CHECKOUT='%s'\nWINDOW_SHA='%s'\n" % (work, sha.strip()))
+        f.write_text(
+            "TARGET_ENV='tb-prod'\nTMD_CHECKOUT='%s'\nWINDOW_SHA='%s'\n" % (work, sha.strip())
+        )
         self.rules([])
         rc, out = self.run_sh(
             [str(HERE / 'check-prereqs.sh'), '--for', 'auth-dns'], cwd=work, TARGET_ENV='tb-prod'
@@ -682,6 +772,191 @@ class ZoneCapture(Sandbox):
         self.assertIn('doh capture partial: 1 of 450 names unread', out)
         self.assertIn('doh_lines=450', out)
 
+
+def filled(src, dst, keep=None, value=None):
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__'))
+    for rel in ('targets/tb-prod.sh', 'verify/tb-prod.env'):
+        p = dst / rel
+        lines = []
+        for line in p.read_text().splitlines():
+            name, sep, rest = line.partition('=')
+            if sep and 'REPLACE_ME' in rest:
+                if name == keep:
+                    rest = value
+                elif name == 'INTERNAL_CIDRS':
+                    rest = '10.0.0.0/16'
+                elif name == 'RUNNER_WORK_SIZE':
+                    rest = '64Gi'
+                else:
+                    rest = 'filled-' + name.lower().replace('_', '-')
+            lines.append(name + sep + rest)
+        p.write_text('\n'.join(lines) + '\n')
+    return dst
+
+
+class Placeholders(Sandbox):
+    def test_thaw_refuses_before_any_call(self):
+        for mode in ('--dry-run', '--apply'):
+            with self.subTest(mode=mode):
+                rc, out = self.run_sh(
+                    [str(HERE / 'thaw.sh'), mode],
+                    TARGET_ENV='tb-prod',
+                    FREEZE_PR='7',
+                    PI_DIR=str(self.t),
+                )
+                self.assertEqual(rc, 64, out)
+                self.assertIn('THAW_BRANCH', out)
+        self.assertEqual(self.log(), '')
+
+    def test_every_apply_refuses_while_one_remains(self):
+        script = 'set -- --apply\n. %s/lib.sh\necho reached\n'
+        rc, out = self.run_sh(['-c', script % HERE], TARGET_ENV='tb-prod')
+        self.assertEqual(rc, 64, out)
+        self.assertNotIn('reached', out)
+        for value in ('REPLACE_ME_X', 'replace_me_x', 'REPLACE_ME', 'pre-Replace_Me-post'):
+            with self.subTest(value=value):
+                mig = filled(HERE, self.t / ('mig-' + str(abs(hash(value)))), 'THAW_BRANCH', value)
+                rc, out = self.run_sh(['-c', script % mig], TARGET_ENV='tb-prod')
+                self.assertEqual(rc, 64, out)
+                self.assertIn('THAW_BRANCH', out)
+        mig = filled(HERE, self.t / 'mig-full')
+        rc, out = self.run_sh(['-c', script % mig], TARGET_ENV='tb-prod')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('reached', out)
+
+    def test_prereqs_and_builder_name_each_one(self):
+        mig = filled(HERE, self.t / 'mig', 'INTERNAL_CIDRS', 'replace_me')
+        rc, out = self.run_sh(
+            [str(mig / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(out, r'(?m)^NEED  placeholders +fill: verify/tb-prod.env:INTERNAL_CIDRS$')
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(out, r'(?m)^NEED  placeholders +fill: .*\bTHAW_BRANCH\b')
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-stage'
+        )
+        self.assertNotIn('placeholders', out)
+        self.rules(stage_rules(ecs='accounts-prod'))
+        rc, out = self.run_sh(
+            [str(HERE / 'build-cutover-env.sh')],
+            TARGET_ENV='tb-prod',
+            KUBECONFIG_TARGET=str(self.t / 'kc-target'),
+            KUBECONFIG_HUB=str(self.t / 'kc-hub'),
+            KUBECONFIG_DEV=str(self.t / 'kc-dev'),
+        )
+        self.assertNotEqual(rc, 0)
+        for name in ('THAW_BRANCH', 'SPF_DECIDED_TXT', 'verify/tb-prod.env:SOURCE_PG_SECRET_ID'):
+            self.assertRegex(out, r'(?m)^%s +NEED \(placeholder' % re.escape(name))
+
+    def test_runner_refuses_each_of_its_names_in_any_case(self):
+        for name in ('RUNNER_SGP_LABEL', 'RUNNER_WORK_SIZE', 'LEGACY_PG_SECRET_NAME'):
+            with self.subTest(name=name):
+                mig = filled(HERE, self.t / ('mig-' + name), name, 'replace_me_x')
+                rc, out = self.run_sh([str(mig / 'runner-pod.sh')], TARGET_ENV='tb-prod')
+                self.assertEqual(rc, 1, out)
+                self.assertIn(name, out)
+
+    def test_run_all_refuses_a_verify_placeholder(self):
+        rc, out = self.run_sh([str(HERE / 'verify' / 'run_all.sh')], TARGET_ENV='tb-prod')
+        self.assertEqual(rc, 99, out)
+        self.assertIn('SOURCE_PG_SECRET_ID INTERNAL_CIDRS', out)
+        self.assertEqual(self.log(), '')
+
+
+
+class CrossEnvironment(Sandbox):
+    def operator_file(self, name, text):
+        d = self.t / 'home' / '.local' / 'state' / 'talos'
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / name
+        f.write_text(text)
+        f.chmod(0o600)
+        return f
+
+    def prod_build(self, *args):
+        self.rules(stage_rules(ecs='accounts-prod'))
+        return self.run_sh(
+            [str(HERE / 'build-cutover-env.sh'), *args],
+            TARGET_ENV='tb-prod',
+            OPERATOR_ENV='',
+            KUBECONFIG_TARGET=str(self.t / 'kc-target'),
+            KUBECONFIG_HUB=str(self.t / 'kc-hub'),
+            KUBECONFIG_DEV=str(self.t / 'kc-dev'),
+        )
+
+    def test_prod_never_reads_the_stage_operator_file(self):
+        self.operator_file('cutover-operator.env', "T7_PR='11'\nADMIN_MERGE='1'\n")
+        self.prod_build()
+        text = (self.t / 'shm' / 'cutover.env').read_text()
+        self.assertIn("T7_PR='42'", text)
+        self.assertIn("ADMIN_MERGE=''", text)
+
+    def test_a_prod_operator_file_needs_its_target_line(self):
+        f = self.operator_file('cutover-operator-tb-prod.env', "ADMIN_MERGE='1'\n")
+        rc, out = self.prod_build()
+        self.assertEqual(rc, 64, out)
+        self.assertIn('built for TARGET_ENV=<none>, not tb-prod', out)
+        f.write_text("TARGET_ENV='tb-prod'\nADMIN_MERGE='1'\n")
+        self.prod_build()
+        self.assertIn("ADMIN_MERGE='1'", (self.t / 'shm' / 'cutover.env').read_text())
+
+    def test_thaw_and_prereqs_refuse_an_env_file_of_the_other_environment(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text("TARGET_ENV='tb-prod'\nTHAW_PR='9'\n")
+        f.chmod(0o600)
+        for args in (
+            [str(HERE / 'thaw.sh'), '--apply'],
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'],
+        ):
+            with self.subTest(script=args[0]):
+                rc, out = self.run_sh(args, TARGET_ENV='tb-stage', FREEZE_PR='7', PI_DIR=str(self.t))
+                self.assertEqual(rc, 64, out)
+                self.assertIn('built for TARGET_ENV=tb-prod, not tb-stage', out)
+        self.assertEqual(self.log(), '')
+        self.assertEqual(f.read_text(), "TARGET_ENV='tb-prod'\nTHAW_PR='9'\n")
+
+    def test_stage_ignores_inherited_target_values(self):
+        names = 'TARGET_AWS_PROFILE STALWART_REPLICAS LEGACY_PG_SECRET_NAME KARGO_STAGE_ACCOUNTS MAIL_ZONE'
+        script = '. %s/lib.sh\nfor n in %s; do printf "%%s " "${!n}"; done' % (HERE, names)
+        rc, out = self.run_sh(
+            ['-c', script],
+            TARGET_ENV='tb-stage',
+            TARGET_AWS_PROFILE='mzla-tb-prod',
+            STALWART_REPLICAS='4',
+            LEGACY_PG_SECRET_NAME='prodlegacy-pg',
+            KARGO_STAGE_ACCOUNTS='tb-prod',
+            MAIL_ZONE='thundermail.com',
+        )
+        self.assertEqual(
+            out, 'mzla-tb-stage 1 rehearsal-legacy-pg tb-stage stage-thundermail.com ', out
+        )
+        rc, out = self.run_sh(
+            ['-c', script], TARGET_ENV='tb-stage', STAGE_AWS_PROFILE='mzla-tb-stage-ro'
+        )
+        self.assertTrue(out.startswith('mzla-tb-stage-ro '), out)
+
+    def test_a_failing_git_status_is_not_clean(self):
+        work = self.t / 'tmd'
+        g = ['git', '-C', str(work), '-c', 'user.name=t', '-c', 'user.email=t@example.test']
+        subprocess.run(['git', 'init', '-q', str(work)], check=True)
+        subprocess.run([*g, 'commit', '-q', '--allow-empty', '-m', 'w'], check=True)
+        sha = subprocess.run([*g, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text(
+            "TARGET_ENV='tb-prod'\nTMD_CHECKOUT='%s'\nWINDOW_SHA='%s'\n" % (work, sha.strip())
+        )
+        (self.bin / 'git').unlink()
+        (self.bin / 'git').write_text(
+            '#!%s\n[ "$1" != status ] || exit 128\nexec %s "$@"\n'
+            % (shutil.which('bash'), shutil.which('git'))
+        )
+        (self.bin / 'git').chmod(0o755)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'auth-dns'], cwd=work, TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(out, r'(?m)^NEED  checkout +git status failed in TMD_CHECKOUT')
 
 if __name__ == '__main__':
     os.environ.pop('TARGET_ENV', None)

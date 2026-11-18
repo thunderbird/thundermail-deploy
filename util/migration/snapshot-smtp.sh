@@ -6,7 +6,10 @@ PORT=${KC_LOCAL_PORT:-18082}
 CID=${KC_STAGE_ADMIN_CLIENT_ID:-tb-accounts-admin}
 CSEC=$(ktarget -n keycloak-customer get secret keycloak-customer-admin-client -o jsonpath='{.data.client-secret}' | base64 -d)
 [ -n "$CSEC" ] || die "keycloak-customer-admin-client secret has no client-secret"
-ktarget -n keycloak-customer port-forward pod/keycloak-customer-0 "$PORT:8080" >/dev/null 2>&1 &
+need KUBECONFIG_TARGET
+[ -z "$(ss -ltnH "sport = :$PORT" 2>/dev/null)" ] || die "local port $PORT is already in use (a port-forward left by an earlier run?): stop that listener, then rerun"
+kube_args_ok --kubeconfig "$KUBECONFIG_TARGET" || exit 64
+command kubectl --kubeconfig "$KUBECONFIG_TARGET" -n keycloak-customer port-forward pod/keycloak-customer-0 "$PORT:8080" >/dev/null 2>&1 &
 pf=$!
 trap 'kill $pf 2>/dev/null || true' EXIT
 for _ in $(seq 1 30); do curl -sf -o /dev/null "http://localhost:$PORT/realms/master" && break; sleep 1; done
