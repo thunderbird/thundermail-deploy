@@ -5,3 +5,6 @@ metadata:
   name: nginx
 spec:
   type: ClusterIP
+  ports:
+    - port: 587
+      targetPort: submission
