@@ -2,13 +2,14 @@
 set -uo pipefail
 umask 077
 
-IDS="go-W1 go-W2 go-outbound-block go-T7 go-W4 go-T8 go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 go-V2 go-rollback checks presync rehearsal backups verify auth-dns pre-cut"
+IDS="go-W1 go-W2 go-outbound-block go-T7 go-W4 go-T8 go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 go-V2 go-rollback start checks presync backups verify auth-dns pre-cut"
 usage() {
   cat <<USAGE
 usage: TARGET_ENV=<env> check-prereqs.sh [--for ID[,ID...]]...
 
 Prints HAVE or NEED for every tool and credential the cutover uses; SKIP marks an optional row left unset.
 Without --for it prints every row (the inventory of platform-infrastructure#1722).
+start holds the rows that can pass before the first window step.
 ID is the go row of a GATE or a block: $IDS.
 The rows of an id are the ## Prerequisites lines of the issue that holds that GATE: its untagged lines and the lines tagged with the id.
 A list prints one block per id. Values are never printed; exit status is the number of NEED rows, or 64 for a usage error.
@@ -50,7 +51,7 @@ sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
 from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//; s/'\\\\''/'/g"; }
-ev() { printf '%s' "${!1:-$(from_file "$ENV_FILE" "$1")}"; }
+ev() { local v; v=$(from_file "$ENV_FILE" "$1"); printf '%s' "${v:-${!1:-}}"; }
 envfile_has() { [ -n "$(ev "$1")" ]; }
 load_operator_env() {
   local f=$1 name val
@@ -131,8 +132,8 @@ c_cf_shared() {
   [ -n "$z" ] && echo "active, zone visible" || { echo "active but Zone:Read missing (operator adds it)"; return 1; }
 }
 c_cf_agent() {
-  mode600 "$HOME/.cloudflare.env" || { echo "$HOME/.cloudflare.env missing or not mode 600"; return 1; }
-  local tok s; tok=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
+  mode600 "$CF_TOKEN_FILE" || { echo "$CF_TOKEN_FILE missing or not mode 600"; return 1; }
+  local tok s; tok=$(from_file "$CF_TOKEN_FILE" CF_API_TOKEN_AGENT)
   [ -n "$tok" ] || { echo "CF_API_TOKEN_AGENT empty"; return 1; }
   s=$(cf_status "$tok"); [ "$s" = active ] || { echo "token status $s"; return 1; }
   local zones
@@ -142,8 +143,8 @@ c_cf_agent() {
   echo "active, $MAIL_ZONE and $TBPRO_ZONE visible"
 }
 c_cf_agent_p2() {
-  mode600 "$HOME/.cloudflare.env" || { echo "$HOME/.cloudflare.env missing or not mode 600"; return 1; }
-  local tok v zones tbpro rc resp; tok=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
+  mode600 "$CF_TOKEN_FILE" || { echo "$CF_TOKEN_FILE missing or not mode 600"; return 1; }
+  local tok v zones tbpro rc resp; tok=$(from_file "$CF_TOKEN_FILE" CF_API_TOKEN_AGENT)
   [ -n "$tok" ] || { echo "CF_API_TOKEN_AGENT empty"; return 1; }
   v=$(curl -s -m 20 -K <(bearer "$tok") "$CF/user/tokens/verify")
   [ "$(jq -r '.result.status // "error"' <<<"$v")" = active ] || { echo "token status $(jq -r '.result.status // "error"' <<<"$v")"; return 1; }
@@ -261,9 +262,11 @@ c_aws_reads() {
 c_legacy_stalwart_pg() { sm "$LEGACY" "$LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend" | jq -e 'has("host") and has("password")' >/dev/null 2>&1 && echo "GetSecretValue ok, host and password keys present" || { echo "GetSecretValue on $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend failed"; return 1; }; }
 c_ghcr() { podman login --get-login ghcr.io >/dev/null 2>&1 && echo "podman logged in to ghcr.io" || { echo "podman has no ghcr.io login"; return 1; }; }
 c_restore_files() {
-  local ev=${EVIDENCE_DIR:-$HOME/.local/state/talos/cutover-$TARGET_ENV} bad="" f
-  for f in cut-legacy-restore.txt t7-restore.txt t8-restore.txt w8-restore.txt; do [ -s "$ev/$f" ] || bad="$bad $f"; done
-  [ -n "$(ev SECRET_VERSIONS_BEFORE)" ] && [ -s "$(ev SECRET_VERSIONS_BEFORE)" ] || bad="$bad SECRET_VERSIONS_BEFORE"
+  local dir bad="" f files="cut-legacy-restore.txt t7-restore.txt t8-restore.txt w8-restore.txt"
+  dir=$(ev EVIDENCE_DIR); dir=${dir:-$HOME/.local/state/talos/cutover-$TARGET_ENV}
+  [ "$TARGET_ENV" != tb-prod ] || files=cut-legacy-restore.txt
+  for f in $files; do [ -s "$dir/$f" ] || bad="$bad $f"; done
+  [ "$TARGET_ENV" = tb-prod ] || { [ -n "$(ev SECRET_VERSIONS_BEFORE)" ] && [ -s "$(ev SECRET_VERSIONS_BEFORE)" ]; } || bad="$bad SECRET_VERSIONS_BEFORE"
   [ -z "$bad" ] && echo "restore files present" || { echo "missing:$bad"; return 1; }
 }
 c_clean_clones() {
@@ -284,9 +287,9 @@ skip() {
   printf '%-4s  %-28s  %s\n' SKIP "$2" "$3"
 }
 
-R1="checks presync rehearsal"
-LEG="$R1 backups go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W4 auth-dns go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 verify go-V2 go-rollback"
-HUB="$R1 go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W5 go-predns go-access go-open go-W8 go-P1 verify go-rollback"
+R1="checks presync"
+LEG="$R1 start backups go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W4 auth-dns go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 verify go-V2 go-rollback"
+HUB="$R1 start go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W5 go-predns go-access go-open go-W8 go-P1 verify go-rollback"
 rows() {
   [ "$TARGET_ENV" != tb-prod ] || [ -z "$FOR" ] || row "ALL" checkout c_checkout
   [ "$TARGET_ENV" != tb-prod ] || row "ALL" placeholders c_placeholders
@@ -297,17 +300,17 @@ rows() {
   row "ALL" "kube-$TARGET_ENV" c_kube_target
   row "$HUB" kube-hub c_kube_hub
   row "$R1" kube-tb-dev c_kube_dev
-  row "$R1 backups go-T7 go-T8 go-W4 auth-dns go-V2 go-rollback" neon-api-key+neonctl c_neon
+  row "$R1 start backups go-T7 go-T8 go-W4 auth-dns go-V2 go-rollback" neon-api-key+neonctl c_neon
   row "checks go-open" cf-token-shared-external-dns c_cf_shared
-  row "$R1 backups auth-dns go-predns go-mx-flip go-access go-open go-W8 verify go-V2 go-rollback" cf-token-agent c_cf_agent
+  row "$R1 start backups auth-dns go-predns go-mx-flip go-access go-open go-W8 verify go-V2 go-rollback" cf-token-agent c_cf_agent
   row "go-access go-open go-W8 go-rollback" cf-token-agent-redirects c_cf_agent_p2
   row "go-T7 go-V2 go-rollback" "keycloak-admin-$TARGET_ENV" c_kc_admin_target
-  row "backups go-rollback" keycloak-admin-legacy c_kc_admin_legacy
-  row "$R1 go-W2 go-W4 go-predns go-mx-flip go-P1 go-rollback" stalwart-admin-legacy c_stalwart_legacy
-  row "go-W4 go-W5 go-predns go-open" stalwart-recovery-admin c_stalwart_recovery
-  row "$R1 go-W4" stalwart-target-db-owner c_target_db
-  row "$R1 backups go-T7 go-T8 go-W4" legacy-db-passwords c_legacy_db
-  row "go-W4" legacy-stalwart-pg-secret c_legacy_stalwart_pg
+  row "start backups go-rollback" keycloak-admin-legacy c_kc_admin_legacy
+  row "$R1 go-W2 go-W4 go-mx-flip go-P1 go-rollback" stalwart-admin-legacy c_stalwart_legacy
+  row "start go-W4 go-W5 go-predns go-open" stalwart-recovery-admin c_stalwart_recovery
+  row "$R1 start go-W4" stalwart-target-db-owner c_target_db
+  row "$R1 start backups go-T7 go-T8 go-W4" legacy-db-passwords c_legacy_db
+  row "start go-W4" legacy-stalwart-pg-secret c_legacy_stalwart_pg
   row "backups" legacy-aws-reads c_aws_reads "$LEGACY" "ecs list-clusters" "logs describe-log-groups" "cloudwatch describe-alarms" "ec2 describe-instances"
   row "backups" "$TARGET_ENV-aws-reads" c_aws_reads "$TARGET_AWS_PROFILE" "ec2 describe-instances"
   row "go-T8 go-predns" accounts-secret-bundle c_accounts_bundle
@@ -319,9 +322,9 @@ rows() {
   row "checks go-W1" freeze-pr c_env_pr platform-infrastructure FREEZE_PR
   row "checks go-open" flip-pr c_env_pr thundermail-deploy FLIP_PR
   if [ -n "$(ev NOTICE_RECIPIENTS_CSV)" ]; then row "checks" notice-recipients-csv c_recipients; else skip "checks" notice-recipients-csv "optional: NOTICE_RECIPIENTS_CSV unset, window notices skipped"; fi
-  row "go-T7 go-T8 go-W1 go-W8 go-rollback" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
-  row "go-open verify" test-mailbox-external c_test_mailbox
-  row "backups go-W5 go-predns go-open verify" "test-user-$TARGET_ENV" c_test_user
+  row "start go-T7 go-T8 go-W1 go-W8 go-rollback" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
+  row "start go-open verify" test-mailbox-external c_test_mailbox
+  row "backups go-open verify" "test-user-$TARGET_ENV" c_test_user
   row "checks" operator-env-file c_operator_env
   row "ALL" github-gh c_github
   row "checks" github-push-pi-pg c_push platform-infrastructure platform-grafana
@@ -333,14 +336,14 @@ rows() {
   row "go-rollback" clean-clones c_clean_clones
   row "backups" ghcr-login c_ghcr
   skip "backups" log-export-store "to fill: the log export store row of platform-infrastructure#1722"
-  row "$R1 backups go-outbound-block pre-cut go-W4" tool-rclone c_tool rclone
-  row "$R1 backups go-W4 go-predns go-P1" tool-podman c_tool podman
-  row "$R1 go-W2 go-outbound-block go-W4" tool-session-manager-plugin c_tool session-manager-plugin
+  row "$R1 start backups go-outbound-block pre-cut go-W4" tool-rclone c_tool rclone
+  row "$R1 start backups go-W4 go-predns go-P1" tool-podman c_tool podman
+  row "$R1 start go-W2 go-outbound-block go-W4" tool-session-manager-plugin c_tool session-manager-plugin
   row "ALL" tool-jq c_tool jq
   row "ALL" tool-yq c_tool yq
-  row "$R1 go-W4 go-W5 go-predns" tool-stalwart-cli c_tool stalwart-cli
-  row "$R1 go-predns go-mx-flip go-access go-open" tool-swaks c_tool swaks
-  row "$R1 backups go-W4 go-W5 go-predns go-P1" python-venv c_venv
+  row "$R1 start go-W4 go-W5 go-predns" tool-stalwart-cli c_tool stalwart-cli
+  row "$R1 start go-predns go-mx-flip go-access go-open" tool-swaks c_tool swaks
+  row "$R1 start backups go-W4 go-W5 go-predns go-P1" python-venv c_venv
 }
 
 printf '%-4s  %-28s  %s\n' STATUS ITEM DETAIL

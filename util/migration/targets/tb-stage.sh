@@ -47,6 +47,7 @@ LEGACY_PG_SECRET_NAME='rehearsal-legacy-pg'
 RUNNER_SGP_LABEL='stalwart-config-applier'
 RUNNER_WORK_SIZE='20Gi'
 PADDLE_API_URL='https://sandbox-api.paddle.com'
+CF_TOKEN_FILE=$HOME/.cloudflare.env
 APPT_DEPLOY_WORKFLOW='deploy-staging.yml'
 FREEZE_BRANCH='freeze-tb-stage'
 THAW_BRANCH='thaw-tb-stage'

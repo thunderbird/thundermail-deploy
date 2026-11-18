@@ -10,6 +10,7 @@ for a in "$@"; do
     *) echo "unknown argument: $a" >&2; exit 2 ;;
   esac
 done
+BUILDING_ENV=1
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
 OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
@@ -19,7 +20,7 @@ NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID NOTICE_RECIPIENTS_CSV"
 OPERATOR_VARS="FREEZE_PR T6_PR FLIP_PR APPOINTMENT_PR ADMIN_MERGE SPF_FINAL_TXT TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER SUPPORT_CHANNEL INBOUND_FROM"
 WINDOW_CARRY="REPLICAS_BEFORE STATE_INBOUND_AT STATE_OPEN_AT AUTH_DNS_AT ACCOUNTS_DNS_AT INBOUND_TTL_BEFORE INBOUND_TTL_WAIT KC_IMAGE_VERSION INBOUND_FROM ACCOUNTS_AUTOSYNC_SHA SECRET_VERSIONS_BEFORE WINDOW_SHA WINDOW_END REALM_BEFORE LEGACY_EGRESS_SNAPSHOT BACKUP_SECOND_COPY"
-WINDOW_OPERATOR_VARS="PROBE_TIMEOUT ACCOUNTS_AUTOSYNC_PR REC_AUTH REC_ACCOUNTS MAIL_RECORDS_TSV TEST_USER_TBPRO PILOT_USER PROBE_MX_HOST PROBE_DOMAIN PROBE_MAILBOX PROBE_SENDER PROBE_HELO TEST_MAILBOX_GMAIL TEST_MAILBOX_M365 JUNK_BAND WINDOW_END ROLLBACK_HORIZON GATE_MARGIN CERT_MIN_NOT_AFTER OUTBOUND_PROOF_INTERVAL OUTBOUND_PROOF_ATTEMPTS VERIFY_BODY_SAMPLE QUOTA_RESET_TIMEOUT W4_DUMP_MAX_AGE REHEARSAL_SHA WATCH_INTERVAL LANE_PROBE_MAX LANE_REPORT_MAX LANE_WAIT_MAX PADDLE_POLL_MAX MAIL_BACKUP_STORE ROTATION_HOST PROVISIONING_RELEASE_PR G_IN_DEADLINE"
+WINDOW_OPERATOR_VARS="PROBE_TIMEOUT ACCOUNTS_AUTOSYNC_PR REC_AUTH REC_ACCOUNTS MAIL_RECORDS_TSV TEST_USER_TBPRO PILOT_USER PROBE_MX_HOST PROBE_DOMAIN PROBE_MAILBOX PROBE_SENDER PROBE_HELO TEST_MAILBOX_GMAIL TEST_MAILBOX_M365 JUNK_BAND WINDOW_END ROLLBACK_HORIZON GATE_MARGIN CERT_MIN_NOT_AFTER OUTBOUND_PROOF_INTERVAL OUTBOUND_PROOF_ATTEMPTS VERIFY_BODY_SAMPLE QUOTA_RESET_TIMEOUT W4_DUMP_MAX_AGE WATCH_INTERVAL LANE_PROBE_MAX LANE_REPORT_MAX LANE_WAIT_MAX PADDLE_POLL_MAX MAIL_BACKUP_STORE ROTATION_HOST PROVISIONING_RELEASE_PR G_IN_DEADLINE"
 SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD"
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -95,8 +96,9 @@ window_vars() {
   put LEGACY_STALWART_NODE_IDS "$ids" "aws ec2 describe-instances --profile $LEGACY_AWS_PROFILE Name=$LEGACY_NODE_NAME_FILTER running; empty unless exactly $LEGACY_NODE_COUNT"
   put LEGACY_PG_SECRET_NAME "$LEGACY_PG_SECRET_NAME" "targets/$TARGET_ENV.sh"
   v=$(opw INBOUND_TTL_WAIT); put INBOUND_TTL_WAIT "${v:-60}" "INBOUND_TTL_WAIT appended in the window, else 60 (the inbound record TTL of #1726)"
-  v=$(opw WINDOW_SHA); put WINDOW_SHA "${v:-$(op REHEARSAL_SHA)}" "WINDOW_SHA appended by a go-fix merge, else REHEARSAL_SHA"
-  put TMD_CHECKOUT "$(op TMD_CHECKOUT)" "operator: the clean thundermail-deploy clone the window runs from"
+  v=""; [ "$REBUILD" != 1 ] || { v=$(prev WINDOW_SHA); [ -n "$v" ] || v=$(window_values WINDOW_SHA); }
+  put WINDOW_SHA "${v:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)}" "--rebuild: WINDOW_SHA of the previous file or window-values.tsv; else git rev-parse HEAD of TMD_CHECKOUT"
+  put TMD_CHECKOUT "$REPO_DIR" "the thundermail-deploy checkout this builder runs from"
   put CUTOVER_ENV "$ENV_FILE" "this file"
   for v in $WINDOW_OPERATOR_VARS $(compgen -v W4_WAIT_ || true); do
     case "$PUT" in *" $v "*) continue ;; esac
@@ -136,7 +138,7 @@ build() {
   put STALWART_TARGET_PG_PASSWORD "$(try k8s_secret thundermail stalwart-postgresql-admin-password STALWART_POSTGRESQL_ADMIN_PASSWORD)" "kubectl -n thundermail get secret stalwart-postgresql-admin-password key STALWART_POSTGRESQL_ADMIN_PASSWORD"
   put STALWART_USER "$(try k8s_secret thundermail stalwart-recovery-admin STALWART_USER)" "kubectl -n thundermail get secret stalwart-recovery-admin key STALWART_USER"
   put STALWART_PASSWORD "$(try k8s_secret thundermail stalwart-recovery-admin STALWART_PASSWORD)" "kubectl -n thundermail get secret stalwart-recovery-admin key STALWART_PASSWORD"
-  [ "$TARGET_ENV" = tb-prod ] || put STALWART_URL http://localhost:18081 "port-forward to the Stalwart pod, 18081:8080"
+  put STALWART_URL http://localhost:18081 "port-forward to the Stalwart pod, 18081:8080"
   put OLD_STALWART_URL https://127.0.0.1:18080 "SSM port-forward to LEGACY_MGMT_INSTANCE 8080; management listener is implicit TLS"
   put OLD_STALWART_USER admin "legacy fallback admin"
   put OLD_STALWART_PASSWORD "$(try sm_legacy "$LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.fallback_admin_password")" "aws secretsmanager get-secret-value --profile $LEGACY_AWS_PROFILE $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.fallback_admin_password"
@@ -217,8 +219,8 @@ build() {
   done
 
   put AWS_REGION "$AWS_REGION" "targets/$TARGET_ENV.sh TARGET_REGION"
-  CF_TOKEN=$(from_file "$HOME/.cloudflare.env" CF_API_TOKEN_AGENT)
-  put CF_API_TOKEN_AGENT "$CF_TOKEN" "\$HOME/.cloudflare.env CF_API_TOKEN_AGENT"
+  CF_TOKEN=$(from_file "$CF_TOKEN_FILE" CF_API_TOKEN_AGENT)
+  put CF_API_TOKEN_AGENT "$CF_TOKEN" "$CF_TOKEN_FILE CF_API_TOKEN_AGENT"
   local zid; zid=$(try cf_zone "$MAIL_ZONE")
   [ -n "$zid" ] || zid=$(try shared_zone_id "$MAIL_ZONE")
   put CF_ZONE_ID "$zid" "GET /zones?name=$MAIL_ZONE with CF_API_TOKEN_AGENT, else with the shared external-dns token (read-only)"
@@ -282,7 +284,7 @@ check() {
   local want=$TARGET_ENV
   set -a; . "$ENV_FILE"; set +a
   TARGET_ENV=$want
-  if [ -n "${LANE_PF_PORT:-}" ]; then STALWART_URL=http://localhost:$LANE_PF_PORT; elif [ "$TARGET_ENV" = tb-prod ]; then STALWART_URL=""; fi
+  [ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
   . "$MIG_DIR/timing.sh"
   local start fails=0 secret_ids=${REPOINT_SECRET_IDS:-$TARGET_SECRET_PREFIX/keycloak-customer-db $TARGET_SECRET_PREFIX/accounts-db}
   start=$(date -u +%FT%TZ)
@@ -291,6 +293,9 @@ check() {
     if out=$("$@" 2>&1); then printf 'PASS  %-32s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-110)"
     else fails=$((fails + 1)); printf 'FAIL  %-32s %s\n' "$name" "$(tail -1 <<<"$out" | cut -c1-110)"; fi
   }
+  in_window() { if [ "$TARGET_ENV" = tb-prod ]; then printf 'WAIT  %-32s %s\n' "$1" "$2"; else local n=$1; shift 2; chk "$n" "$@"; fi; }
+  stage_chk() { [ "$TARGET_ENV" = tb-prod ] || chk "$@"; }
+  [ "$TARGET_ENV" != tb-prod ] || OPERATOR_VARS="TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER"
   operator_values() { local v bad=""; for v in $OPERATOR_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all operator values set" || { echo "empty:$bad"; return 1; }; }
   nonempty() { local v bad=""; for v in $SECRET_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all set" || { echo "empty:$bad"; return 1; }; }
   dirs() {
@@ -325,14 +330,13 @@ check() {
     [ -z "$bad" ] && echo "no value contains stage" || { echo "values contain stage:$bad"; return 1; }
   }
   posint() { [[ ${!1:-} =~ ^[1-9][0-9]*$ ]] && echo "$1=${!1}" || { echo "$1='${!1:-}' is not a positive integer"; return 1; }; }
-  lane_limit() { if [ -z "${!1:-}" ] && [ "${REHEARSAL:-0}" = 1 ]; then echo "$1 unset: no limit (REHEARSAL=1)"; else posint "$1"; fi; }
   nlb_live() {
     local h st
     h=$(ktarget -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
     st=$([ -n "$h" ] && aws_target elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$h'].State.Code | [0]" --output text 2>/dev/null)
     [ -n "$h" ] && [ "$h" = "${TARGET_NLB_DNS:-}" ] && [ "$st" = active ] && echo "TARGET_NLB_DNS matches the live nginx Service, NLB active" || { echo "env=${TARGET_NLB_DNS:-empty} live=${h:-none} state=${st:-none}: rebuild the env file"; return 1; }
   }
-  target_health() { [ -n "${STALWART_URL:-}" ] || { echo "STALWART_URL unset: set LANE_PF_PORT"; return 1; }; http200 "$STALWART_URL/healthz/live"; }
+  target_health() { [ -n "${STALWART_URL:-}" ] || { echo "STALWART_URL empty: rebuild the env file"; return 1; }; http200 "$STALWART_URL/healthz/live"; }
   count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
     local out snap
@@ -340,6 +344,7 @@ check() {
     snap=$(tail -1 <<<"$out")
     [ -f "$snap" ] || { echo "snapshot-$1.sh wrote no file"; return 1; }
     "$MIG_DIR/restore-$2.sh" "$snap" ${4:-} --dry-run | tail -1
+    mkdir -p "$(dirname "$snap")/env-check" && mv "$snap" "$(dirname "$snap")/env-check/"
   }
   target_db() {
     if pod sh -c 'test -s /work/target-before.dump' 2>/dev/null; then "$MIG_DIR/restore-target-db.sh" /work/target-before.dump --dry-run | tail -1
@@ -349,15 +354,15 @@ check() {
   chk secrets-non-empty nonempty
   chk operator-values operator_values
   chk dirs-and-kubeconfigs dirs
-  chk runner-pod runner
+  in_window runner-pod "the runner pod starts in the window" runner
   for h in STALWART_LEGACY_PG_HOST:STALWART_LEGACY_PG_USER:STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST:STALWART_TARGET_PG_USER:STALWART_TARGET_PG_DB KC_LEGACY_PG_HOST:KC_LEGACY_PG_USER:KC_LEGACY_PG_DB ACCOUNTS_LEGACY_PG_HOST:ACCOUNTS_LEGACY_PG_USER:ACCOUNTS_LEGACY_PG_NAME; do
     IFS=: read -r hv uv dv <<<"$h"
-    chk "pg_isready-${hv%_PG_HOST}" pod pg_isready -h "${!hv}"
-    chk "psql-select1-${hv%_PG_HOST}" pod psql -h "${!hv}" -U "${!uv}" -d "${!dv}" -Atc 'select 1'
+    in_window "pg_isready-${hv%_PG_HOST}" "runs in the runner pod, which starts in the window" pod pg_isready -h "${!hv}"
+    in_window "psql-select1-${hv%_PG_HOST}" "runs in the runner pod, which starts in the window" pod psql -h "${!hv}" -U "${!uv}" -d "${!dv}" -Atc 'select 1'
   done
-  chk legacy-url-loopback legacy_loopback
-  chk stalwart-legacy-healthz http200 "$OLD_STALWART_URL/healthz/live"
-  chk stalwart-target-healthz target_health
+  in_window legacy-url-loopback "needs the SSM tunnel, opened in the window" legacy_loopback
+  in_window stalwart-legacy-healthz "needs the SSM tunnel, opened in the window" http200 "$OLD_STALWART_URL/healthz/live"
+  in_window stalwart-target-healthz "Stalwart runs at 0 replicas until the window" target_health
   chk rclone-lsd-legacy bash -c '[ -n "$LEGACY_BLOB_BUCKET" ] && rclone lsd leg: | awk -v b="$LEGACY_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
   chk rclone-lsd-target bash -c '[ -n "$TARGET_BLOB_BUCKET" ] && rclone lsd tgt: | awk -v b="$TARGET_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
   chk legacy-sg count_eq "$(aws_legacy ec2 describe-security-groups --group-ids "$LEGACY_PUB_SG" --query 'length(SecurityGroups)' 2>/dev/null)" 1 security_groups
@@ -366,29 +371,29 @@ check() {
   chk legacy-asg-targets count_eq "$(aws_legacy application-autoscaling describe-scalable-targets --service-namespace ecs --resource-ids $LEGACY_ASG_RESOURCE_IDS --query 'length(ScalableTargets)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_ASG_RESOURCE_IDS")" scalable_targets
   chk legacy-mgmt-instance count_eq "$(aws_legacy ec2 describe-instances --instance-ids "$LEGACY_MGMT_INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)" running state
   chk legacy-pub-lb count_eq "$(aws_legacy elbv2 describe-load-balancers --load-balancer-arns "$LEGACY_PUB_LB_ARN" --query 'length(LoadBalancers)' 2>/dev/null)" 1 load_balancers
-  chk target-nlb nlb_live
+  in_window target-nlb "the mail load balancer opens in the window; then run build-cutover-env.sh --rebuild" nlb_live
   chk argo-apps count_eq "$(khub -n argocd get application $ARGO_APPS -o name 2>/dev/null | grep -c .)" "$(wc -w <<<"$ARGO_APPS")" applications
   chk kargo-stage-accounts khub -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o name
-  chk kargo-stage-configs khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
-  chk kargo-warehouse-configs khub -n "$KARGO_PROJECT_CONFIGS" get warehouse "$KARGO_WAREHOUSE_CONFIGS" -o name
+  in_window kargo-stage-configs "created by the Kargo stage PR merged in the window" khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
+  in_window kargo-warehouse-configs "created by the Kargo stage PR merged in the window" khub -n "$KARGO_PROJECT_CONFIGS" get warehouse "$KARGO_WAREHOUSE_CONFIGS" -o name
   chk cf-token-shared-scope shared_scope
   chk cf-token-agent agent_token
-  chk spf-final-txt spf_final
-  chk t7-prs pr_pair keycloak-customer-deploy "${T7_PR:-}" "${T7_REVERT_PR:-}"
-  chk t8-prs pr_pair accounts-deploy "${T8_PR:-}" "${T8_REVERT_PR:-}"
+  stage_chk spf-final-txt spf_final
+  stage_chk t7-prs pr_pair keycloak-customer-deploy "${T7_PR:-}" "${T7_REVERT_PR:-}"
+  stage_chk t8-prs pr_pair accounts-deploy "${T8_PR:-}" "${T8_REVERT_PR:-}"
   chk restore-legacy-sg-dry-run pair legacy-sg legacy-sg
   chk restore-ecs-dry-run pair ecs ecs
-  chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-2*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
+  stage_chk restore-replicas-dry-run bash -o pipefail -c '"$0"/snapshot-gitops.sh >/dev/null && "$0"/restore-replicas.sh "$(ls -1t "$EVIDENCE_DIR"/replicas-before-2*.txt | head -1)" --dry-run | tail -1' "$MIG_DIR"
   chk restore-zone-dry-run pair zone zone "$CF_ZONE_ID"
   chk restore-realm-dry-run pair realm realm "$KC_LEGACY_URL" "$KC_LEGACY_URL"
-  chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/restore-secret-version.sh --check $1 >/dev/null && "$0"/snapshot-secret-versions.sh $1 >/dev/null && n=0 && while read -r id v; do "$0"/restore-secret-version.sh "$id" "$v" --dry-run >/dev/null && n=$((n + 1)) || exit 1; done < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && echo "secrets=$n checked, list and dry-run ok"' "$MIG_DIR" "$secret_ids"
-  chk restore-target-db-dry-run target_db
+  stage_chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/restore-secret-version.sh --check $1 >/dev/null && "$0"/snapshot-secret-versions.sh $1 >/dev/null && n=0 && while read -r id v; do "$0"/restore-secret-version.sh "$id" "$v" --dry-run >/dev/null && n=$((n + 1)) || exit 1; done < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && echo "secrets=$n checked, list and dry-run ok"' "$MIG_DIR" "$secret_ids"
+  in_window restore-target-db-dry-run "runs in the runner pod, which starts in the window" target_db
   if [ "$TARGET_ENV" = tb-prod ]; then
     chk no-placeholders bash -c '[ -z "$1" ] && echo "no REPLACE_ME value" || { echo "placeholders:$1"; exit 1; }' _ "$PLACEHOLDERS"
     chk no-stage-values no_stage
     chk watch-interval posint WATCH_INTERVAL
-    chk lane-report-max lane_limit LANE_REPORT_MAX
-    chk lane-wait-max lane_limit LANE_WAIT_MAX
+    chk lane-report-max posint LANE_REPORT_MAX
+    chk lane-wait-max posint LANE_WAIT_MAX
     chk t7-pr-replicas held_replicas "${KCD_DIR:-}" "${T7_PR:-}" StatefulSet keycloak-customer "${KEYCLOAK_REPLICAS:-}"
     chk t8-pr-replicas held_replicas "${ACD_DIR:-}" "${T8_PR:-}" Deployment accounts-web "${ACCOUNTS_WEB_REPLICAS:-}"
   fi

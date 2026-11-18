@@ -63,6 +63,25 @@ operator_env_default() {
   [ "$TARGET_ENV" != tb-stage ] || [ -e "$f" ] || f=$HOME/.local/state/talos/cutover-operator.env
   printf '%s' "$f"
 }
+load_cutover_env() {
+  local want=$TARGET_ENV f
+  ENV_FILE=${CUTOVER_ENV:-}
+  if [ -z "$ENV_FILE" ]; then
+    ENV_FILE=/dev/shm/talos/cutover-$TARGET_ENV.env
+    for f in "$ENV_FILE" "$HOME/.local/state/talos/cutover-$TARGET_ENV.env"; do [ ! -f "$f" ] || { ENV_FILE=$f; break; }; done
+  fi
+  if [ -f "$ENV_FILE" ]; then
+    if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm /022)" ]; then
+      echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others" >&2
+      exit 1
+    fi
+    env_target_ok "$ENV_FILE" || exit 64
+    set -a; eval "$(< "$ENV_FILE")"; set +a
+    TARGET_ENV=$want
+  fi
+  [ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
+  CUTOVER_ENV_LOADED=1
+}
 stage_only() {
   [ "${STAGE_ONLY_OK:-0}" = 1 ] && return 0
   echo "usage: $(basename "$0") is a tb-stage step; TARGET_ENV=$TARGET_ENV has no form of it" >&2

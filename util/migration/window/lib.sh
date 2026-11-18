@@ -1,20 +1,6 @@
 # shellcheck shell=bash
 . "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
-WANT_ENV=$TARGET_ENV
-ENV_FILE=${CUTOVER_ENV:-}
-if [ -z "$ENV_FILE" ]; then
-  for ENV_FILE in "/dev/shm/talos/cutover-$TARGET_ENV.env" "$HOME/.local/state/talos/cutover-$TARGET_ENV.env"; do [ -f "$ENV_FILE" ] && break; done
-fi
-if [ -f "$ENV_FILE" ]; then
-  if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm /022)" ]; then
-    echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others" >&2
-    exit 1
-  fi
-  env_target_ok "$ENV_FILE" || exit 64
-  set -a; eval "$(< "$ENV_FILE")"; set +a
-  TARGET_ENV=$WANT_ENV
-fi
-if [ -n "${LANE_PF_PORT:-}" ]; then STALWART_URL=http://localhost:$LANE_PF_PORT; elif [ "$WANT_ENV" = tb-prod ]; then STALWART_URL=""; fi
+load_cutover_env
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS
@@ -157,7 +143,7 @@ pending() {
   local v
   for v in "$@"; do
     [ -n "${!v:-}" ] && continue
-    [ "$APPLY" = 1 ] && stop "$v is empty in $ENV_FILE (an earlier window step appends it)"
+    [ "$APPLY" = 1 ] && stop "$v is empty in $ENV_FILE ($(need_hint "$v" | grep . || echo "an earlier window step appends it"))"
     printf "PENDING  %s is filled in-window; shown as \${%s} below\n" "$v" "$v"
     printf -v "$v" "\${%s}" "$v"
   done
@@ -233,10 +219,26 @@ legacy_tunnel() {
   owned_by "${hp##*:}" session-manager || { echo "no SSM tunnel owned by $(id -un) on :${hp##*:} (or a foreign listener): credentials not sent"; return 1; }
 }
 
+forward_kubeconfig_ok() {
+  local pid a prev last args=()
+  for pid in $(listener "$1" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+    mapfile -d '' -t args 2>/dev/null < "/proc/$pid/cmdline" || return 1
+    prev="" last=""
+    for a in "${args[@]}"; do
+      [ "$a" != -- ] || break
+      [ "$prev" != --kubeconfig ] || last=$a
+      case $a in --kubeconfig=*) last=${a#--kubeconfig=} ;; esac
+      prev=$a
+    done
+    [ -n "$last" ] && [ "$last" = "${KS[2]}" ] && kube_args_ok "${args[@]}" >/dev/null 2>&1 || return 1
+  done
+}
+
 port_forward() {
   local pod port=${STALWART_URL##*:}
   if [ -n "$(listener "$port")" ]; then
     owned_by "$port" kubectl || { echo "a listener on :$port is not a kubectl owned by $(id -un): credentials not sent"; return 1; }
+    [ "$TARGET_ENV" != tb-prod ] || forward_kubeconfig_ok "$port" || { echo "the kubectl on :$port was not started with --kubeconfig ${KS[2]}: credentials not sent"; return 1; }
     curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "kubectl listener on :$port does not answer"; return 1; }
     echo "reusing the kubectl port-forward on $STALWART_URL"
     PF_OK=1

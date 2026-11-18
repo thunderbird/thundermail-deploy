@@ -29,7 +29,7 @@ sys.exit(1)
 """
 GATE_IDS = (
     'go-W1 go-W2 go-outbound-block go-T7 go-W4 go-T8 go-W5 go-predns go-mx-flip go-access go-open '
-    'go-W8 go-P1 go-V2 go-rollback checks presync rehearsal backups verify auth-dns pre-cut'
+    'go-W8 go-P1 go-V2 go-rollback start checks presync backups verify auth-dns pre-cut'
 ).split()
 MAIN_STAGE_BUILD = (
     'STALWART_TARGET_PG_HOST 19 STALWART_TARGET_PG_DB 2 STALWART_TARGET_PG_USER 3 '
@@ -242,8 +242,14 @@ class Builder(Sandbox):
             'CUTOVER_ENV',
         ):
             self.assertRegex(out, r'(?m)^%s +len=' % name)
-        self.assertNotRegex(out, r'(?m)^STALWART_URL ')
+        self.assertRegex(out, r'(?m)^STALWART_URL +len=22$')
         text = (self.t / 'shm' / 'cutover.env').read_text()
+        head = subprocess.run(
+            ['git', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True
+        ).stdout.strip()
+        self.assertIn("TMD_CHECKOUT='%s'" % REPO, text)
+        self.assertIn("WINDOW_SHA='%s'" % head, text)
+        self.assertNotIn('REHEARSAL', text)
         self.assertIn("INBOUND_TTL_WAIT='60'", text)
         self.assertIn("NEON_BRANCH_KC='main'", text)
         self.assertEqual(oct((self.t / 'shm' / 'cutover.env').stat().st_mode & 0o777), '0o600')
@@ -270,21 +276,65 @@ class Builder(Sandbox):
         self.assertRegex(out, r'TEST_SENDER_APP_PASSWORD +not restored')
         self.assertRegex(out, r'STATE_OPEN_AT +not restored')
 
-    def test_prod_check_without_a_lane_port_reports_and_finishes(self):
+    def test_prod_check_waits_for_what_only_the_window_creates(self):
         self.build(HERE, **self.prod_env())
-        self.assertNotRegex((self.t / 'shm' / 'cutover.env').read_text(), r'(?m)^STALWART_URL=')
         self.rules([])
         rc, out = self.run_sh(
             [str(HERE / 'build-cutover-env.sh'), '--check'],
             TARGET_ENV='tb-prod',
-            STALWART_URL='http://localhost:18081',
             TIMING_TSV=str(self.t / 'ev' / 'timing.tsv'),
         )
         self.assertNotEqual(rc, 0)
-        self.assertRegex(
-            out, r'FAIL  stalwart-target-healthz +STALWART_URL unset: set LANE_PF_PORT'
-        )
+        for name in (
+            'runner-pod',
+            'pg_isready-STALWART_LEGACY',
+            'psql-select1-ACCOUNTS_LEGACY',
+            'legacy-url-loopback',
+            'stalwart-legacy-healthz',
+            'stalwart-target-healthz',
+            'target-nlb',
+            'kargo-stage-configs',
+            'kargo-warehouse-configs',
+            'restore-target-db-dry-run',
+        ):
+            self.assertRegex(out, r'(?m)^WAIT  %s +\S' % re.escape(name))
+            self.assertNotRegex(out, r'(?m)^(PASS|FAIL)  %s ' % re.escape(name))
+        for name in ('spf-final-txt', 't7-prs', 't8-prs', 'restore-replicas-dry-run'):
+            self.assertNotRegex(out, r'(?m)^\S+  %s ' % re.escape(name))
+        self.assertRegex(out, r'(?m)^FAIL  operator-values +empty: TEST_MAILBOX ')
+        self.assertNotIn('FREEZE_PR', out)
         self.assertIn('env-check\t', (self.t / 'ev' / 'timing-tb-prod.tsv').read_text())
+        self.assertNotIn('pod/runner', self.log())
+
+    def test_rebuild_keeps_the_window_sha_and_a_build_takes_head(self):
+        self.build(HERE, **self.prod_env())
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text(f.read_text() + "WINDOW_SHA='fix3'\n")
+        self.build(HERE, '--rebuild', **self.prod_env())
+        self.assertIn("WINDOW_SHA='fix3'", f.read_text())
+        self.build(HERE, **self.prod_env(WINDOW_SHA='stale'))
+        self.assertNotIn('fix3', f.read_text())
+        self.assertNotIn('stale', f.read_text())
+
+    def test_prod_cloudflare_token_comes_from_the_prod_file(self):
+        home = self.t / 'home'
+        for name, token in (('.cloudflare.env', 'stage-tok'), ('.prod-cloudflare.env', 'prod-token-1')):
+            (home / name).write_text("CF_API_TOKEN_AGENT='%s'\n" % token)
+            (home / name).chmod(0o600)
+        rc, out = self.build(HERE, **self.prod_env())
+        text = (self.t / 'shm' / 'cutover.env').read_text()
+        self.assertIn("CF_API_TOKEN_AGENT='prod-token-1'", text)
+        self.assertIn('# source: %s/.prod-cloudflare.env CF_API_TOKEN_AGENT' % home, text)
+        self.assertRegex(out, r'(?m)^CF_API_TOKEN_AGENT +len=12$')
+        self.assertNotIn('prod-token-1', out)
+        (home / '.prod-cloudflare.env').chmod(0o644)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'start'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(
+            out, r'(?m)^NEED  cf-token-agent +%s/.prod-cloudflare.env missing or not mode 600$' % home
+        )
+        self.assertNotIn('token-1', out)
 
     def test_build_refuses_a_file_of_the_other_environment(self):
         f = self.t / 'shm' / 'cutover.env'
@@ -302,6 +352,31 @@ class Builder(Sandbox):
                 self.assertEqual(rc, 64)
                 self.assertIn(needle, out)
 
+
+class CheckSnapshots(Sandbox):
+    def test_check_snapshots_leave_the_files_rollback_reads(self):
+        text = (HERE / 'build-cutover-env.sh').read_text()
+        start = text.index('  pair() {')
+        fn = text[start : text.index('\n  }\n', start) + 4]
+        mig = self.t / 'mig'
+        mig.mkdir()
+        (mig / 'snapshot-zone.sh').write_text(
+            'f=$EVIDENCE_DIR/zone-before-$1-1.json; echo "[]" > "$f"; echo "$f"\n'
+        )
+        (mig / 'snapshot-realm.sh').write_text(
+            'f=$SECRET_DIR/realm-before-1.json; echo "{}" > "$f"; echo "$f"\n'
+        )
+        for name in ('restore-zone.sh', 'restore-realm.sh'):
+            (mig / name).write_text('[ -f "$1" ] && echo "create=0 update=0 delete=0"\n')
+        for f in mig.iterdir():
+            f.chmod(0o755)
+        body = 'MIG_DIR=%s\n%s\npair zone zone z1\npair realm realm https://kc https://kc\n' % (mig, fn)
+        rc, out = self.run_sh(['-c', body])
+        self.assertEqual(out, 'create=0 update=0 delete=0\n' * 2, out)
+        self.assertEqual(list((self.t / 'ev').glob('zone-before-*')), [])
+        self.assertEqual(list((self.t / 'secret').glob('realm-before-*')), [])
+        self.assertTrue((self.t / 'ev' / 'env-check' / 'zone-before-z1-1.json').is_file())
+        self.assertTrue((self.t / 'secret' / 'env-check' / 'realm-before-1.json').is_file())
 
 class HeldReplicas(Sandbox):
     def repo(self, replicas):
@@ -515,21 +590,58 @@ class TargetEnv(Sandbox):
         self.assertEqual(rc, 64, out)
         self.assertIn('built for TARGET_ENV=tb-stage, not tb-prod', out)
 
-    def test_prod_takes_stalwart_url_only_from_the_lane_port(self):
+    def test_prod_takes_stalwart_url_from_the_env_file_and_the_lane_port(self):
         f = self.t / 'shm' / 'cutover.env'
-        f.write_text("TARGET_ENV='tb-prod'\n")
+        f.write_text("TARGET_ENV='tb-prod'\nSTALWART_URL='http://localhost:18081'\n")
         f.chmod(0o600)
-        lib = HERE / 'window' / 'lib.sh'
-        script = 'set -- --dry-run\n. %s\necho "url=${STALWART_URL:-}"' % lib
-        for port, want in ((None, 'url='), ('18555', 'url=http://localhost:18555')):
-            with self.subTest(port=port):
-                rc, out = self.run_sh(
-                    ['-c', script],
-                    TARGET_ENV='tb-prod',
-                    STALWART_URL='http://localhost:18081',
-                    LANE_PF_PORT=port,
-                )
-                self.assertIn(want + '\n', out)
+        for lib in (HERE / 'window' / 'lib.sh', HERE / 'lib.sh'):
+            script = 'set -- --dry-run\n. %s\necho "url=${STALWART_URL:-}"' % lib
+            for port, want in ((None, 'url=http://localhost:18081'), ('18555', 'url=http://localhost:18555')):
+                with self.subTest(lib=lib.name, port=port):
+                    rc, out = self.run_sh(
+                        ['-c', script],
+                        TARGET_ENV='tb-prod',
+                        STALWART_URL='http://localhost:19999',
+                        LANE_PF_PORT=port,
+                    )
+                    self.assertIn(want + '\n', out)
+
+    def test_an_empty_stalwart_url_names_its_source(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text("TARGET_ENV='tb-prod'\nSTALWART_URL=''\n")
+        f.chmod(0o600)
+        rc, out = self.run_sh([str(HERE / 'quota-reset.sh')], TARGET_ENV='tb-prod')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('missing STALWART_URL: not in %s or the environment; build-cutover-env.sh writes http://localhost:18081' % f, out)
+        self.assertEqual(self.log(), '')
+
+    def test_scripts_read_values_appended_after_the_shell_loaded_the_file(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text(
+            "TARGET_ENV='tb-prod'\nTARGET_NLB_DNS=''\nFREIGHT='f1'\n"
+            "CUT_ECS_END='2026-11-20T01:00:00Z'\nTARGET_NLB_DNS='nlb.example.test'\nFREIGHT='f2'\n"
+        )
+        f.chmod(0o600)
+        script = '. %s/lib.sh\necho "$CUT_ECS_END $TARGET_NLB_DNS $FREIGHT"' % HERE
+        rc, out = self.run_sh(
+            ['-c', script], TARGET_ENV='tb-prod', TARGET_NLB_DNS='', FREIGHT='f1'
+        )
+        self.assertEqual(out, '2026-11-20T01:00:00Z nlb.example.test f2\n', out)
+
+    def test_the_builder_does_not_load_the_previous_env_file_over_the_environment(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text("TARGET_ENV='tb-prod'\nT6_PR='5'\n")
+        f.chmod(0o600)
+        self.rules(stage_rules(ecs='accounts-prod'))
+        self.run_sh(
+            [str(HERE / 'build-cutover-env.sh')],
+            TARGET_ENV='tb-prod',
+            T6_PR='6',
+            KUBECONFIG_TARGET=str(self.t / 'kc-target'),
+            KUBECONFIG_HUB=str(self.t / 'kc-hub'),
+            KUBECONFIG_DEV=str(self.t / 'kc-dev'),
+        )
+        self.assertIn("T6_PR='6'", f.read_text())
 
     def test_no_stage_literal_outside_the_stage_definitions(self):
         pattern = re.compile(
@@ -599,6 +711,66 @@ class Prereqs(Sandbox):
         _, out = self.prereqs('--for', 'go-W4', env='tb-prod')
         self.assertRegex(out, r'(?m)^(HAVE|NEED)  legacy-stalwart-pg-secret ')
         self.assertRegex(out, r'(?m)^(HAVE|NEED)  tool-podman ')
+
+    def rows(self, out):
+        return re.findall(r'(?m)^(?:HAVE|NEED|SKIP)  (\S+)', out)
+
+    def test_start_holds_only_what_exists_before_the_first_step(self):
+        _, out = self.prereqs('--for', 'start', env='tb-prod')
+        rows = self.rows(out)
+        for item in (
+            'checkout',
+            'placeholders',
+            'sso-mzla-tb-prod',
+            'sso-mzla-legacy',
+            'kube-tb-prod',
+            'kube-hub',
+            'cf-token-agent',
+            'neon-api-key+neonctl',
+            'keycloak-admin-legacy',
+            'git-transport',
+            'tool-session-manager-plugin',
+            'python-venv',
+        ):
+            self.assertIn(item, rows)
+        for item in (
+            'stalwart-admin-legacy',
+            'test-user-tb-prod',
+            'accounts-secret-bundle',
+            'keycloak-admin-tb-prod',
+            'rollback-restore-files',
+            't7-pr-and-revert',
+            't8-pr-and-revert',
+            'freeze-pr',
+            'flip-pr',
+            'spf-final-txt',
+            'paddle',
+        ):
+            self.assertNotIn(item, rows)
+        self.assertNotIn('127.0.0.1:18080', self.log())
+
+    def test_steps_after_the_legacy_stop_need_no_legacy_admin_api(self):
+        for gid in ('go-W5', 'go-predns'):
+            with self.subTest(gid=gid):
+                _, out = self.prereqs('--for', gid, env='tb-prod')
+                rows = self.rows(out)
+                self.assertNotIn('stalwart-admin-legacy', rows)
+                self.assertNotIn('test-user-tb-prod', rows)
+                self.assertIn('stalwart-recovery-admin', rows)
+
+    def test_rehearsal_is_not_an_id(self):
+        rc, out = self.prereqs('--for', 'rehearsal')
+        self.assertEqual(rc, 64, out)
+
+    def test_prod_rollback_files_are_the_ones_the_window_writes(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text("TARGET_ENV='tb-prod'\nEVIDENCE_DIR='%s'\n" % (self.t / 'ev'))
+        f.chmod(0o600)
+        _, out = self.prereqs('--for', 'go-rollback', env='tb-prod')
+        self.assertRegex(out, r'(?m)^NEED  rollback-restore-files +missing: cut-legacy-restore.txt$')
+        (self.t / 'ev' / 'cut-legacy-restore.txt').write_text('x\n')
+        _, out = self.prereqs('--for', 'go-rollback', env='tb-prod')
+        self.assertRegex(out, r'(?m)^HAVE  rollback-restore-files +restore files present$')
 
     def test_prod_checkout_row_and_paddle_probe(self):
         (self.t / 'home' / '.paddle.env').write_text("PADDLE_API_KEY='k'\n")

@@ -2,6 +2,7 @@ umask 077
 MIG_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(cd "$MIG_DIR/../.." && pwd)
 . "$MIG_DIR/target.sh" || return 64
+[ "${CUTOVER_ENV_LOADED:-}" = 1 ] || [ "${BUILDING_ENV:-}" = 1 ] || load_cutover_env
 TS=${TS:-$(date -u +%Y%m%dT%H%M%SZ)}
 EVIDENCE_DIR=${EVIDENCE_DIR:-$HOME/.local/state/talos/cutover-$TARGET_ENV}
 SECRET_DIR=${SECRET_DIR:-/dev/shm/talos/cutover-$TARGET_ENV/secret-artifacts}
@@ -22,7 +23,13 @@ set -- "${ARGS[@]+"${ARGS[@]}"}"
 mkdir -p "$EVIDENCE_DIR"
 
 die() { echo "$*" >&2; exit 1; }
-need() { local v; for v in "$@"; do [ -n "${!v:-}" ] || die "missing $v in the environment: source the cutover env file first"; done; }
+need_hint() {
+  case $1 in
+    STALWART_URL) echo "build-cutover-env.sh writes http://localhost:18081 there; LANE_PF_PORT picks another local port" ;;
+    TARGET_NLB_DNS|TARGET_NLB_IPS) echo "it stays empty until the mail load balancer exists; then run build-cutover-env.sh --rebuild" ;;
+  esac
+}
+need() { local v h; for v in "$@"; do [ -n "${!v:-}" ] || { h=$(need_hint "$v"); die "missing $v: not in ${ENV_FILE:-the cutover env file} or the environment; ${h:-run build-cutover-env.sh}"; }; done; }
 mode() { [ "$APPLY" = 1 ] && echo apply || echo dry-run; }
 ktarget() { need KUBECONFIG_TARGET; kubectl --kubeconfig "$KUBECONFIG_TARGET" "$@"; }
 khub() { need KUBECONFIG_HUB; kubectl --kubeconfig "$KUBECONFIG_HUB" "$@"; }

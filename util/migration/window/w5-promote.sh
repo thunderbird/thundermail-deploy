@@ -181,10 +181,17 @@ readback() {
 }
 
 accounts_check() {
-  local out id cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
+  local out id ready cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
   printf '  + %s\n' "$(shq "${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd")"
   printf '  + a failure is PENDING (not a STOP) while %s has no put-accounts-bundle row for this cut\n' "$TIMING_TSV"
   [ "$APPLY" = 1 ] || return 0
+  ready=$("${KS[@]}" -n accounts get deploy accounts-web -o jsonpath='{.status.readyReplicas}') || return 1
+  if [ "${ready:-0}" = 0 ]; then
+    VALUE=no-ready-pod
+    printf 'PENDING  Accounts is not up yet: deploy/accounts-web has 0 ready replicas, so the Accounts -> Stalwart check runs after Accounts starts\n'
+    NEEDS=$((NEEDS + 1))
+    return 0
+  fi
   out=$("${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd") || return 1
   VALUE=$(tail -1 <<<"$out")
   id=$(sed '$d' <<<"$out" | jq -r '.primaryAccounts["urn:stalwart:jmap"] // empty' 2>/dev/null || true)

@@ -4,9 +4,11 @@ Scripts for the tb-stage cutover (platform-infrastructure milestone 1536) and th
 cutover (milestone 1719). Every shell script needs `TARGET_ENV` set to `tb-stage` or `tb-prod` and
 exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environment (cluster,
 profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
-and secrets are looked up at build time. A `REPLACE_ME_*` value is one a later change fills in.
-Every command in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it)
-first, then `util/migration/timing.sh`:
+and secrets are looked up at build time. A `REPLACE_ME_*` value (any case) is one a later change
+fills in; while one is left in `targets/$TARGET_ENV.sh` or `verify/$TARGET_ENV.env`, every `--apply` exits 64.
+Every script loads the env file itself at start (`$CUTOVER_ENV`, default
+`/dev/shm/talos/cutover-$TARGET_ENV.env`; tmpfs, gone on reboot: rebuild it), and its values win over
+the shell's; the builder is the exception. A shell command that reads a variable sources the file again first:
 
 ```bash
 export TARGET_ENV=tb-prod
@@ -17,11 +19,14 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
 
 - `check-prereqs.sh [--for ID[,ID...]]` prints HAVE/NEED per tool and credential and exits with
   the NEED count; without `--for` it prints every row. ID is a gate id (`go-W1` ... `go-rollback`,
-  `checks`, `presync`, `rehearsal`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
-  block per id. It never prints a value.
+  `start`, `checks`, `presync`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
+  block per id. `start` holds only the rows that can pass before the first window step. It reads
+  values from the env file first, then the environment, and never prints a value.
 - `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
   `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
-  so no script falls back to the current context. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
+  or when `--context`, `--cluster`, `--server`, `--token` or `--user` is passed, so no script falls
+  back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
+  cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
   name is still read.
 - Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`
   (mode 600, or both scripts stop; tb-stage falls back to `cutover-operator.env`; a tb-prod file needs a `TARGET_ENV=tb-prod` line); the builder and check-prereqs load its non-empty values, and the environment wins.
@@ -29,7 +34,16 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
   appends (`FREEZE_SHA`, `FREIGHT`, ...) are carried over too. `--check` runs the read-only
-  connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV.
+  connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV; it
+  moves its own snapshots into `env-check/` so rollback never picks them. On tb-prod it prints
+  `WAIT` (not a failure) for rows whose object only exists in the window (runner pod, SSM tunnel,
+  Stalwart, the mail load balancer, the Kargo configs stage) and skips the tb-stage-only rows.
+- The tb-prod build writes `TMD_CHECKOUT` (the checkout it runs from), `WINDOW_SHA` (its `HEAD`;
+  `--rebuild` keeps the recorded value) and `STALWART_URL=http://localhost:18081`, as tb-stage
+  does; `LANE_PF_PORT` replaces the port. The env file is built before the mail load balancer
+  exists, so `TARGET_NLB_DNS` is empty until `build-cutover-env.sh --rebuild` runs after it does.
+- The Cloudflare token is `CF_API_TOKEN_AGENT` from `CF_TOKEN_FILE` (`~/.prod-cloudflare.env` for
+  tb-prod, `~/.cloudflare.env` for tb-stage).
 - Restore scripts are dry-run by default and print what they would change; `--apply`
   performs the writes. `--dry-run` is accepted and is the default. Snapshot scripts always
   write their file under `$EVIDENCE_DIR` (or `$SECRET_DIR` when the content is sensitive)
@@ -158,7 +172,8 @@ the keying for the real hosts.
   refuses a changed plan; W4 needs `--go` once a `drop-schema` row exists for the current cut.
   The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
 - Legacy credentials are sent only to a loopback `OLD_STALWART_URL` served by the operator's own
-  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator.
+  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator
+  (on tb-prod, one started with `--kubeconfig $KUBECONFIG_TARGET`).
 - Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check or signal prints
   `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands and exits 1. Nothing
   rolls back automatically. Exit 2 means a NEED item is listed.
