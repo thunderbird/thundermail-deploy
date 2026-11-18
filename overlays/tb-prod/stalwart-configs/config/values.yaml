@@ -1,0 +1,23 @@
+domainSlug: thundermail
+domainFQDN: thundermail.com
+blobStoreRegion: EuCentral1
+blobStoreBucket: mzla-tb-prod-thundermail-stalwart-blob-store
+inMemoryStoreURL: REPLACE_ME_IN_MEMORY_STORE_URL
+tracerSlug: stdout
+internalIPCIDR: 10.130.0.0/16
+tlsCertificateSANs: REPLACE_ME_TLS_CERTIFICATE_SANS
+oidcIssuerURL: https://auth.tb.pro/realms/tbpro
+stalwartPgHost: ep-still-resonance-b9c8rnw6-pooler.c-7.eu-central-1.aws.neon.tech
+stalwartPgDatabase: neondb
+stalwartPgAdminUsername: neondb_owner
+dnsManagement: Manual
+dnsPublishSpf: false
+authBanRateCount: REPLACE_ME_AUTH_BAN_RATE_COUNT
+scanBanRateCount: REPLACE_ME_SCAN_BAN_RATE_COUNT
+addressBookName: REPLACE_ME_ADDRESS_BOOK_NAME
+allowedIPs: REPLACE_ME_ALLOWED_IPS
+webhookURL: https://accounts.tb.pro/api/v1/telemetry/stalwart/webhook/
+webhookEvents:
+  message-ingest.ham: true
+  message-ingest.spam: true
+  queue.authenticated-message-queued: true
