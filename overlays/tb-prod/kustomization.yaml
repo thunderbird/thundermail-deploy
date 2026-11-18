@@ -10,12 +10,6 @@ components:
 
 namespace: "thundermail"
 
-replicas:
-  - name: stalwart
-    count: 0
-  - name: nginx
-    count: 0
-
 images:
   - name: stalwartlabs/stalwart
     newTag: v0.16.27

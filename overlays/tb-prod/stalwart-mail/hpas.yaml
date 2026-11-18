@@ -4,6 +4,23 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: stalwart
   namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
-  minReplicas: 2
-  maxReplicas: 4
+  minReplicas: 1
+  maxReplicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stalwart
+  namespace: thundermail
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: stalwart
+          env:
+            - name: STALWART_RECOVERY_MODE
+              value: "true"
