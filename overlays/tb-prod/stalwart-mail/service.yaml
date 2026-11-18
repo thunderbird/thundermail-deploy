@@ -1,5 +1,5 @@
-# This file contains no overlays for the stalwart-mail and stalwart-https services, which are
-# cluster-internal and do not require additional environment configuration.
+# This file contains no overlays for the stalwart-https service, which is cluster-internal and
+# does not require additional environment configuration.
 
 ---
 $patch: delete
@@ -19,3 +19,13 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0a98c29bd563864be, subnet-0707b308b8b35a48c"
     service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=prod,project=mzla-tb-prod"
     service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0b9631e7a165dc3a7" # stalwart-admin-lb-thundermail
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-mail
+spec:
+  ports:
+    - port: 587
+      targetPort: starttls
