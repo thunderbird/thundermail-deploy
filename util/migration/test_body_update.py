@@ -145,8 +145,11 @@ class Harness(unittest.TestCase):
         with open(self.d / f'issue-{n}.md', 'w', newline='') as f:
             f.write(body)
 
-    def pr(self, comments):
-        (self.d / 'pr.json').write_text(json.dumps({'comments': comments}))
+    def pr(self, comments, author='lead'):
+        comments = [{'author': {'login': author}, **c} for c in comments]
+        (self.d / 'pr.json').write_text(
+            json.dumps({'author': {'login': 'lead'}, 'comments': comments})
+        )
 
     def run_tool(self, *args):
         env = dict(os.environ, FAKE_DIR=str(self.d), PATH=f'{self.d / "bin"}:{os.environ["PATH"]}')
@@ -263,6 +266,28 @@ class Close(Harness):
         p = self.run_tool('--close', PR)
         self.assertEqual(p.returncode, 1)
         self.assertIn('0 lines equal placeholder', p.stderr)
+        self.assertEqual(self.edits(), [])
+
+    def test_a_comment_by_another_user_is_ignored(self):
+        self.pr([{'body': COMMENT}], author='someone-else')
+        p = self.run_tool('--close', PR)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn('0 comments by the PR author lead', p.stderr)
+        self.assertEqual(self.edits(), [])
+
+    def test_an_issue_outside_the_repo_writes_nothing(self):
+        self.pr(
+            [
+                {
+                    'body': COMMENT.replace(
+                        'issue 1743', 'issue https://github.com/other/repo/issues/1'
+                    )
+                }
+            ]
+        )
+        p = self.run_tool('--close', PR)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn('is outside', p.stderr)
         self.assertEqual(self.edits(), [])
 
     def test_no_comment_exits_non_zero(self):

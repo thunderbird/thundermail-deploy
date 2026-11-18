@@ -238,17 +238,31 @@ def close_body(body, ref, items):
 def close(a):
     if not PR_URL.fullmatch(a.close):
         raise Fail(f'not a pull request URL: {a.close}')
-    comments = load(gh('pr', 'view', a.close, '--json', 'comments'), 'comments')
+    out = gh('pr', 'view', a.close, '--json', 'author,comments')
+    comments = load(out, 'comments')
     if not isinstance(comments, list) or not all(isinstance(c, dict) for c in comments):
         raise Fail(f'gh pr view {a.close}: unreadable output')
     if not comments:
         raise Fail(f'{a.close} has no comment')
-    carriers = [c.get('body') or '' for c in comments if BLOCK.search(c.get('body') or '')]
+    owner = (load(out, 'author') or {}).get('login')
+    if not owner:
+        raise Fail(f'gh pr view {a.close}: no PR author')
+    carriers = [
+        c.get('body') or ''
+        for c in comments
+        if (c.get('author') or {}).get('login') == owner and BLOCK.search(c.get('body') or '')
+    ]
     if len(carriers) != 1:
-        raise Fail(f'{a.close}: {len(carriers)} comments carry a placeholders block, want 1')
+        raise Fail(
+            f'{a.close}: {len(carriers)} comments by the PR author {owner} carry a placeholders'
+            ' block, want 1'
+        )
     entries = parse_blocks(carriers[0], a.repo)
     if not entries:
         raise Fail(f'{a.close}: the placeholders block lists no line')
+    for ref, _, _ in entries:
+        if ref[0] != a.repo:
+            raise Fail(f'{a.close}: {label(ref)} is outside {a.repo}')
     by_issue = {}
     for ref, old, new in entries:
         by_issue.setdefault(ref, []).append((old, new))

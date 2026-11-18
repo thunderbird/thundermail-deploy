@@ -111,7 +111,7 @@ build() {
   env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   local count=0 missing=0
   PUT=" "
-  [ -z "$(prev TARGET_ENV)" ] || [ "$(prev TARGET_ENV)" = "$TARGET_ENV" ] || die "refusing $ENV_FILE: it was built for TARGET_ENV=$(prev TARGET_ENV), not $TARGET_ENV"
+  [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
   if [ "$TARGET_ENV" = tb-prod ] && [ -n "$(op FREEZE_SHA)" ] && [ "$REBUILD" != 1 ]; then die "FREEZE_SHA is set: the window is open, rerun with --rebuild"; fi
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-$TARGET_ENV.XXXXXX")
   trap 'rm -f "$tmp"' EXIT
@@ -276,7 +276,10 @@ build() {
 check() {
   env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   [ -f "$ENV_FILE" ] || die "$ENV_FILE missing: run build-cutover-env.sh first"
+  env_target_ok "$ENV_FILE" || exit 64
+  local want=$TARGET_ENV
   set -a; . "$ENV_FILE"; set +a
+  TARGET_ENV=$want
   . "$MIG_DIR/timing.sh"
   local start fails=0 secret_ids=${REPOINT_SECRET_IDS:-$TARGET_SECRET_PREFIX/keycloak-customer-db $TARGET_SECRET_PREFIX/accounts-db}
   start=$(date -u +%FT%TZ)

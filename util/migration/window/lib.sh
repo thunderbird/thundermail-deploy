@@ -10,10 +10,11 @@ if [ -f "$ENV_FILE" ]; then
     echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others" >&2
     exit 1
   fi
+  env_target_ok "$ENV_FILE" || exit 64
   set -a; eval "$(< "$ENV_FILE")"; set +a
-  [ "${TARGET_ENV:-}" = "$WANT_ENV" ] || { echo "refusing $ENV_FILE: it was built for TARGET_ENV=${TARGET_ENV:-}, not $WANT_ENV" >&2; exit 64; }
+  TARGET_ENV=$WANT_ENV
 fi
-[ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
+if [ -n "${LANE_PF_PORT:-}" ]; then STALWART_URL=http://localhost:$LANE_PF_PORT; elif [ "$WANT_ENV" = tb-prod ]; then STALWART_URL=""; fi
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS

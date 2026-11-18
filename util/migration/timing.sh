@@ -1,4 +1,4 @@
-. "$(dirname "${BASH_SOURCE[0]}")/target.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/target.sh" || return 64
 TS=${TS:-$(date -u +%Y%m%dT%H%M%SZ)}
 TIMING_TSV=${TIMING_TSV:-${EVIDENCE_DIR:-$HOME/.local/state/talos/cutover-$TARGET_ENV}/timing-$TARGET_ENV.tsv}
 mkdir -p "$(dirname "$TIMING_TSV")"

@@ -1,7 +1,7 @@
 umask 077
 MIG_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(cd "$MIG_DIR/../.." && pwd)
-. "$MIG_DIR/target.sh"
+. "$MIG_DIR/target.sh" || return 64
 TS=${TS:-$(date -u +%Y%m%dT%H%M%SZ)}
 EVIDENCE_DIR=${EVIDENCE_DIR:-$HOME/.local/state/talos/cutover-$TARGET_ENV}
 SECRET_DIR=${SECRET_DIR:-/dev/shm/talos/cutover-$TARGET_ENV/secret-artifacts}

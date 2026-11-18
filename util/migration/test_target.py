@@ -229,11 +229,19 @@ class Builder(Sandbox):
 
     def test_build_refuses_a_file_of_the_other_environment(self):
         f = self.t / 'shm' / 'cutover.env'
-        f.write_text("TARGET_ENV='tb-stage'\n")
-        f.chmod(0o600)
-        rc, out = self.build(HERE, **self.prod_env())
-        self.assertEqual(rc, 1)
-        self.assertIn('built for TARGET_ENV=tb-stage', out)
+        for content, needle in (
+            ("TARGET_ENV='tb-stage'\n", 'built for TARGET_ENV=tb-stage'),
+            ("STALWART_URL='http://localhost:18081'\n", 'built for TARGET_ENV=<none>'),
+        ):
+            with self.subTest(content=content):
+                f.write_text(content)
+                f.chmod(0o600)
+                rc, out = self.build(HERE, **self.prod_env())
+                self.assertEqual(rc, 64)
+                self.assertIn(needle, out)
+                rc, out = self.build(HERE, '--check', **self.prod_env())
+                self.assertEqual(rc, 64)
+                self.assertIn(needle, out)
 
 
 class HeldReplicas(Sandbox):
@@ -322,6 +330,26 @@ class KubeconfigGuard(Sandbox):
                 self.assertEqual(rc, 64, out)
                 self.assertEqual(self.log(), '')
 
+    def test_a_kubeconfig_of_the_other_environment_refuses(self):
+        (self.t / 'kc-target').write_text(
+            'clusters:\n- name: arn:aws:eks:x:1:cluster/mzla-eks-tb-prod01\n'
+        )
+        rc, out = self.guard('kubectl --kubeconfig %s/kc-target get pods' % self.t)
+        self.assertEqual(rc, 64)
+        self.assertIn('names mzla-eks-tb-prod01, not a tb-stage cluster', out)
+        self.assertEqual(self.log(), '')
+
+    def test_prod_target_kubeconfig_must_name_the_prod_cluster(self):
+        self.rules([{'tool': 'kubectl', 'match': '.', 'out': 'reached\n'}])
+        kc = self.t / 'kc-target'
+        script = '. %s/target.sh\nkubectl --kubeconfig "$KUBECONFIG_TARGET" get pods' % HERE
+        rc, out = self.run_sh(['-c', script], TARGET_ENV='tb-prod', KUBECONFIG_TARGET=str(kc))
+        self.assertEqual(rc, 64)
+        self.assertIn('does not name mzla-eks-tb-prod01', out)
+        kc.write_text('clusters:\n- name: arn:aws:eks:x:1:cluster/mzla-eks-tb-prod01\n')
+        rc, out = self.run_sh(['-c', script], TARGET_ENV='tb-prod', KUBECONFIG_TARGET=str(kc))
+        self.assertEqual((rc, out), (0, 'reached\n'))
+
     def test_the_stage_kubeconfig_name_still_works(self):
         rc, out = self.guard(
             'kubectl --kubeconfig "$KUBECONFIG_TARGET" get pods',
@@ -360,6 +388,22 @@ class TargetEnv(Sandbox):
         rc, out = self.run_sh([str(HERE / 'window' / 'w7-since-flip.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 64, out)
         self.assertIn('built for TARGET_ENV=tb-stage, not tb-prod', out)
+
+    def test_prod_takes_stalwart_url_only_from_the_lane_port(self):
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text("TARGET_ENV='tb-prod'\n")
+        f.chmod(0o600)
+        lib = HERE / 'window' / 'lib.sh'
+        script = 'set -- --dry-run\n. %s\necho "url=${STALWART_URL:-}"' % lib
+        for port, want in ((None, 'url='), ('18555', 'url=http://localhost:18555')):
+            with self.subTest(port=port):
+                rc, out = self.run_sh(
+                    ['-c', script],
+                    TARGET_ENV='tb-prod',
+                    STALWART_URL='http://localhost:18081',
+                    LANE_PF_PORT=port,
+                )
+                self.assertIn(want + '\n', out)
 
     def test_no_stage_literal_outside_the_stage_definitions(self):
         pattern = re.compile(
@@ -521,6 +565,7 @@ class Runner(Sandbox):
             p.read_text()
             .replace('REPLACE_ME_RUNNER_SGP_LABEL', 'runner-sgp')
             .replace('REPLACE_ME_RUNNER_WORK_SIZE', '64Gi')
+            .replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
         )
         rc, out = self.run_sh([str(defs / 'runner-pod.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 0, out)
