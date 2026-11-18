@@ -3,7 +3,7 @@ set -euo pipefail
 
 overlay=${1:?usage: $0 <overlay dir>}
 engine=${CONTAINER_ENGINE:-$(command -v podman || command -v docker)}
-image=${NGINX_IMAGE:-docker.io/library/nginx:1.31}
+image=${NGINX_IMAGE:-docker.io/library/nginx:1.31.9@sha256:08f354a3b44c422021a5c0f5efb3e27f8f90236b5447d3bac4053f5f50ab6760}
 python=${PYTHON_IMAGE:-docker.io/library/python:3.13-slim}
 name=jmap-filter-$$
 containers=("$name-edge" "$name-mock" "$name-wsecho" "$name-eventsource")
