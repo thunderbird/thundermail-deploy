@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need ARGO_APPS LEGACY_ECS_TARGETS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_TARGET KUBECONFIG_HUB PI_DIR
+need ARGO_APPS KEYCLOAK_REPLICAS ACCOUNTS_WEB_REPLICAS STALWART_REPLICAS LEGACY_ECS_TARGETS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_TARGET KUBECONFIG_HUB PI_DIR
 pending THAW_PR REPLICAS_BEFORE
 PI=thunderbird/platform-infrastructure
 ACC=thunderbird/thunderbird-accounts
@@ -25,8 +25,8 @@ recovery_off() {
 }
 
 workloads_up() {
-  [ "$("${KS[@]}" -n accounts get deploy accounts-web -o jsonpath='{.spec.replicas}')" = 1 ] &&
-    [ "$("${KS[@]}" -n keycloak-customer get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = 2 ]
+  [ "$("${KS[@]}" -n accounts get deploy accounts-web -o jsonpath='{.spec.replicas}')" = "$ACCOUNTS_WEB_REPLICAS" ] &&
+    [ "$("${KS[@]}" -n keycloak-customer get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = "$KEYCLOAK_REPLICAS" ]
 }
 
 scale_up() {
@@ -34,10 +34,10 @@ scale_up() {
   r=$("${KS[@]}" -n thundermail get deploy stalwart -o jsonpath='{.spec.replicas}') || return 1
   echo "deploy/stalwart replicas=$r"
   if [ "$r" = 0 ]; then
-    run "${KS[@]}" -n thundermail scale deploy/stalwart --replicas=1 || return 1
+    run "${KS[@]}" -n thundermail scale deploy/stalwart "--replicas=$STALWART_REPLICAS" || return 1
     run "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s || return 1
   fi
-  printf '  + wait 60s for accounts-web 1 and keycloak-customer 2, else bash %s %s --apply\n' "$MIG_DIR/restore-replicas.sh" "$REPLICAS_BEFORE"
+  printf '  + wait 60s for accounts-web %s and keycloak-customer %s, else bash %s %s --apply\n' "$ACCOUNTS_WEB_REPLICAS" "$KEYCLOAK_REPLICAS" "$MIG_DIR/restore-replicas.sh" "$REPLICAS_BEFORE"
   [ "$APPLY" = 1 ] || return 0
   case "$REPLICAS_BEFORE" in */replicas-before-thaw-*) echo "REPLICAS_BEFORE names the post-window snapshot"; return 1 ;; esac
   until_ok 60 workloads_up || bash "$MIG_DIR/restore-replicas.sh" "$REPLICAS_BEFORE" --apply || return 1

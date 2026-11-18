@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need KC_LEGACY_PG_USER KC_LEGACY_PG_PASSWORD KCD_DIR KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
+need KC_LEGACY_PG_USER KC_LEGACY_PG_PASSWORD KEYCLOAK_REPLICAS KCD_DIR KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
 pending T7_PR T7_REVERT_PR
 REPO=thunderbird/keycloak-customer-deploy
 SECRET_ID=$TARGET_SECRET_PREFIX/keycloak-customer-db
@@ -79,7 +79,7 @@ env_sync() {
   until_ok 400 app_rev || { echo "$APP did not sync $T7_ENV_SHA"; return 1; }
 }
 
-two() { [ "$("${KS[@]}" -n "$NS" get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = 2 ]; }
+two() { [ "$("${KS[@]}" -n "$NS" get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = "$KEYCLOAK_REPLICAS" ]; }
 
 issuer_ok() {
   local ip out
@@ -92,9 +92,9 @@ issuer_ok() {
 }
 
 repoint() {
-  printf '  + wait 120s for sts/keycloak-customer replicas 2, rollout status 600s, issuer check on %s retried for 180s\n' "$ISSUER_HOST"
+  printf '  + wait 120s for sts/keycloak-customer replicas %s, rollout status 600s, issuer check on %s retried for 180s\n' "$KEYCLOAK_REPLICAS" "$ISSUER_HOST"
   [ "$APPLY" = 1 ] || return 0
-  until_ok 120 two || { echo "sts/keycloak-customer is not at 2 replicas"; return 1; }
+  until_ok 120 two || { echo "sts/keycloak-customer is not at $KEYCLOAK_REPLICAS replicas"; return 1; }
   "${KS[@]}" -n "$NS" rollout status sts/keycloak-customer --timeout=600s || return 1
   until_ok 180 issuer_ok || { printf 'issuer: %s after 180s (last HTTP %s, body starts: %s)\n' "${ISSUER:-none}" "${ISSUER_CODE:-none}" "$(head -c 200 <<<"$ISSUER_BODY" | tr -c '[:print:]' ' ')"; return 1; }
   echo "issuer: $ISSUER"

@@ -237,14 +237,33 @@ class Builder(Sandbox):
         (self.t / 'ev' / 'window-values.tsv').write_text(
             'AUTH_DNS_AT\t2026-11-20T01:00:00Z\nREALM_BEFORE\t/x/realm.json\n'
             'TEST_SENDER_APP_PASSWORD\tleaked\nAUTH_DNS_AT\t2026-11-20T02:00:00Z\n'
+            'WINDOW_SHA\tfix2\nINBOUND_TTL_WAIT\t300\n'
         )
         rc, out = self.build(HERE, '--rebuild', **self.prod_env(FREEZE_SHA='abc'))
         text = (self.t / 'shm' / 'cutover.env').read_text()
         self.assertIn("AUTH_DNS_AT='2026-11-20T02:00:00Z'", text)
         self.assertIn("REALM_BEFORE='/x/realm.json'", text)
         self.assertNotIn('leaked', text)
+        self.assertIn("WINDOW_SHA='fix2'", text)
+        self.assertIn("INBOUND_TTL_WAIT='300'", text)
         self.assertRegex(out, r'TEST_SENDER_APP_PASSWORD +not restored')
         self.assertRegex(out, r'STATE_OPEN_AT +not restored')
+
+    def test_prod_check_without_a_lane_port_reports_and_finishes(self):
+        self.build(HERE, **self.prod_env())
+        self.assertNotRegex((self.t / 'shm' / 'cutover.env').read_text(), r'(?m)^STALWART_URL=')
+        self.rules([])
+        rc, out = self.run_sh(
+            [str(HERE / 'build-cutover-env.sh'), '--check'],
+            TARGET_ENV='tb-prod',
+            STALWART_URL='http://localhost:18081',
+            TIMING_TSV=str(self.t / 'ev' / 'timing.tsv'),
+        )
+        self.assertNotEqual(rc, 0)
+        self.assertRegex(
+            out, r'FAIL  stalwart-target-healthz +STALWART_URL unset: set LANE_PF_PORT'
+        )
+        self.assertIn('env-check\t', (self.t / 'ev' / 'timing-tb-prod.tsv').read_text())
 
     def test_build_refuses_a_file_of_the_other_environment(self):
         f = self.t / 'shm' / 'cutover.env'

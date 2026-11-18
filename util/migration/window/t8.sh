@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need ACCOUNTS_LEGACY_PG_USER ACCOUNTS_LEGACY_PG_PASSWORD ACD_DIR KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
+need ACCOUNTS_LEGACY_PG_USER ACCOUNTS_LEGACY_PG_PASSWORD ACCOUNTS_WEB_REPLICAS ACD_DIR KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
 pending T8_PR T8_REVERT_PR
 REPO=thunderbird/accounts-deploy
 SECRET_ID=$TARGET_SECRET_PREFIX/accounts-db
@@ -75,13 +75,13 @@ env_sync() {
   until_ok 400 app_rev || { echo "$APP did not sync $T8_ENV_SHA"; return 1; }
 }
 
-one() { [ "$("${KS[@]}" -n "$NS" get deploy accounts-web -o jsonpath='{.spec.replicas}')" = 1 ]; }
+one() { [ "$("${KS[@]}" -n "$NS" get deploy accounts-web -o jsonpath='{.spec.replicas}')" = "$ACCOUNTS_WEB_REPLICAS" ]; }
 
 repoint() {
   local pending plan
-  printf '  + wait 120s for deploy/accounts-web replicas 1, rollout status 600s for web, celery, flower, then showmigrations --plan unapplied = 0\n'
+  printf '  + wait 120s for deploy/accounts-web replicas %s, rollout status 600s for web, celery, flower, then showmigrations --plan unapplied = 0\n' "$ACCOUNTS_WEB_REPLICAS"
   [ "$APPLY" = 1 ] || return 0
-  until_ok 120 one || { echo "deploy/accounts-web is not at 1 replica"; return 1; }
+  until_ok 120 one || { echo "deploy/accounts-web is not at $ACCOUNTS_WEB_REPLICAS replica$([ "$ACCOUNTS_WEB_REPLICAS" = 1 ] || echo s)"; return 1; }
   "${KS[@]}" -n "$NS" rollout status deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --timeout=600s || return 1
   plan=$("${KS[@]}" -n "$NS" exec deploy/accounts-web -- ./manage.py showmigrations --plan) || { echo "showmigrations failed"; return 1; }
   pending=$(grep -c '\[ \]' <<<"$plan" || true)

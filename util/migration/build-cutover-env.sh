@@ -32,6 +32,7 @@ sm_target() { aws_target secretsmanager get-secret-value --secret-id "$1" --outp
 k8s_secret() { ktarget -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 -d; }
 direct() { sed 's/-pooler//'; }
 doh_a() { curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data] | sort | join(" ")'; }
+opw() { local v; v=$(op "$1"); [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || v=$(window_values "$1"); printf '%s' "$v"; }
 window_values() { [ -f "$EVIDENCE_DIR/window-values.tsv" ] && awk -F'\t' -v n="$1" '$1 == n {v = $2; f = 1} END {if (f) printf "%s", v}' "$EVIDENCE_DIR/window-values.tsv" || true; }
 cf_zone() { [ -n "${CF_TOKEN:-}" ] || return 0; curl -sS -m 30 -K <(bearer "$CF_TOKEN") "$CF_API/zones?name=$1" | jq -r '.result[0].id // empty'; }
 pr_by_head() { gh pr list -R "thunderbird/$1" --state open --json number,headRefName --jq "[.[] | select(.headRefName | test(\"(^|/)$2\$\"))] | if length == 1 then .[0].number else empty end"; }
@@ -93,13 +94,13 @@ window_vars() {
   [ "$(wc -w <<<"$ids")" = "$LEGACY_NODE_COUNT" ] || ids=""
   put LEGACY_STALWART_NODE_IDS "$ids" "aws ec2 describe-instances --profile $LEGACY_AWS_PROFILE Name=$LEGACY_NODE_NAME_FILTER running; empty unless exactly $LEGACY_NODE_COUNT"
   put LEGACY_PG_SECRET_NAME "$LEGACY_PG_SECRET_NAME" "targets/$TARGET_ENV.sh"
-  v=$(op INBOUND_TTL_WAIT); put INBOUND_TTL_WAIT "${v:-60}" "INBOUND_TTL_WAIT appended in the window, else 60 (the inbound record TTL of #1726)"
-  v=$(op WINDOW_SHA); put WINDOW_SHA "${v:-$(op REHEARSAL_SHA)}" "WINDOW_SHA appended by a go-fix merge, else REHEARSAL_SHA"
+  v=$(opw INBOUND_TTL_WAIT); put INBOUND_TTL_WAIT "${v:-60}" "INBOUND_TTL_WAIT appended in the window, else 60 (the inbound record TTL of #1726)"
+  v=$(opw WINDOW_SHA); put WINDOW_SHA "${v:-$(op REHEARSAL_SHA)}" "WINDOW_SHA appended by a go-fix merge, else REHEARSAL_SHA"
   put TMD_CHECKOUT "$(op TMD_CHECKOUT)" "operator: the clean thundermail-deploy clone the window runs from"
   put CUTOVER_ENV "$ENV_FILE" "this file"
   for v in $WINDOW_OPERATOR_VARS $(compgen -v W4_WAIT_ || true); do
     case "$PUT" in *" $v "*) continue ;; esac
-    put "$v" "$(op "$v")" "operator: $v (environment or $OPERATOR_ENV)"
+    put "$v" "$(opw "$v")" "operator: $v (environment or $OPERATOR_ENV)"
   done
 }
 
@@ -280,6 +281,7 @@ check() {
   local want=$TARGET_ENV
   set -a; . "$ENV_FILE"; set +a
   TARGET_ENV=$want
+  if [ -n "${LANE_PF_PORT:-}" ]; then STALWART_URL=http://localhost:$LANE_PF_PORT; elif [ "$TARGET_ENV" = tb-prod ]; then STALWART_URL=""; fi
   . "$MIG_DIR/timing.sh"
   local start fails=0 secret_ids=${REPOINT_SECRET_IDS:-$TARGET_SECRET_PREFIX/keycloak-customer-db $TARGET_SECRET_PREFIX/accounts-db}
   start=$(date -u +%FT%TZ)
@@ -329,6 +331,7 @@ check() {
     st=$([ -n "$h" ] && aws_target elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$h'].State.Code | [0]" --output text 2>/dev/null)
     [ -n "$h" ] && [ "$h" = "${TARGET_NLB_DNS:-}" ] && [ "$st" = active ] && echo "TARGET_NLB_DNS matches the live nginx Service, NLB active" || { echo "env=${TARGET_NLB_DNS:-empty} live=${h:-none} state=${st:-none}: rebuild the env file"; return 1; }
   }
+  target_health() { [ -n "${STALWART_URL:-}" ] || { echo "STALWART_URL unset: set LANE_PF_PORT"; return 1; }; http200 "$STALWART_URL/healthz/live"; }
   count_eq() { local got=$1 want=$2 what=$3; [ -n "$got" ] && [ -n "$want" ] && [ "$want" != 0 ] && [ "$got" = "$want" ] && echo "$what=$got" || { echo "$what=$got expected $want"; return 1; }; }
   pair() {
     local out snap
@@ -353,7 +356,7 @@ check() {
   done
   chk legacy-url-loopback legacy_loopback
   chk stalwart-legacy-healthz http200 "$OLD_STALWART_URL/healthz/live"
-  chk stalwart-target-healthz http200 "$STALWART_URL/healthz/live"
+  chk stalwart-target-healthz target_health
   chk rclone-lsd-legacy bash -c '[ -n "$LEGACY_BLOB_BUCKET" ] && rclone lsd leg: | awk -v b="$LEGACY_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
   chk rclone-lsd-target bash -c '[ -n "$TARGET_BLOB_BUCKET" ] && rclone lsd tgt: | awk -v b="$TARGET_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
   chk legacy-sg count_eq "$(aws_legacy ec2 describe-security-groups --group-ids "$LEGACY_PUB_SG" --query 'length(SecurityGroups)' 2>/dev/null)" 1 security_groups
