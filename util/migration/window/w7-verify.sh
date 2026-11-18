@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-[ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
+[ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id "$MAIL_ZONE" || true)
 need TARGET_NLB_DNS CF_ZONE_ID
 pending TEST_USER TEST_MAILBOX TEST_SENDER TEST_SENDER_APP_PASSWORD
-Z=stage-thundermail.com
-M=mail.$Z
+Z=$MAIL_ZONE
+M=$MAIL_HOST
 TABLE=$EVIDENCE_DIR/w7-verify-$(mode)-$TS.txt
 SUBJECT=w7-verify-$TS
 FAILS=0

@@ -1,17 +1,28 @@
 # Cutover tooling
 
-Scripts for the tb-stage cutover (platform-infrastructure milestone 1536). Every command
-in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it) first,
-then `util/migration/timing.sh`:
+Scripts for the tb-stage cutover (platform-infrastructure milestone 1536) and the tb-prod
+cutover (milestone 1719). Every script needs `TARGET_ENV` set to `tb-stage` or `tb-prod` and
+exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environment (cluster,
+profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
+and secrets are looked up at build time. A `REPLACE_ME_*` value is one a later change fills in.
+Every command in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it)
+first, then `util/migration/timing.sh`:
 
 ```bash
-set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
+export TARGET_ENV=tb-prod
+set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
 
-- `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
-  NEED count (`--for T0` prints every row). It never prints a value.
+- `check-prereqs.sh [--for ID[,ID...]]` prints HAVE/NEED per tool and credential and exits with
+  the NEED count; without `--for` it prints every row. ID is a gate id (`go-W1` ... `go-rollback`,
+  `checks`, `presync`, `rehearsal`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
+  block per id. It never prints a value.
+- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
+  `--kubeconfig` value is empty or names a missing file, so no script falls back to the current
+  context. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
+  name is still read.
 - Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator.env`
   (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
@@ -29,7 +40,9 @@ set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.s
 
 ## Runner pod
 
-`runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
+`runner-pod.sh` prints `runner-pod.yaml` for `TARGET_ENV` (label, `/work` size and the legacy
+Secret name from `targets/$TARGET_ENV.sh`); `runner-pod.sh --secret` writes that Secret under
+`$SECRET_DIR` and prints its path. `runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
 security group through the existing `stalwart-config-applier` SecurityGroupPolicy label
 (not `app=stalwart`, so no Service selects it). It runs on `role: mail` nodes like Stalwart,
 as uid 70 with no capabilities. The `postgres` container writes `/secrets/.pgpass` (a
@@ -53,7 +66,10 @@ the keying for the real hosts.
 ## Script notes
 
 - `snapshot-zone.sh ZONE` keeps `data` for SRV/TLSA/CAA and also records a DoH answer per
-  record as `zone-doh-before-<zone>-<ts>.txt`.
+  record as `zone-doh-before-<zone>-<ts>.txt`; when a lookup fails it prints
+  `doh capture partial: N of M names unread`.
+- `body-update.py --tick <gate> --evidence <file>` and `--close <PR URL>` edit issue bodies;
+  `--dry-run` prints the diff and the body size and writes nothing (`--help` has the formats).
 - `restore-zone.sh SNAPSHOT` creates missing records, updates changed ones and deletes
   records added since the snapshot; it never touches `_externaldns.*`, `*.dkim.*` or `*._domainkey.*`.
 - `restore-ecs.sh` restores desiredCount first, then min/max, then clears the suspension.
@@ -119,7 +135,7 @@ the keying for the real hosts.
   `$EVIDENCE_DIR/tbpro-rules-before-*.json` and, with `--apply`, the records to
   `tbpro-p2-records-before-*.json`; it prints every call. Writes need `--apply`. It runs with the
   P2 token: `CF_API_TOKEN_AGENT` swapped for a tb.pro-only token with `expires_on`
-  (`check-prereqs.sh --for P2` checks both), revoked after `post/p2-verify.sh` passes.
+  (the `cf-token-agent-redirects` row of `check-prereqs.sh` checks both), revoked after `post/p2-verify.sh` passes.
   Rollback is `post/p2-redirects.sh --rollback [--apply]`: it unproxies the saved records first
   (restoring their TTL), then deletes every entrypoint rule whose ref starts with `p2_`. After a
   successful rollback it moves that cycle's records files to `tbpro-p2-rolled-back-<ts>/`.
@@ -130,10 +146,11 @@ the keying for the real hosts.
 
 `window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
 `w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
-`/dev/shm/talos/cutover-tb-stage.env`, else `~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
+`/dev/shm/talos/cutover-$TARGET_ENV.env`, else `~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
-- `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,
+- `--dry-run` (default) runs `check-prereqs.sh --for <gate id>` (`GATE_ID`, else the script's
+  go row), the snapshots and read-only checks,
   and prints every write as the exact command; it never runs `kubectl exec`. Timing rows get a
   `dryrun-` prefix. `--apply` runs the writes.
 - W2 writes only with `--apply --go '<operator words>'`; W5 phase 1 (`--apply`) stops after

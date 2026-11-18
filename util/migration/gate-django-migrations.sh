@@ -3,7 +3,7 @@ set -euo pipefail
 DRY=0
 for a in "$@"; do [ "$a" = --dry-run ] && DRY=1; done
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-web_image() { kstage -n accounts get deploy accounts-web -o jsonpath='{.spec.template.spec.containers[?(@.name=="accounts")].image}'; }
+web_image() { ktarget -n accounts get deploy accounts-web -o jsonpath='{.spec.template.spec.containers[?(@.name=="accounts")].image}'; }
 if [ "${1:-}" = --capture ]; then
   out=$EVIDENCE_DIR/django-plan-$TS
   if [ "$DRY" = 1 ]; then
@@ -11,13 +11,13 @@ if [ "${1:-}" = --capture ]; then
     printf 'dry-run: deploy/accounts-web container accounts image > %s.image\n' "$out"
     exit 0
   fi
-  kstage -n accounts rollout status deploy/accounts-web --timeout=120s >/dev/null || die "deploy/accounts-web rollout is not complete"
+  ktarget -n accounts rollout status deploy/accounts-web --timeout=120s >/dev/null || die "deploy/accounts-web rollout is not complete"
   image=$(web_image)
   [ -n "$image" ] || die "no accounts container image on deploy/accounts-web"
-  sel=$(kstage -n accounts get deploy accounts-web -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
-  pod=$(kstage -n accounts get pods -l "$sel" -o json | jq -r --arg img "$image" '[.items[] | select(.status.phase == "Running" and .metadata.deletionTimestamp == null) | select(any(.spec.containers[]; .name == "accounts" and .image == $img))][0].metadata.name // empty')
+  sel=$(ktarget -n accounts get deploy accounts-web -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+  pod=$(ktarget -n accounts get pods -l "$sel" -o json | jq -r --arg img "$image" '[.items[] | select(.status.phase == "Running" and .metadata.deletionTimestamp == null) | select(any(.spec.containers[]; .name == "accounts" and .image == $img))][0].metadata.name // empty')
   [ -n "$pod" ] || die "no Running accounts-web pod runs $image"
-  plan=$(kstage -n accounts exec "$pod" -c accounts -- ./manage.py showmigrations --plan --no-color | sed -n 's/^\[[ X]\] *\([^ ]*\).*/\1/p' | sort -u)
+  plan=$(ktarget -n accounts exec "$pod" -c accounts -- ./manage.py showmigrations --plan --no-color | sed -n 's/^\[[ X]\] *\([^ ]*\).*/\1/p' | sort -u)
   [ -n "$plan" ] || die "showmigrations returned no migrations"
   printf '%s\n' "$plan" > "$out.txt"
   printf '%s\n' "$image" > "$out.image"

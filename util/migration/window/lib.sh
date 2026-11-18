@@ -1,7 +1,9 @@
 # shellcheck shell=bash
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
+WANT_ENV=$TARGET_ENV
 ENV_FILE=${CUTOVER_ENV:-}
 if [ -z "$ENV_FILE" ]; then
-  for ENV_FILE in /dev/shm/talos/cutover-tb-stage.env "$HOME/.local/state/talos/cutover-tb-stage.env"; do [ -f "$ENV_FILE" ] && break; done
+  for ENV_FILE in "/dev/shm/talos/cutover-$TARGET_ENV.env" "$HOME/.local/state/talos/cutover-$TARGET_ENV.env"; do [ -f "$ENV_FILE" ] && break; done
 fi
 if [ -f "$ENV_FILE" ]; then
   if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm /022)" ]; then
@@ -9,7 +11,9 @@ if [ -f "$ENV_FILE" ]; then
     exit 1
   fi
   set -a; eval "$(< "$ENV_FILE")"; set +a
+  [ "${TARGET_ENV:-}" = "$WANT_ENV" ] || { echo "refusing $ENV_FILE: it was built for TARGET_ENV=${TARGET_ENV:-}, not $WANT_ENV" >&2; exit 64; }
 fi
+[ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS
@@ -26,11 +30,10 @@ done
 W=$(basename "$0" .sh)
 KEY=$(tr '[:lower:]' '[:upper:]' <<<"${W%%-*}")
 SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
-KS=(kubectl --kubeconfig "${KUBECONFIG_STAGE:-}")
+KS=(kubectl --kubeconfig "${KUBECONFIG_TARGET:-}")
 KH=(kubectl --kubeconfig "${KUBECONFIG_HUB:-}")
 TMD_URL=https://github.com/thunderbird/thundermail-deploy.git
-PREVIEW_BRANCH=env/tb-stage-thundermail-stalwart-configs-preview
-CFG_PATHS="overlays/tb-stage-thundermail/stalwart-configs bases/stalwart-configs"
+CFG_PATHS="$CONFIGS_OVERLAY bases/stalwart-configs"
 SUF=""
 [ "$APPLY" = 1 ] || SUF=.dry-run
 RESTORE=$EVIDENCE_DIR/$W-restore$SUF.txt
@@ -114,11 +117,19 @@ go_gate() {
   printf '== operator go recorded in %s: %s\n' "$TIMING_TSV" "$GO"
 }
 
+gate_id() {
+  [ -z "${GATE_ID:-}" ] || { printf '%s' "$GATE_ID"; return 0; }
+  case "$KEY" in
+    W1) echo go-W1 ;; W2) echo go-W2 ;; T7) echo go-T7 ;; T8) echo go-T8 ;; W3|W4) echo go-W4 ;;
+    W5) echo go-W5 ;; W6) echo go-predns ;; W7) echo go-open ;; W8) echo go-W8 ;; *) echo "$KEY" ;;
+  esac
+}
+
 prereqs() {
-  local out
-  if out=$(bash "$MIG_DIR/check-prereqs.sh" --for "$KEY" 2>&1); then printf '%s\n' "$(tail -1 <<<"$out")"; return 0; fi
+  local out id; id=$(gate_id)
+  if out=$(bash "$MIG_DIR/check-prereqs.sh" --for "$id" 2>&1); then printf '%s\n' "$(tail -1 <<<"$out")"; return 0; fi
   grep '^NEED' <<<"$out" || printf '%s\n' "$out"
-  [ "$APPLY" = 1 ] && stop "check-prereqs.sh --for $KEY reports NEED"
+  [ "$APPLY" = 1 ] && stop "check-prereqs.sh --for $id reports NEED"
   NEEDS=$((NEEDS + 1))
 }
 
@@ -241,7 +252,7 @@ port_forward() {
 mail_tls() {
   local st=()
   case "$1" in 25|587) st=(-starttls smtp) ;; esac
-  timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername mail.stage-thundermail.com -verify_return_error -verify_hostname mail.stage-thundermail.com "${st[@]}" </dev/null >/dev/null 2>&1
+  timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername "$MAIL_HOST" -verify_return_error -verify_hostname "$MAIL_HOST" "${st[@]}" </dev/null >/dev/null 2>&1
 }
 
 port_free() { [ -z "$(listener "$1")" ]; }
@@ -252,7 +263,7 @@ restart_stalwart() {
   local pod p pid sport bad="" fwd=()
   run "${KS[@]}" -n thundermail rollout restart deploy/stalwart || return 1
   run "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s || return 1
-  printf '  + port-forward a Running stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993, then up to 60s per port for TLS verified for mail.stage-thundermail.com (STARTTLS on 25 and 587)\n'
+  printf '  + port-forward a Running stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993, then up to 60s per port for TLS verified for %s (STARTTLS on 25 and 587)\n' "$MAIL_HOST"
   [ "$APPLY" = 1 ] || return 0
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart-nginx --field-selector=status.phase=Running -o name | head -1)
   [ -n "$pod" ] || { echo "no Running stalwart-nginx pod"; return 1; }
@@ -267,7 +278,7 @@ restart_stalwart() {
   kill "$MAIL_PF" 2>/dev/null || true
   MAIL_PF=""
   [ -z "$bad" ] || { echo "after the Stalwart restart, no verified TLS through $pod on:$bad"; return 1; }
-  echo "Stalwart restarted; 25 465 587 993 answer through $pod with TLS verified for mail.stage-thundermail.com"
+  echo "Stalwart restarted; 25 465 587 993 answer through $pod with TLS verified for $MAIL_HOST"
   [ "$PF_OK" = 1 ] || return 0
   sport=${STALWART_URL##*:}
   if [ -n "$PF" ]; then

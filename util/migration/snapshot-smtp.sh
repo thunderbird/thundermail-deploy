@@ -4,9 +4,9 @@ set -euo pipefail
 REALM=${1:-tbpro}
 PORT=${KC_LOCAL_PORT:-18082}
 CID=${KC_STAGE_ADMIN_CLIENT_ID:-tb-accounts-admin}
-CSEC=$(kstage -n keycloak-customer get secret keycloak-customer-admin-client -o jsonpath='{.data.client-secret}' | base64 -d)
+CSEC=$(ktarget -n keycloak-customer get secret keycloak-customer-admin-client -o jsonpath='{.data.client-secret}' | base64 -d)
 [ -n "$CSEC" ] || die "keycloak-customer-admin-client secret has no client-secret"
-kstage -n keycloak-customer port-forward pod/keycloak-customer-0 "$PORT:8080" >/dev/null 2>&1 &
+ktarget -n keycloak-customer port-forward pod/keycloak-customer-0 "$PORT:8080" >/dev/null 2>&1 &
 pf=$!
 trap 'kill $pf 2>/dev/null || true' EXIT
 for _ in $(seq 1 30); do curl -sf -o /dev/null "http://localhost:$PORT/realms/master" && break; sleep 1; done

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-REDIRECTS=${REDIRECTS:-"accounts-stage.tb.pro=https://accounts.stage-thundermail.com auth-stage.tb.pro=https://auth.stage-thundermail.com"}
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
+stage_only
+REDIRECTS=${REDIRECTS:-"$LEGACY_ACCOUNTS_HOST=https://$ACCOUNTS_HOST $LEGACY_AUTH_HOST=https://$AUTH_HOST"}
 TRIES=${TRIES:-5}
 fail=0
 

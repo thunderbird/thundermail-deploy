@@ -221,6 +221,7 @@ class Harness(unittest.TestCase):
             'SECRET_DIR': str(self.t / 'secret'),
             'TIMING_TSV': str(self.t / 'ev' / 'timing.tsv'),
             'TS': '20261112T000000Z',
+            'TARGET_ENV': 'tb-stage',
         }
         e.update(extra)
         return e
@@ -284,7 +285,7 @@ class Harness(unittest.TestCase):
             'SECRET_NAMES=""\n'
             'MIG_DIR=%s ENV_FILE=%s/cutover.env LOG=%s/run.log RESTORE=%s/restore.txt\n'
             'KS=(kubectl --kubeconfig /dev/null) KH=(kubectl --kubeconfig /dev/null)\n'
-            '. %s/defs.sh\n' % (mig, self.t, self.t, self.t, self.t)
+            '. %s/target.sh\n. %s/defs.sh\n' % (mig, self.t, self.t, self.t, mig, self.t)
         )
         return self.netns(head + setup + '\n' + body + '\n', **kw)
 
@@ -829,7 +830,7 @@ class W6Verify(Harness):
     def test_folders_run_even_when_verify_fails(self):
         mig = self.t / 'fix'
         (mig / 'verify').mkdir(parents=True)
-        (mig / 'verify' / 'stage.env').write_text('')
+        (mig / 'verify' / 'tb-stage.env').write_text('')
         (mig / 'verify' / 'expected-warn.txt').write_text('extra on target:\n')
         (mig / 'verify' / 'run_all.sh').write_text(
             'echo "  FAIL  emails: source 1, target 0"; exit 1\n'

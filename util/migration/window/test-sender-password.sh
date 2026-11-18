@@ -3,7 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need TARGET_NLB_DNS
 pending TEST_USER
-M=mail.stage-thundermail.com
+M=$MAIL_HOST
 OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
 printf 'n/a: stores one value in the env file\n' > "$RESTORE"
 

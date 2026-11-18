@@ -3,6 +3,7 @@
 # 01 must succeed: the later checks compare against the snapshot it writes, so a stale one would give false PASSes.
 set -u
 cd "$(dirname "$0")" || exit 99
+. ../target.sh
 usage() { echo "usage: run_all.sh [--group source|data|config]"; exit 99; }
 GROUP=all
 case "${1:-}" in

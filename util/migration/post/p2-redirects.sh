@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
+stage_only
 ROLLBACK=0
 POS=()
 for a in "$@"; do case "$a" in --rollback) ROLLBACK=1 ;; *) POS+=("$a") ;; esac; done
 ZONE=${POS[0]:-${CF_ZONE_ID_TBPRO:-}}
 [[ $ZONE =~ ^[0-9a-f]{32}$ ]] || die "usage: post/p2-redirects.sh [ZONE_ID] [--rollback] [--dry-run|--apply] (ZONE_ID defaults to CF_ZONE_ID_TBPRO and must be a 32-hex zone id, got '$ZONE')"
 need CF_API_TOKEN_AGENT
-REDIRECTS="accounts-stage.tb.pro=https://accounts.stage-thundermail.com auth-stage.tb.pro=https://auth.stage-thundermail.com"
+REDIRECTS="$LEGACY_ACCOUNTS_HOST=https://$ACCOUNTS_HOST $LEGACY_AUTH_HOST=https://$AUTH_HOST"
 EP=$CF_API/zones/$ZONE/rulesets/phases/http_request_dynamic_redirect/entrypoint
 RECS_DIR=$CF_API/zones/$ZONE/dns_records
 

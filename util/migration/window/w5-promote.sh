@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need STALWART_URL STALWART_USER STALWART_PASSWORD KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KUBECONFIG_STAGE KUBECONFIG_HUB SECRET_DIR
+need STALWART_URL STALWART_USER STALWART_PASSWORD KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
 pending STALWART_ADMIN_ACCOUNT_ID TEST_USER
 export STALWART_URL STALWART_USER STALWART_PASSWORD STALWART_ADMIN_ACCOUNT_ID
 PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
@@ -10,7 +10,7 @@ PHASE=1
 [ "$APPLY" = 1 ] && [ -n "$GO" ] && PHASE=2
 PROMOTION=$EVIDENCE_DIR/promotion-configs-$TS.yaml
 PROMOTION_RESTORE=$EVIDENCE_DIR/promotion-configs-restore$SUF-$TS.yaml
-UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname mail.stage-thundermail.com
+UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname "$MAIL_HOST"
   --skip WebHook --skip AllowedIp --skip MtaSts --skip MtaQueueQuota --skip Security --skip Calendar --skip AddressBook --skip Http)
 
 snap_settings() {
@@ -29,7 +29,7 @@ snap_settings() {
   [ -s "$FREIGHT_BEFORE" ] || { echo "no freight-before file"; return 1; }
   [ "$APPLY" = 0 ] || [ -s "$SETTINGS_BEFORE" ] || { echo "snapshot-settings.sh printed no settings-before file"; return 1; }
   if [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
-    sed "s/__TS__/$(date -u +%s)r/; s/__FREIGHT__/$(cat "$FREIGHT_BEFORE")/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION_RESTORE" || return 1
+    sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)r/; s/__FREIGHT__/$(cat "$FREIGHT_BEFORE")/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION_RESTORE" || return 1
   else
     printf 'promotion.yaml.tpl missing: render it with __FREIGHT__=%s\n' "$(cat "$FREIGHT_BEFORE")" > "$PROMOTION_RESTORE"
   fi
@@ -89,7 +89,7 @@ job_started() { [ "$("${KS[@]}" -n thundermail get job stalwart-config-apply -o 
 
 promote() {
   if [ "$APPLY" = 0 ] && ! live promotion.yaml.tpl; then printf '  + %s\n' "$(shq "${KH[@]}" create -f "$PROMOTION")"; return 0; fi
-  sed "s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$FREIGHT/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION" || return 1
+  sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$FREIGHT/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION" || return 1
   sed 's/^/    /' "$PROMOTION"
   PROMOTE_AT=$(date -u +%FT%TZ)
   run "${KH[@]}" create -f "$PROMOTION" || return 1

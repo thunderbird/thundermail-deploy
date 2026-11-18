@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-APPT_HOST=${APPT_HOST:-appointment-stage.tb.pro}
-AUTH_HOST=${AUTH_HOST:-auth.stage-thundermail.com}
-ACCOUNTS_HOST=${ACCOUNTS_HOST:-accounts.stage-thundermail.com}
-CALDAV_HOST=${CALDAV_HOST:-stage-thundermail.com}
-OLD_AUTH_HOST=auth-stage.tb.pro
-OLD_ACCOUNTS_HOST=accounts-stage.tb.pro
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
+OLD_AUTH_HOST=$LEGACY_AUTH_HOST
+OLD_ACCOUNTS_HOST=$LEGACY_ACCOUNTS_HOST
 OIDC_CLIENT_ID=thunderbird-appointment-frontend
 
 TMP=$(mktemp -d)
