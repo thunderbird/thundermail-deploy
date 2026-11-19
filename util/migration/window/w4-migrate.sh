@@ -398,7 +398,7 @@ export_current() {
   else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
   if [ "${1:-reset}" = boot ] && [ "$bad" = 0 ]; then
     bound=$(cut_row reset-export | awk -F'\t' '$5 == "sha256" {print $6}')
-    if [ -z "$bound" ] || [ "$bound" != "$(export_digests)" ]; then echo "the export files in $S are not the ones the reset checked (reset-export row): a read ran after the reset; rerun --phase reset --apply --go '<words>'"; bad=1; fi
+    if [ -z "$bound" ] || [ "$bound" != "$(export_digests)" ] || [ -z "$(cut_line reset)" ] || [ "$(cut_line reset-export)" -gt "$(cut_line reset)" ]; then echo "the export files in $S are not the ones the reset checked (reset-export row): a read ran after the reset; rerun --phase reset --apply --go '<words>'"; bad=1; fi
   fi
   [ "$bad" = 0 ]
 }
@@ -721,11 +721,11 @@ reset_phase() {
   STOP_AT=""
   [ "$APPLY" = 0 ] || APPLY_ARG=(--apply)
   step reset-preflight "" reset_preflight
-  [ "$APPLY" = 0 ] || mark reset-export sha256 "$(export_digests)" || stop "could not write the reset-export row"
   if [ "$APPLY" = 1 ] && { [ -n "$(cut_row reset)" ] || [ -n "$(cut_row reset-sent)" ]; }; then
     [ -n "$GO" ] || stop "$CUTOVER_BRANCH was already reset in this cut: a second reset needs the operator's confirmation (--go); after an expired pod wait use --phase boot"
     go_gate
   fi
+  [ "$APPLY" = 0 ] || mark reset-export sha256 "$(export_digests)" || stop "could not write the reset-export row"
   step neon-reset reset_at neon_reset
   step source-branch-create created_at source_branch
   step branch-check parent_lsn branch_check

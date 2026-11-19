@@ -527,6 +527,10 @@ class BootPhase(Prod):
         changed = FILES_SH + 'echo \'{"changed": 1}\' > "$S/export.json"\n'
         out = self.w4(changed + 'boot_resume; echo "rc=$?"')
         self.assertIn('rc=1', out)
+        self.rows([CUT, EXPORT, READ, STOPPED, r, BOUND, g, self.PRE])
+        out = self.w4(FILES_SH + 'boot_resume; echo "rc=$?"')
+        self.assertIn('are not the ones the reset checked (reset-export row)', out)
+        self.assertIn('rc=1', out)
         self.rows([x for x in ok if x[0] != 'reset-export'])
         out = self.w4(FILES_SH + 'boot_resume; echo "rc=$?"')
         self.assertIn('the export files in', out)
@@ -679,6 +683,7 @@ class Script(Prod):
         ]
         out = self.run_w4('--phase', 'reset', '--apply', rows=[CUT, EXPORT, READ, STOPPED, reset])
         self.assertIn('was already reset in this cut: a second reset needs', out)
+        self.assertNotIn('reset-export', [r[0] for r in self.timing()])
         self.assertNotIn('nb ', '\n'.join(self.calls('nb')).replace('nb hosts', ''))
         out = self.run_w4('--phase', 'boot', '--apply', rows=[CUT, EXPORT, READ, STOPPED])
         self.assertIn('STOP W4 (apply): --phase boot has nothing to resume', out)
