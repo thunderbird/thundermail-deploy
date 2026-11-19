@@ -139,11 +139,11 @@ read_queue() {
   done
   now=$(date -u +%s)
   min=$((now + HELD_MIN_HOURS * 3600))
-  Q=$(jq -c --argjson min "$min" --argjson cut "$cut" '
+  Q=$(jq -c --argjson min "$min" --argjson now "$((now + 60))" --argjson cut "$cut" '
     def due: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
     map({id, created: ((.createdAt // "1970-01-01T00:00:00Z") | due), pend: [(.recipients // {}) | (if type == "array" then .[] else to_entries[] | .value end) | select(.status["@type"] == "Scheduled" or .status["@type"] == "TemporaryFailure")]})
-    | map(. + {remote: any(.pend[]; .queueName != "local"), held: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) >= $min))})
-    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created < $cut) | .id]}' <<<"$list") || return 1
+    | map(. + {remote: any(.pend[]; .queueName != "local"), held: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) >= $min)), later: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) > $now))})
+    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created < $cut) | .id], later: [.[] | select(.remote and .later) | .id]}' <<<"$list") || return 1
 }
 
 show_queue() { jq -r '"queue: total=\(.total) remote=\(.remote | length) held=\(.held | length) not_held=\(.not_held | length)" + (if (.not_held | length) != (.hold | length) then " queued_after_release=\((.not_held | length) - (.hold | length))" else "" end)' <<<"$Q"; }
@@ -179,8 +179,8 @@ hold_queue() {
 release_queue() {
   read_queue || return 1
   show_queue
-  VALUE=$(jq '.held | length' <<<"$Q")
-  set_retry "$(jq -c .held <<<"$Q")" "$(date -u +%FT%TZ)" || return 1
+  VALUE=$(jq '.later | length' <<<"$Q")
+  set_retry "$(jq -c .later <<<"$Q")" "$(date -u +%FT%TZ)" || return 1
   [ "$APPLY" = 1 ] || return 0
   read_queue || return 1
   printf 'read back: '
@@ -226,8 +226,8 @@ case "$MODE" in
     pods || stop "a Running Stalwart pod is outside $SG"
     with_queue hold_queue
     printf 'bash %s set --dry-run\nbash %s set --apply\n' "$0" "$0" > "$RESTORE"
-    OPEN_AT=$(date -u +%s)
     open_25 || stop "opening port 25 on $SG failed"
+    OPEN_AT=$(date -u +%s)
     with_queue hold_queue "$OPEN_AT"
     [ "$APPLY" = 0 ] || mark hold25-release-port25 held "$VALUE" ;;
   release-queue)

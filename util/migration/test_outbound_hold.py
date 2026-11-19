@@ -548,6 +548,15 @@ class Hold25(Base):
         self.assertIn('revoke-', w[1])
         self.assertEqual(self.rows()[-2:], ['go-HOLD25', 'hold25-release-port25'])
 
+    def test_release_queue_releases_a_hold_older_than_the_held_threshold(self):
+        now = time.time()
+        self.edit(pods=['stalwart-a'], queue={'21': msg(now + 6 * 3600), '22': msg(now - 60)})
+        self.add_row('hold25-release-port25')
+        p = self.run_tool('hold25.sh', 'release-queue', '--apply', '--go', 'go 7.7')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('ids=21\n', p.stdout)
+        self.assertLess(self.due('21'), time.time() + 60)
+
     def test_release_port25_leaves_mail_queued_after_the_release_unheld(self):
         self.run_tool('hold25.sh', 'set', '--apply')
         self.queue()
