@@ -88,7 +88,7 @@ for i in "${IDS[@]}"; do printf '%s\n' "${NAME[$i]} $i ${ROLE[$i]}"; done | sort
 done
 [ "${#TARGETS[@]}" -gt 0 ] || halt "no node carries mail ($TAG other than management)"
 
-if [ "$MODE" = restart ] && [ -n "$(awk -F'\t' '$1 == "cut-ecs" {v = ""} $1 == "stop-legacy-stalwart" {v = $0} END {print v}' "$TIMING_TSV" 2>/dev/null)" ]; then
+if [ "$MODE" = restart ] && [ -n "$(awk -F'\t' '$1 == "cut-ecs" || $1 == "start-legacy-stalwart" {v = ""} $1 == "stop-legacy-stalwart" {v = $0} END {print v}' "$TIMING_TSV" 2>/dev/null)" ]; then
   need_line "a stop-legacy-stalwart row follows the last cut-ecs row in $TIMING_TSV: restart would start the stopped nodes; start is the Rollback mode"
 fi
 if [ "$MODE" = stop ]; then
@@ -110,13 +110,17 @@ fi
 end_needs
 
 SENT=$(date -u +%FT%TZ)
+if [ "$MODE" = start ]; then
+  printf 'start-legacy-stalwart\t%s\t%s\tnodes\t%d\n' "$SENT" "$SENT" "${#TARGETS[@]}" >> "$TIMING_TSV"
+  echo "start-legacy-stalwart row written to $TIMING_TSV before the send: an earlier stop-legacy-stalwart row no longer counts"
+fi
 printf '  + %s\n' "$(q aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" "${SEND[@]}")"
 cid=$(aws_legacy "${SEND[@]}" 2>&1) || halt "ssm send-command failed: $(tail -1 <<<"$cid")"
 [[ $cid =~ ^[0-9a-f-]{36}$ ]] || halt "ssm send-command returned no command id: $(tail -1 <<<"$cid")"
 echo "command id $cid, sent $SENT"
 printf '  + %s   (each of the %d node(s), every %s s, up to %s s)\n' "$(q aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" ssm get-command-invocation --command-id "$cid" --instance-id '<node>' --output json)" "${#TARGETS[@]}" "$POLL" "$WAIT"
 
-declare -A ST RC OUT
+declare -A ST RC OUT ERR
 deadline=$(( $(date +%s) + WAIT ))
 while :; do
   open=0
@@ -126,6 +130,7 @@ while :; do
       ST[$i]=$(jq -r '.Status // empty' <<<"$inv" 2>/dev/null || true)
       RC[$i]=$(jq -r '.ResponseCode // empty' <<<"$inv" 2>/dev/null || true)
       OUT[$i]=$(jq -r '.StandardOutputContent // ""' <<<"$inv" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)
+      ERR[$i]=$(jq -r '.StandardErrorContent // ""' <<<"$inv" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)
     fi
     case "${ST[$i]:-}" in Success|Failed|Cancelled|TimedOut) ;; *) open=$((open + 1)) ;; esac
   done
@@ -139,6 +144,7 @@ LINES=$(for i in "${TARGETS[@]}"; do
   printf 'node %s %s %s rc=%s %s\n' "${NAME[$i]}" "$i" "$s" "${RC[$i]:--}" "${OUT[$i]:-}"
 done | sort)
 printf '%s\n' "$LINES" | sed 's/ *$//'
+for i in "${TARGETS[@]}"; do [ -z "${ERR[$i]:-}" ] || printf 'stderr %s %s: %s\n' "${NAME[$i]}" "$i" "${ERR[$i]}"; done
 fails=$(grep -vc '^node [^ ]* [^ ]* Success ' <<<"$LINES" || true)
 [ "$fails" = 0 ] || halt "$fails of ${#TARGETS[@]} node(s) failed or did not answer within $WAIT s (command id $cid)"
 

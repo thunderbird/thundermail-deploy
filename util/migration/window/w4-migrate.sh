@@ -389,14 +389,15 @@ no_stalwart() {
 }
 
 reset_preflight() {
-  local read stop bad=0
-  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart)
+  local read stop start bad=0
+  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart) start=$(cut_line start-legacy-stalwart)
   STOP_AT=$(cut_time stop-legacy-stalwart)
   if [ -n "$read" ] && ! export_ok; then echo "the export of the last read run did not pass its checks (no w4-export row after the last w4-export-start row)"; read=""; fi
   if ! awk -F'\t' '$1 == "cut-ecs" {f = 1} END {exit !f}' "$TIMING_TSV" 2>/dev/null; then echo "no cut-ecs row in $TIMING_TSV: W2 has not cut legacy in this attempt"; bad=1; fi
   if [ -z "$read" ] || [ ! -s "$S/export.json" ]; then echo "no w4-read-done row after the last cut-ecs row (or no $S/export.json): run --phase read first"; bad=1; fi
   if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
   elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
+  elif [ -n "$start" ] && [ "$start" -gt "$stop" ]; then echo "a start-legacy-stalwart row follows the stop-legacy-stalwart row: legacy Stalwart was started again; stop and read it again (W 4.3)"; bad=1
   else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
   if runner_up; then echo "runner Running"; else echo "runner pod is not Running"; bad=1; fi
   no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }

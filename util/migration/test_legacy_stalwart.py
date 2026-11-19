@@ -1,3 +1,4 @@
+import importlib
 import json
 import os
 import pathlib
@@ -7,6 +8,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+W4 = importlib.import_module('test_pr3_w4')
 
 HERE = pathlib.Path(__file__).resolve().parent
 FAKE_AWS = r"""#!{py}
@@ -58,7 +62,10 @@ elif svc == 'ssm' and op == 'get-command-invocation':
     if r == 'missing':
         json.dump(st, open(os.environ['AWS_STATE'], 'w'))
         sys.stderr.write('InvocationDoesNotExist\n'); sys.exit(254)
-    print(json.dumps({{'Status': r[0], 'ResponseCode': r[1], 'StandardOutputContent': r[2]}}))
+    out = {{'Status': r[0], 'ResponseCode': r[1], 'StandardOutputContent': r[2]}}
+    if len(r) > 3:
+        out['StandardErrorContent'] = r[3]
+    print(json.dumps(out))
 else:
     sys.exit(2)
 json.dump(st, open(os.environ['AWS_STATE'], 'w'))
@@ -431,6 +438,37 @@ class LegacyStalwart(unittest.TestCase):
         self.assertIn('no node carries mail', out)
         self.assertIsNone(self.sent())
 
+    def test_failed_node_prints_its_stderr(self):
+        bad = ['Failed', 1, '', 'Failed to stop thundermail.service: Access denied\n']
+        self.state({}, inv={ALL[0]: [bad]})
+        rc, out = self.run_tool('start', '--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn(
+            'stderr mailstrom-prod-stalwart-10 i-0000000000000a010: '
+            'Failed to stop thundermail.service: Access denied',
+            out,
+        )
+        self.assertNotIn('stderr mailstrom-prod-stalwart-11', out)
+
+    def test_start_voids_the_stop_row_before_it_sends(self):
+        cut = ['cut-ecs', 'a', 'b', '', '']
+        stop = ['stop-legacy-stalwart', 'a', 'b', 'nodes', '6']
+        self.rows(cut, stop)
+        self.state({'send_fail': True})
+        rc, out = self.run_tool('start', '--apply')
+        self.assertEqual(rc, 1, out)
+        last = self.tsv_text().splitlines()[-1].split('\t')
+        self.assertEqual((last[0], last[3:]), ('start-legacy-stalwart', ['nodes', '6']))
+        self.state({})
+        rc, out = self.run_tool('restart', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.rows(cut, stop)
+        rc, out = self.run_tool('start')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.tsv_text().count('start-legacy-stalwart'), 0)
+        rc, out = self.run_tool('restart', '--apply')
+        self.assertEqual(rc, 2, out)
+
     def test_send_failure_stops(self):
         self.state({'send_fail': True})
         rc, out = self.run_tool('start', '--apply')
@@ -485,6 +523,27 @@ class LegacyStalwart(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         log = self.t / 'ev' / 'legacy-stalwart-read-dry-run-20261119T000000Z.log'
         self.assertIn('legacy-stalwart read dry-run: done (6 node(s))', log.read_text())
+
+
+class ResetAfterStart(W4.Prod):
+    def preflight(self, rows):
+        self.rows(rows)
+        self.kube({'replicas': 0, 'pods': []})
+        return self.w4(
+            'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
+            'reset_preflight; echo "rc=$? stop=$STOP_AT"'
+        )
+
+    def test_a_start_after_the_stop_row_refuses_the_reset(self):
+        start = ['start-legacy-stalwart', 'x', '2026-11-19T04:40:00Z', 'nodes', '6']
+        ok = [W4.CUT, W4.EXPORT, W4.READ, W4.STOPPED]
+        out = self.preflight(ok + [start])
+        self.assertIn('a start-legacy-stalwart row follows the stop-legacy-stalwart row', out)
+        self.assertIn('rc=1', out)
+        out = self.preflight(ok + [start, W4.STOPPED])
+        self.assertIn('rc=0 stop=2026-11-19T04:30:00Z', out)
+        out = self.preflight([W4.CUT, start] + ok[1:])
+        self.assertIn('rc=0', out)
 
 
 if __name__ == '__main__':
