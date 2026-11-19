@@ -6,13 +6,15 @@ exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environme
 profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
 and secrets are looked up at build time. A `REPLACE_ME_*` value (any case) is one a later change
 fills in; while one is left in `targets/$TARGET_ENV.sh` or `verify/$TARGET_ENV.env`, every `--apply` exits 64.
-Every script loads the env file itself at start (`$CUTOVER_ENV`, default
-`/dev/shm/talos/cutover-$TARGET_ENV.env`; tmpfs, gone on reboot: rebuild it), and its values win over
+Every script loads the env file itself at start (`$CUTOVER_ENV`; default on tb-prod
+`~/.local/state/talos/cutover-tb-prod.env` on disk, file 600 in a directory of 700, refused if group
+or others have any access; elsewhere `/dev/shm/talos/cutover-$TARGET_ENV.env` on tmpfs, gone on
+reboot: rebuild it), and its values win over
 the shell's; the builder is the exception. A shell command that reads a variable sources the file again first:
 
 ```bash
 export TARGET_ENV=tb-prod
-set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/timing.sh
+set -a; . "$HOME/.local/state/talos/cutover-tb-prod.env"; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
@@ -171,8 +173,9 @@ the keying for the real hosts.
 ## Window scripts
 
 `window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
-`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
-`/dev/shm/talos/cutover-$TARGET_ENV.env`, else `~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
+`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default on tb-prod
+`~/.local/state/talos/cutover-tb-prod.env`; elsewhere `/dev/shm/talos/cutover-$TARGET_ENV.env`, else
+`~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
 - `--dry-run` (default) runs `check-prereqs.sh --for <gate id>` (`GATE_ID`, else the script's

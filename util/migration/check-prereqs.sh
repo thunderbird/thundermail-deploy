@@ -32,7 +32,7 @@ done
 . "$(dirname "${BASH_SOURCE[0]}")/target.sh"
 
 WORK_DIR=${WORK_DIR:-$HOME/.local/state/talos}
-ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
+ENV_FILE=${CUTOVER_ENV:-$(env_file_default)}
 [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
 OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 KC_TARGET=${KUBECONFIG_TARGET:-$WORK_DIR/$TARGET_KUBECONFIG_NAME}

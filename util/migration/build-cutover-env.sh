@@ -14,12 +14,12 @@ for a in "$@"; do
 done
 BUILDING_ENV=1
 SHELL_NAMES=" $(compgen -e | tr '\n' ' ')"
-if [ -z "${CUTOVER_ATTEMPT:-}" ] && [ "${TARGET_ENV:-}" = tb-prod ] && [ -f "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" ]; then
-  CUTOVER_ATTEMPT=$(sed -n "s/^CUTOVER_ATTEMPT='\([1-9][0-9]*\)'$/\1/p" "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" | tail -1)
+if [ -z "${CUTOVER_ATTEMPT:-}" ] && [ "${TARGET_ENV:-}" = tb-prod ] && [ -f "${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-prod.env}" ]; then
+  CUTOVER_ATTEMPT=$(sed -n "s/^CUTOVER_ATTEMPT='\([1-9][0-9]*\)'$/\1/p" "${CUTOVER_ENV:-$HOME/.local/state/talos/cutover-tb-prod.env}" | tail -1)
   [ -n "$CUTOVER_ATTEMPT" ] || unset CUTOVER_ATTEMPT
 fi
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
+ENV_FILE=${CUTOVER_ENV:-$(env_file_default)}
 OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 load_operator_env "$OPERATOR_ENV"
 VALUES=$REPO_DIR/$CONFIGS_OVERLAY/config/values.yaml
@@ -178,7 +178,7 @@ build() {
   KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
   KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
   mkdir -p "$(dirname "$ENV_FILE")"
-  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
+  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or $(env_perm_why)"
   [ "$TARGET_ENV" != tb-prod ] || attempt_guard
   mkdir -p "$EVIDENCE_DIR" "$SECRET_DIR"
   local count=0 missing=0
@@ -351,13 +351,18 @@ build() {
   mv "$tmp" "$ENV_FILE"
   exec 9>&-
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
-  old=$HOME/.local/state/talos/cutover-$TARGET_ENV.env
-  [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
+  if [ "$TARGET_ENV" = tb-prod ]; then
+    old=/dev/shm/talos/cutover-$TARGET_ENV.env
+    [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s on tmpfs is not read on tb-prod any more: delete it\n' "$old"; missing=$((missing + 1)); }
+  else
+    old=$HOME/.local/state/talos/cutover-$TARGET_ENV.env
+    [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
+  fi
   [ "$missing" = 0 ]
 }
 
 check() {
-  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
+  env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or $(env_perm_why)"
   [ -f "$ENV_FILE" ] || die "$ENV_FILE missing: run build-cutover-env.sh first"
   env_target_ok "$ENV_FILE" || exit 64
   local want=$TARGET_ENV
