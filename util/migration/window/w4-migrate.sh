@@ -344,8 +344,8 @@ domain_fix_step() {
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
   grep '^warning: ' "$S/domain-fix.txt" > "$S/domain-fixed.txt" || true
-  VALUE=$(grep -c . "$S/domain-fixed.txt" || true)
-  echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature ($S/domain-fixed.txt)"
+  VALUE=$(grep -cE '^warning: dropping (Domain|DkimSignature) ' "$S/domain-fixed.txt" || true)
+  echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature; $(grep -c '^warning: not restoring the catch-all ' "$S/domain-fixed.txt" || true) catch-all(s) not restored ($S/domain-fixed.txt)"
 }
 
 read_done() {
