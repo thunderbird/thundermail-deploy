@@ -226,7 +226,7 @@ class Builder(Sandbox):
     def test_prod_marks_placeholders_and_writes_the_window_names(self):
         rc, out = self.build(HERE, **self.prod_env())
         self.assertNotEqual(rc, 0)
-        self.assertRegex(out, r'LEGACY_PG_SECRET_NAME +len=\d+ NEED \(placeholder\)')
+        self.assertRegex(out, r'(?m)^LEGACY_PG_SECRET_NAME +len=9$')
         for name in (
             'TARGET_NLB_IPS',
             'TBPROD_AUTH_ALB',
@@ -875,20 +875,24 @@ class Runner(Sandbox):
         self.assertEqual(rc, 0, out)
         self.assertEqual(out, (HERE / 'runner-pod.yaml').read_text())
 
-    def test_prod_refuses_until_the_placeholders_are_filled(self):
-        rc, out = self.run_sh([str(HERE / 'runner-pod.sh')], TARGET_ENV='tb-prod')
+    def test_prod_refuses_a_placeholder(self):
+        mig = with_placeholder(HERE, self.t / 'mig-ph', 'LEGACY_PG_SECRET_NAME')
+        rc, out = self.run_sh([str(mig / 'runner-pod.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 1)
         self.assertIn('fill it before rendering the runner', out)
         self.assertEqual(out.count('\n'), 1, out)
+
+    def test_prod_renders_with_the_target_values(self):
+        rc, out = self.run_sh([str(HERE / 'runner-pod.sh')], TARGET_ENV='tb-prod')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('secretName: legacy-pg\n', out)
+        self.assertNotIn('REPLACE_ME', out)
 
     def test_prod_render_with_values(self):
         defs = self.t / 'mig'
         shutil.copytree(HERE, defs, ignore=shutil.ignore_patterns('__pycache__'))
         p = defs / 'targets' / 'tb-prod.sh'
-        p.write_text(
-            p.read_text().replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
-            + 'RUNNER_WORK_SIZE=64Gi\n'
-        )
+        p.write_text(p.read_text() + 'RUNNER_WORK_SIZE=64Gi\n')
         rc, out = self.run_sh([str(defs / 'runner-pod.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 0, out)
         self.assertIn('    app.kubernetes.io/name: stalwart-config-applier\n', out)
@@ -988,6 +992,15 @@ def filled(src, dst, keep=None, value=None):
     return dst
 
 
+def with_placeholder(src, dst, name):
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__'))
+    p = dst / 'targets' / 'tb-prod.sh'
+    text = p.read_text()
+    assert '\n%s=' % name in text, name
+    p.write_text(re.sub(r'(?m)^%s=.*$' % re.escape(name), '%s=REPLACE_ME_%s' % (name, name), text))
+    return dst
+
+
 class Placeholders(Sandbox):
     def test_thaw_refuses_tb_prod_before_any_call(self):
         mig = filled(HERE, self.t / 'mig')
@@ -1034,9 +1047,27 @@ class Placeholders(Sandbox):
         for name in ('FREEZE_PR', 'T7_PR', 'T7_REVERT_PR', 'T8_PR', 'T8_REVERT_PR'):
             self.assertNotRegex(text, r'(?m)^%s=' % name)
 
+    def test_no_placeholder_is_left_on_tb_prod(self):
+        for rel in ('targets/tb-prod.sh', 'verify/tb-prod.env'):
+            self.assertNotIn('replace_me', (HERE / rel).read_text().lower(), rel)
+        rc, out = self.run_sh(
+            ['-c', 'set -- --apply\n. %s/lib.sh\necho reached\n' % HERE], TARGET_ENV='tb-prod'
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('refusing', out)
+        self.assertIn('reached', out)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(
+            out,
+            r'(?m)^HAVE  placeholders +no REPLACE_ME value in targets/tb-prod.sh or verify/tb-prod.env$',
+        )
+
     def test_every_apply_refuses_while_one_remains(self):
         script = 'set -- --apply\n. %s/lib.sh\necho reached\n'
-        rc, out = self.run_sh(['-c', script % HERE], TARGET_ENV='tb-prod')
+        mig = with_placeholder(HERE, self.t / 'mig-ph', 'LEGACY_PG_SECRET_NAME')
+        rc, out = self.run_sh(['-c', script % mig], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 64, out)
         self.assertNotIn('reached', out)
         for value in ('REPLACE_ME_X', 'replace_me_x', 'REPLACE_ME', 'pre-Replace_Me-post'):
@@ -1050,14 +1081,38 @@ class Placeholders(Sandbox):
         self.assertEqual(rc, 0, out)
         self.assertIn('reached', out)
 
+    def test_tb_prod_names_the_legacy_pg_secret_and_has_no_e2e_user(self):
+        text = (HERE / 'targets' / 'tb-prod.sh').read_text()
+        self.assertRegex(text, r'(?m)^LEGACY_PG_SECRET_NAME=legacy-pg$')
+        self.assertNotRegex(text, r'(?m)^E2E_USER_SECRET=')
+        rc, out = self.run_sh(
+            ['-c', 'set -- --apply\n. %s/lib.sh\necho reached\n' % HERE], TARGET_ENV='tb-prod'
+        )
+        self.assertNotIn('LEGACY_PG_SECRET_NAME', out)
+        self.assertNotIn('E2E_USER_SECRET', out)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W8'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(
+            out,
+            r'(?m)^SKIP  accounts-e2e-user +tb-prod has no Accounts e2e user \(operator decision\): '
+            r'no E2E_USER_SECRET to check$',
+        )
+        self.assertNotIn('unbound variable', out)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W8'], TARGET_ENV='tb-stage'
+        )
+        self.assertRegex(out, r'(?m)^(HAVE|NEED)  accounts-e2e-user ')
+
     def test_prereqs_and_builder_name_each_one(self):
         mig = filled(HERE, self.t / 'mig', 'INTERNAL_CIDRS', 'replace_me')
         rc, out = self.run_sh(
             [str(mig / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
         )
         self.assertRegex(out, r'(?m)^NEED  placeholders +fill: verify/tb-prod.env:INTERNAL_CIDRS$')
+        ph = with_placeholder(HERE, self.t / 'mig-ph', 'LEGACY_PG_SECRET_NAME')
         rc, out = self.run_sh(
-            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
+            [str(ph / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
         )
         self.assertRegex(out, r'(?m)^NEED  placeholders +fill: .*\bLEGACY_PG_SECRET_NAME\b')
         rc, out = self.run_sh(
@@ -1066,15 +1121,14 @@ class Placeholders(Sandbox):
         self.assertNotIn('placeholders', out)
         self.rules(stage_rules(ecs='accounts-prod'))
         rc, out = self.run_sh(
-            [str(HERE / 'build-cutover-env.sh')],
+            [str(ph / 'build-cutover-env.sh')],
             TARGET_ENV='tb-prod',
             KUBECONFIG_TARGET=str(self.t / 'kc-target'),
             KUBECONFIG_HUB=str(self.t / 'kc-hub'),
             KUBECONFIG_DEV=str(self.t / 'kc-dev'),
         )
         self.assertNotEqual(rc, 0)
-        for name in ('LEGACY_PG_SECRET_NAME', 'E2E_USER_SECRET'):
-            self.assertRegex(out, r'(?m)^%s +NEED \(placeholder' % re.escape(name))
+        self.assertRegex(out, r'(?m)^LEGACY_PG_SECRET_NAME +NEED \(placeholder')
         mig = filled(HERE, self.t / 'mig-verify', 'SOURCE_PG_SECRET_ID', 'REPLACE_ME_X')
         rc, out = self.run_sh(
             [str(mig / 'build-cutover-env.sh')],
