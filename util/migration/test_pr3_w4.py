@@ -145,7 +145,7 @@ class Prod(Harness):
         super().setUp()
         b = self.t / 'bin'
         b.mkdir()
-        for name, src in (('kubectl', KUBE), ('nb', NB)):
+        for name, src in (('kubectl', KUBE), ('nb', NB), ('gpg', '#!/bin/sh\nexit 0\n')):
             (b / name).write_text(src.format(py=sys.executable))
             (b / name).chmod(0o755)
         if shutil.which('yq'):
@@ -223,7 +223,7 @@ class ReadPhase(Prod):
     BODY = (
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
-        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }\n'
+        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }; keep_copy() { echo KEEP; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
     )
 
