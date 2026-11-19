@@ -12,6 +12,9 @@ SG=$TARGET_STALWART_SG
 AWST=(aws --profile "$TARGET_AWS_PROFILE" --region "$AWS_REGION")
 HOLD_HOURS=${QUEUE_HOLD_HOURS:-24}
 HELD_MIN_HOURS=${QUEUE_HELD_MIN_HOURS:-12}
+DOMAIN_SECS=${QUEUE_DOMAIN_ATTEMPT_SECONDS:-1360}
+DRAIN_POLL=${QUEUE_DRAIN_POLL_SECONDS:-15}
+DRAIN_MAX=${QUEUE_DRAIN_MAX_SECONDS:-5400}
 OPEN_KEY='-1|-1|-1|0.0.0.0/0'
 CLOSED_KEYS='tcp|0|24|0.0.0.0/0 tcp|26|65535|0.0.0.0/0 udp|0|65535|0.0.0.0/0 icmp|-1|-1|0.0.0.0/0'
 RULES='[]'
@@ -139,11 +142,11 @@ read_queue() {
   done
   now=$(date -u +%s)
   min=$((now + HELD_MIN_HOURS * 3600))
-  Q=$(jq -c --argjson min "$min" --argjson now "$((now + 60))" --argjson cut "$cut" '
+  Q=$(jq -c --argjson min "$min" --argjson now "$((now + 60))" --argjson cut "$cut" --argjson hold "$((HOLD_HOURS * 3600))" --argjson dom "$DOMAIN_SECS" '
     def due: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
-    map({id, created: ((.createdAt // "1970-01-01T00:00:00Z") | due), pend: [(.recipients // {}) | (if type == "array" then .[] else to_entries[] | .value end) | select(.status["@type"] == "Scheduled" or .status["@type"] == "TemporaryFailure")]})
-    | map(. + {remote: any(.pend[]; .queueName != "local"), held: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) >= $min)), later: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) > $now))})
-    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created < $cut) | .id], later: [.[] | select(.remote and .later) | .id]}' <<<"$list") || return 1
+    map({id, created: ((.createdAt // "1970-01-01T00:00:00Z") | due), pend: [(.recipients // {}) | (if type == "array" then .[] else to_entries[] | .value + {address: .key} end) | select(.status["@type"] == "Scheduled" or .status["@type"] == "TemporaryFailure")]})
+    | map(. + {remote: any(.pend[]; .queueName != "local"), held: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) >= $min)), later: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) > $now)), wrote: (if (.pend | length) > 0 then ([.pend[].retryDue | due] | min) - $hold else 0 end), domains: ([.pend[] | select(.queueName != "local") | (.address // "") | ascii_downcase | split("@") | last] | unique | length)})
+    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created < $cut) | .id], later: [.[] | select(.remote and .later) | .id], msgs: [.[] | select(.remote) | {id, created, held, wrote, bound: ((if .domains > 1 then .domains else 1 end) * $dom)}]}' <<<"$list") || return 1
 }
 
 show_queue() { jq -r '"queue: total=\(.total) remote=\(.remote | length) held=\(.held | length) not_held=\(.not_held | length)" + (if (.not_held | length) != (.hold | length) then " queued_after_release=\((.not_held | length) - (.hold | length))" else "" end)' <<<"$Q"; }
@@ -174,6 +177,41 @@ hold_queue() {
   n=$(jq '.hold | length' <<<"$Q")
   VALUE=$(jq '.held | length' <<<"$Q")
   [ "$n" = 0 ] || { echo "read back: $n queued message(s) not held"; return 1; }
+}
+
+drain() {
+  local start now st ran='[]' key last="" w
+  start=$(date -u +%s)
+  echo "drain: every remote message queued before $(date -u -d "@$start" +%FT%TZ) stays held past its longest delivery attempt ($DOMAIN_SECS s per remote domain) before port 25 opens"
+  while :; do
+    read_queue || return 1
+    now=$(date -u +%s)
+    st=$(jq -c --argjson now "$now" --argjson start "$start" --argjson ran "$ran" '
+      [.msgs[] | select(.created < $start)] as $old
+      | [$old[] | if .held then .wrote + .bound - $now else .bound end | select(. > 0)] as $w
+      | {hold: [.msgs[] | select(.held | not) | .id], again: [.msgs[] | select((.held | not) and (.id | IN($ran[]))) | .id], old: ($old | length), late: ([.msgs[] | select(.created >= $start)] | length), waiting: ($w | length), longest: ($w | max // 0)}' <<<"$Q") || return 1
+    key=$(jq -r '"\(.old) \(.waiting) \(.late)"' <<<"$st")
+    [ "$key" = "$last" ] || jq -r '"drain: queued before the drain: \(.old) remote, \(.waiting) still waiting (longest \(.longest) s); queued since: \(.late)"' <<<"$st"
+    last=$key
+    ran=$(jq -c --argjson q "$Q" '. + [$q.msgs[] | select(.held) | .id] | unique' <<<"$ran")
+    [ "$(jq '.again | length' <<<"$st")" = 0 ] || echo "drain: held again, overwritten by a delivery attempt that ended: ids=$(jq -r '.again | join(",")' <<<"$st")"
+    if [ "$(jq '.hold | length' <<<"$st")" -gt 0 ]; then
+      set_retry "$(jq -c .hold <<<"$st")" "$(date -u -d "+$HOLD_HOURS hours" +%FT%TZ)" || return 1
+      ran=$(jq -c --argjson h "$(jq -c .hold <<<"$st")" '. + $h | unique' <<<"$ran")
+    fi
+    w=$(jq .longest <<<"$st")
+    if [ "$APPLY" = 0 ]; then
+      echo "drain: --apply would wait up to $w s, read the queue every $DRAIN_POLL s, hold again what an ending attempt overwrites, and stop after $DRAIN_MAX s"
+      return 0
+    fi
+    if [ "$w" = 0 ]; then
+      echo "drain: done after $((now - start)) s: no delivery attempt that started before its hold is still running for mail queued before the drain"
+      echo "drain: unproven=$(jq .late <<<"$st") (queued during the drain and held, but an attempt that started before its hold can still deliver once port 25 opens)"
+      return 0
+    fi
+    [ $((now - start)) -lt "$DRAIN_MAX" ] || { echo "drain: $(jq .waiting <<<"$st") message(s) not proven held after $DRAIN_MAX s; port 25 stays closed"; return 1; }
+    sleep "$((w < DRAIN_POLL ? w : DRAIN_POLL))"
+  done
 }
 
 release_queue() {
@@ -224,7 +262,7 @@ case "$MODE" in
     gate_row hold25-queue-hold "the queue hold of 5.1 runs first"
     go_gate
     pods || stop "a Running Stalwart pod is outside $SG"
-    with_queue hold_queue
+    with_queue drain
     printf 'bash %s set --dry-run\nbash %s set --apply\n' "$0" "$0" > "$RESTORE"
     open_25 || stop "opening port 25 on $SG failed"
     OPEN_AT=$(date -u +%s)

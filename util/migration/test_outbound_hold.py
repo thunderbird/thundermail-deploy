@@ -65,6 +65,9 @@ elif 'ec2 authorize-security-group-egress' in a:
     for perm in json.loads(arg('--ip-permissions')):
         if perm['IpProtocol'] == '-1':
             st['queue'].update(st.pop('on_open', {{}}))
+            for i in st.pop('attempts', {{}}):
+                st.setdefault('delivered', []).append(i)
+                st['queue'].pop(i, None)
         st['seq'] = st.get('seq', 0) + 1
         rng = perm['IpRanges'][0]
         r = {{'SecurityGroupRuleId': 'sgr-new%d' % st['seq'], 'IsEgress': True,
@@ -171,6 +174,70 @@ json.dump(st, open(p, 'w'))
 print(json.dumps(out))
 """
 
+DATE = r"""#!{py}
+import os, sys, time
+t = time.time() + float(open(os.environ['FAKE_CLOCK']).read() or 0)
+args = sys.argv[1:]
+fmt = '%a %b %d %H:%M:%S UTC %Y'
+i = 0
+while i < len(args):
+    a = args[i]
+    if a == '-d':
+        d = args[i + 1]
+        i += 1
+        if d.startswith('@'):
+            t = float(d[1:])
+        else:
+            n, unit = d.lstrip('+').split()
+            t += int(n) * {{'hours': 3600, 'minutes': 60, 'seconds': 1}}[unit]
+    elif a.startswith('+'):
+        fmt = a[1:]
+    elif a != '-u':
+        sys.exit(1)
+    i += 1
+print(time.strftime(fmt.replace('%s', str(int(t))), time.gmtime(t)))
+"""
+
+SLEEP = r"""#!{py}
+import calendar, copy, json, os, sys, time
+n = float(sys.argv[1])
+c = os.environ['FAKE_CLOCK']
+clock = float(open(c).read() or 0) + n
+open(c, 'w').write(str(clock))
+p = os.environ['STATE']
+st = json.load(open(p))
+st.setdefault('sleeps', []).append(n)
+now = time.time() + clock
+def iso(t):
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
+def due(r):
+    return calendar.timegm(time.strptime(r['retryDue'], '%Y-%m-%dT%H:%M:%SZ'))
+def pending(m):
+    live = ('Scheduled', 'TemporaryFailure')
+    return [r for r in m['recipients'].values() if r['status']['@type'] in live]
+q = st['queue']
+att = st.setdefault('attempts', {{}})
+for i in list(att):
+    att[i]['left'] -= n
+    if att[i]['left'] <= 0:
+        m = att.pop(i)['snap']
+        for r in pending(m):
+            r['retryDue'] = iso(now + 120)
+            r['status'] = {{'@type': 'TemporaryFailure'}}
+        if i in q:
+            q[i] = m
+        st.setdefault('ended', []).append(i)
+for i, m in st.pop('arrive', {{}}).items():
+    m['createdAt'] = iso(now)
+    q[i] = m
+if st.get('scheduler'):
+    for i, m in q.items():
+        if i not in att and any(r['queueName'] != 'local' and due(r) <= now for r in pending(m)):
+            att[i] = {{'left': st['attempt_secs'], 'snap': copy.deepcopy(m)}}
+            st.setdefault('started', []).append(i)
+json.dump(st, open(p, 'w'))
+"""
+
 SS = r"""#!{py}
 import json, os, sys
 st = json.load(open(os.environ['STATE']))
@@ -208,13 +275,22 @@ class Base(unittest.TestCase):
         p.write_text(self.targets.replace('REPLACE_ME_', 'filled_'))
         self.stubs = self.root / 'stubs'
         self.stubs.mkdir()
-        for name, body in (('aws', AWS), ('kubectl', KUBE), ('curl', CURL), ('ss', SS)):
+        for name, body in (
+            ('aws', AWS),
+            ('kubectl', KUBE),
+            ('curl', CURL),
+            ('ss', SS),
+            ('date', DATE),
+            ('sleep', SLEEP),
+        ):
             (self.stubs / name).write_text(body.format(py=shutil.which('python3')))
             (self.stubs / name).chmod(0o755)
         (self.root / 'home').mkdir()
         self.ev = self.root / 'ev'
         self.log = self.root / 'fake.log'
         self.log.write_text('')
+        self.clock = self.root / 'clock'
+        self.clock.write_text('0')
         self.kc = self.root / 'kc'
         self.kc.write_text(
             'apiVersion: v1\ncurrent-context: prod\ncontexts:\n- name: prod\n  context:\n'
@@ -294,8 +370,9 @@ class Base(unittest.TestCase):
         st.update(kw)
         self.save(st)
 
-    def run_tool(self, tool, *args, target='tb-prod'):
+    def run_tool(self, tool, *args, target='tb-prod', **extra):
         env = {
+            'QUEUE_DRAIN_POLL_SECONDS': '300',
             'PATH': '%s:%s' % (self.stubs, os.environ['PATH']),
             'HOME': str(self.root / 'home'),
             'TARGET_ENV': target,
@@ -305,6 +382,8 @@ class Base(unittest.TestCase):
             'SECRET_DIR': str(self.root / 'secret'),
             'FAKE_LOG': str(self.log),
             'STATE': str(self.state_path),
+            'FAKE_CLOCK': str(self.clock),
+            **extra,
         }
         return subprocess.run(
             ['bash', str(self.mig / 'window' / tool), *args],
@@ -563,13 +642,125 @@ class Hold25(Base):
         self.add_row('hold25-queue-hold')
         self.assertEqual(self.run_tool('hold25.sh', 'queue-hold', '--apply').returncode, 0)
         late = msg(time.time() - 60)
-        late['createdAt'] = iso(time.time() + 300)
+        late['createdAt'] = iso(time.time() + 7200)
         self.edit(on_open={'15': late})
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn('held=2 not_held=1 queued_after_release=1', p.stdout)
         self.assertLess(self.due('15'), time.time())
         self.assertGreater(self.due('11'), time.time() + 23 * 3600)
+
+    def fake_now(self):
+        return time.time() + float(self.clock.read_text())
+
+    def held_for_release(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.queue()
+        self.add_row('hold25-queue-hold')
+        self.assertEqual(self.run_tool('hold25.sh', 'queue-hold', '--apply').returncode, 0)
+
+    def in_flight(self, i, left, snap=None):
+        st = self.state()
+        st.setdefault('attempts', {})[i] = {'left': left, 'snap': snap or msg(time.time() - 60)}
+        self.save(st)
+
+    def test_release_port25_waits_out_an_attempt_that_overwrites_the_hold(self):
+        self.held_for_release()
+        self.in_flight('11', 200)
+        self.edit(scheduler=True, attempt_secs=200)
+        p = self.run_tool(
+            'hold25.sh',
+            'release-port25',
+            '--apply',
+            '--go',
+            'go 7.5',
+            QUEUE_DRAIN_POLL_SECONDS='60',
+        )
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        st = self.state()
+        self.assertEqual(st.get('delivered', []), [])
+        self.assertEqual(st['ended'], ['11'])
+        self.assertEqual(st.get('started', []), [])
+        self.assertIn(
+            'drain: held again, overwritten by a delivery attempt that ended: ids=11', p.stdout
+        )
+        self.assertIn('drain: unproven=0', p.stdout)
+        self.assertGreaterEqual(sum(st['sleeps']), 200 + 1360)
+        self.assertIn('read back: port25: open on %s' % SG, p.stdout)
+        self.assertIn('read back: queue: total=4 remote=2 held=2 not_held=0', p.stdout)
+        for i in ('11', '12'):
+            self.assertGreater(self.due(i), self.fake_now() + 23 * 3600)
+        self.assertLess(p.stdout.index('drain: done'), p.stdout.index('authorize-'))
+        self.assertEqual(self.rows()[-2:], ['go-HOLD25', 'hold25-release-port25'])
+
+    def test_release_port25_waits_longer_for_mail_to_several_domains(self):
+        self.held_for_release()
+        st = self.state()
+        for i in ('11', '12'):
+            r = st['queue'][i]['recipients']
+            r['rcpt@other.test'] = dict(r['rcpt@example.test'])
+        self.save(st)
+        self.in_flight('12', 2000)
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertIn('longest 2719 s', p.stdout)
+        self.assertIn('ids=12', p.stdout)
+        self.assertGreater(self.due('12'), self.fake_now() + 23 * 3600)
+
+    def test_release_port25_opens_at_once_for_mail_held_long_before(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        now = time.time()
+        self.edit(
+            pods=['stalwart-a'], queue={'31': msg(now + 22 * 3600), '32': msg(now + 23 * 3600)}
+        )
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn(
+            'drain: queued before the drain: 2 remote, 0 still waiting (longest 0 s)', p.stdout
+        )
+        self.assertEqual(self.state().get('sleeps', []), [])
+        self.assertNotIn('x:QueuedMessage/set', p.stdout)
+
+    def test_release_port25_counts_mail_queued_during_the_drain_as_unproven(self):
+        self.held_for_release()
+        self.edit(arrive={'16': msg(time.time() - 60)})
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('queued since: 1', p.stdout)
+        self.assertIn('ids=16', p.stdout)
+        self.assertIn('drain: unproven=1', p.stdout)
+        self.assertGreater(self.due('16'), self.fake_now() + 23 * 3600)
+
+    def test_release_port25_keeps_port_25_closed_when_the_drain_runs_out(self):
+        self.held_for_release()
+        self.in_flight('11', 200)
+        self.edit(scheduler=True, attempt_secs=200)
+        p = self.run_tool(
+            'hold25.sh',
+            'release-port25',
+            '--apply',
+            '--go',
+            'go 7.5',
+            QUEUE_DRAIN_MAX_SECONDS='600',
+            QUEUE_DRAIN_POLL_SECONDS='60',
+        )
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('message(s) not proven held after 600 s; port 25 stays closed', p.stdout)
+        self.assertEqual(self.egress(), CLOSED)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertNotIn('hold25-release-port25', self.rows())
+
+    def test_release_port25_dry_run_prints_the_drain_and_does_not_wait(self):
+        self.held_for_release()
+        p = self.run_tool('hold25.sh', 'release-port25')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertRegex(
+            p.stdout, r'drain: --apply would wait up to 13(59|60) s, read the queue every 300 s'
+        )
+        self.assertEqual(self.state().get('sleeps', []), [])
+        self.assertEqual(self.egress(), CLOSED)
 
     def test_release_queue_needs_the_port_release_row_and_releases_every_held_message(self):
         self.queue()
