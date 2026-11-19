@@ -567,6 +567,8 @@ print('== ' + name)
 print('  PASS  %s range %s out %s' % (name, rng, os.path.basename(os.environ['VERIFY_OUT'])))
 with open(os.environ['FAKE_RUNS'], 'a') as f:
     f.write('%s %s\\n' % (name, rng))
+if os.environ.get('FAKE_WARN') == rng + ':' + name:
+    print('  WARN  planted in an earlier run')
 if os.environ.get('FAKE_FAIL') == rng + ':' + name:
     print('  FAIL  planted')
     sys.exit(1)
@@ -609,6 +611,19 @@ class Pieces(Base):
     def runs(self):
         p = self.t / 'runs'
         return p.read_text().splitlines() if p.exists() else []
+
+    def test_a_resume_still_reports_the_warnings_of_passed_batches(self):
+        out1, out2 = self.t / 'out1', self.t / 'out2'
+        rc, out = self.piece(
+            'counts',
+            VERIFY_PIECE_BUDGET='1',
+            FAKE_SLEEP='0.4',
+            FAKE_WARN='0-2:04_collections',
+            VERIFY_OUT=str(out1),
+        )
+        self.assertIn('WARN  planted in an earlier run', out)
+        rc, out = self.piece('counts', '--resume', VERIFY_OUT=str(out2))
+        self.assertIn('UNEXPECTED WARN  planted in an earlier run', out)
 
     def test_an_expiring_aws_session_starts_no_batch(self):
         ev = self.t / 'ev-login'

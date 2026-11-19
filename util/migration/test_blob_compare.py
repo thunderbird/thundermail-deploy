@@ -710,6 +710,34 @@ class Compare(Harness):
         self.assertIn('list legacy shard 0002 (k, s]', r.stdout)
         self.assertEqual(r.stdout.count(' reused'), 7)
 
+    def test_apply_lists_tb_prod_again_after_a_dry_run(self):
+        self.cut()
+        m = tool()
+        named = [obj(k, 'n' + k) for k in m.NAMED]
+        self.state['buckets'][LEGACY] = [obj('k1', 'one'), *named]
+        self.state['buckets'][TBPROD] = [obj('k1', 'one'), *[obj(k, 'n' + k) for k in m.NAMED]]
+        r = self.compare()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.state['buckets'][TBPROD] = [
+            obj('k1', 'one'),
+            obj('STALWART_WEBADMIN', 'changed-after-the-dry-run'),
+            *[obj(k, 'n' + k) for k in m.NAMED if k != 'STALWART_WEBADMIN'],
+        ]
+        r = self.compare('--apply')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(TBPROD, {c['opts']['bucket'] for c in self.lists()})
+        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN legacy=(\S+) tb-prod=\1 copied, match')
+
+    def test_a_run_leaves_other_runs_temporary_files(self):
+        self.cut()
+        self.fill()
+        base = self.t / 'secret' / 'blob-compare-tmp'
+        (base / 'run-other').mkdir(parents=True)
+        (base / 'run-other' / 'part').write_text('in use')
+        self.compare(extra_env={'SECRET_DIR': str(self.t / 'secret')})
+        self.assertEqual((base / 'run-other' / 'part').read_text(), 'in use')
+        self.assertEqual(sorted(x.name for x in base.iterdir()), ['run-other'])
+
     def test_new_stop_row_invalidates_the_listing(self):
         self.cut()
         self.fill()

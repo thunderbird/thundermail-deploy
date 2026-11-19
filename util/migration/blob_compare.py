@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import atexit
 import base64
 import concurrent.futures
 import datetime
@@ -10,8 +11,10 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -741,16 +744,14 @@ def cmd_compare(a, summary):
     lock = lock_out(out)
     run_dir = out / ('run-%s-%s' % (started.strftime('%Y%m%dT%H%M%SZ'), summary['mode']))
     run_dir.mkdir(exist_ok=True)
-    tmp = (
+    base = (
         pathlib.Path(os.environ['SECRET_DIR']) / 'blob-compare-tmp'
         if os.environ.get('SECRET_DIR')
         else out / 'tmp'
     )
-    tmp.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp.chmod(0o700)
-    for old in tmp.iterdir():
-        if old.is_file():
-            old.unlink()
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix='run-', dir=base))
+    atexit.register(shutil.rmtree, tmp, True)
     sides = (Side('legacy', LEGACY, LEGACY_RO, out), Side('tb-prod', TBPROD, TBPROD_RO, out))
     for s in sides:
         s.dir.mkdir(parents=True, exist_ok=True)
@@ -771,7 +772,11 @@ def cmd_compare(a, summary):
     )
     key = {'stop': z(stop) if stop else 'none', 'wait': z(wait) if wait else 'none'}
     jobs = [
-        ((s.name, i), list_shard, (a.aws, s, i, lo, up, key, a.relist))
+        (
+            (s.name, i),
+            list_shard,
+            (a.aws, s, i, lo, up, key, a.relist or (a.apply and s is sides[1])),
+        )
         for i, (lo, up) in enumerate(shards)
         for s in sides
     ]
