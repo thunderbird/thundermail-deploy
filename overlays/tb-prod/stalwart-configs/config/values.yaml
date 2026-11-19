@@ -14,9 +14,9 @@ stalwartPgDatabase: neondb
 stalwartPgAdminUsername: neondb_owner
 dnsManagement: Manual
 dnsPublishSpf: false
-authBanRateCount: REPLACE_ME_AUTH_BAN_RATE_COUNT
-scanBanRateCount: REPLACE_ME_SCAN_BAN_RATE_COUNT
-addressBookName: REPLACE_ME_ADDRESS_BOOK_NAME
+authBanRateCount: 5000
+scanBanRateCount: 1000
+addressBookName: Thundermail Address Book
 allowedIPs: REPLACE_ME_ALLOWED_IPS
 webhookURL: https://accounts.tb.pro/api/v1/telemetry/stalwart/webhook/
 webhookEvents:
