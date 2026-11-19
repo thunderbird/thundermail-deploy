@@ -622,8 +622,30 @@ class Pieces(Base):
             VERIFY_OUT=str(out1),
         )
         self.assertIn('WARN  planted in an earlier run', out)
+        first = self.w6_unexpected_warns(out)
+        self.assertEqual(first, 1, out)
         rc, out = self.piece('counts', '--resume', VERIFY_OUT=str(out2))
         self.assertIn('UNEXPECTED WARN  planted in an earlier run', out)
+        self.assertEqual(self.w6_unexpected_warns(out), first, out)
+        self.assertRegex(out, r'(?m)^== piece counts batch 0-2: passed in an earlier run, ')
+        self.assertRegex(out, r'(?m)^  WARN  planted in an earlier run$')
+
+    def w6_unexpected_warns(self, run_all_out):
+        w6 = (MIG / 'window' / 'w6-verify.sh').read_text().splitlines()
+        count = [x.strip() for x in w6 if x.strip().startswith('UNEXPECTED_WARN=$(grep ')]
+        self.assertEqual(len(count), 1, count)
+        f = self.t / 'run_all.txt'
+        f.write_text(run_all_out)
+        p = subprocess.run(
+            ['bash', '-c', count[0] + '\necho "$UNEXPECTED_WARN"'],
+            env=dict(
+                os.environ, f=str(f), EXPECTED_WARN=str(self.mig / 'verify' / 'expected-warn.txt')
+            ),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return int(p.stdout.strip())
 
     def test_an_expiring_aws_session_starts_no_batch(self):
         ev = self.t / 'ev-login'

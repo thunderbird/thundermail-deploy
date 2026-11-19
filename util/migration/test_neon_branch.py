@@ -22,6 +22,7 @@ class FakeNeon:
     def __init__(self):
         self.log, self.lock_left, self.reset_moves = [], 0, True
         self.head = 0x999
+        self.operations, self.restore_ops = [], None
         self.redirect, self.followed = False, 0
         self.branches = {
             PARENT: {'id': PARENT, 'name': 'production', 'default': True, 'parent_id': None},
@@ -98,7 +99,7 @@ class FakeNeon:
         if method == 'GET' and path == pre + '/branches':
             return 200, {'branches': list(self.branches.values())}
         if method == 'GET' and path == pre + '/operations':
-            return 200, {'operations': []}
+            return 200, {'operations': self.operations}
         if method == 'GET' and path == pre + '/endpoints':
             return 200, {'endpoints': self.endpoints}
         m = re.fullmatch(pre + r'/branches/([^/]+)(/.*)?', path)
@@ -114,6 +115,8 @@ class FakeNeon:
                     b['last_reset_at'] = now()
                     b['parent_lsn'] = '0/%X' % self.head if self.head is not None else None
                     self.head = self.head + 0x10 if self.head is not None else None
+                if self.restore_ops is not None:
+                    return 200, {'branch': b, 'operations': self.restore_ops}
                 return 200, {'branch': b}
             if method == 'DELETE' and not rest:
                 del self.branches[bid]
@@ -200,6 +203,35 @@ class NeonBranch(unittest.TestCase):
         )
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
         self.assertIn('reset proof FAILED: last_reset_at 2026-11-01T00:00:00Z', p.stdout)
+
+    def test_an_old_failed_operation_does_not_fail_a_good_reset(self):
+        old = {
+            'id': 'op-old',
+            'branch_id': CHILD,
+            'action': 'apply_config',
+            'status': 'failed',
+            'created_at': '2026-11-01T00:00:00Z',
+        }
+        new = {
+            'id': 'op-new',
+            'branch_id': CHILD,
+            'action': 'restore',
+            'status': 'finished',
+            'created_at': now(),
+        }
+        args = ('reset', '--branch', 'tb-prod-cutover', '--after', '2026-11-19T00:00:00Z')
+        self.fake.operations = [old, new]
+        for answer in ([new], None):
+            with self.subTest(answer='operations in the answer' if answer else 'since the call'):
+                self.fake.restore_ops = answer
+                p = self.run_tool(*args, '--apply')
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                self.assertIn('reset proof: last_reset_at ', p.stdout)
+        failed = dict(new, status='failed')
+        self.fake.operations, self.fake.restore_ops = [old, failed], [failed]
+        p = self.run_tool(*args, '--apply')
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('reset: operation restore on %s is failed' % CHILD, p.stderr)
 
     def test_dry_run_reads_only(self):
         p = self.run_tool('reset', '--branch', 'tb-prod-cutover', '--after', '2026-11-19T00:00:00Z')
