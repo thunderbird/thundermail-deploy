@@ -7,6 +7,7 @@ TS=${TS:-$(date -u +%Y%m%dT%H%M%SZ)}
 [ "$TARGET_ENV" != tb-prod ] || CUTOVER_ATTEMPT=${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}
 EVIDENCE_DIR=${EVIDENCE_DIR:-$(evidence_default)}
 SECRET_DIR=${SECRET_DIR:-$(secret_default)}
+[ "$TARGET_ENV" != tb-prod ] || secret_dir_ok "$SECRET_DIR" || { echo "refusing: $SECRET_DIR, or a file in it, is a symlink, not owned by $(id -un), or open to group or others (want the directory 700 and its files 600)" >&2; exit 1; }
 AWS_REGION=${AWS_REGION:-$TARGET_REGION}
 LEGACY_AWS_PROFILE=${LEGACY_AWS_PROFILE:-$DEF_LEGACY_AWS_PROFILE}
 CF_API=https://api.cloudflare.com/client/v4
