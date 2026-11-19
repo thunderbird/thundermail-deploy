@@ -16,6 +16,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 KUBE = r"""#!{py}
 import json, os, re, sys
 AUTH = 'psql: error: FATAL:  password authentication failed for user "o"' + chr(10) + 'rc=2'
+RO = 'ERROR:  cannot execute CREATE TABLE in a read-only transaction' + chr(10) + 'rc=1'
 args = sys.argv[1:]
 a = ' '.join(args)
 open(os.environ['FAKE_LOG'], 'a').write('kubectl ' + a + '\n')
@@ -62,7 +63,9 @@ elif ' exec -i runner -c postgres -- sh -c ' in ' ' + a + ' ':
     elif 'read -r PGPASSWORD' in script:
         pw = sys.stdin.readline().rstrip('\n')
         st.setdefault('seen_pw', []).append(pw)
-        if host == st.get('source_host'):
+        if 'create table' in script:
+            out = st.get('source_write', RO)
+        elif host == st.get('source_host'):
             out = st.get('source_login', '1\nrc=0')
         else:
             out = st.get('prod_source', AUTH)
@@ -376,7 +379,18 @@ class ResetPhase(Prod):
     def test_the_guard_passes_only_on_password_authentication_failed(self):
         out = self.guard()
         self.assertIn('GUARD PASS\nrc=0', out)
-        self.assertEqual(self.kube_state()['seen_pw'], ['src-pw-123', 'src-pw-123'])
+        self.assertEqual(self.kube_state()['seen_pw'], ['src-pw-123'] * 3)
+        self.assertIn(
+            'tb-prod-cutover-source login: ok\n'
+            'tb-prod-cutover-source refuses a write: read-only transaction\n',
+            out,
+        )
+        long_auth = (
+            'psql: error: connection to server at "%s" (3.124.121.135), port 5432 failed: '
+            'ERROR:  password authentication failed for user "stalwart_owner"\nrc=2' % ('h' * 200)
+        )
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        self.assertIn('GUARD PASS\nrc=0', self.guard(prod_cutover=long_auth, prod_source=long_auth))
         self.assertNotIn('src-pw-123', '\n'.join(self.calls('kubectl')))
         self.assertIn('guard', [r[0] for r in self.timing()])
         for case, kube in (
@@ -389,6 +403,8 @@ class ResetPhase(Prod):
                 {'source_login': 'psql: error: FATAL: password authentication failed\nrc=2'},
             ),
             ('branch login', {'login': 'psql: error: could not connect'}),
+            ('source write accepted', {'source_write': 'BEGIN\nCREATE TABLE\nROLLBACK\nrc=0'}),
+            ('source write other error', {'source_write': 'psql: error: timeout expired\nrc=2'}),
         ):
             with self.subTest(case=case):
                 (self.t / 'ev' / 'timing.tsv').unlink(missing_ok=True)

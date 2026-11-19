@@ -72,6 +72,7 @@ class Neon:
             api_base(),
         )
         self.child = None
+        self.child_endpoints = set()
 
     def resolve_parent(self):
         name = plain_id(self.parent, 'parent')
@@ -93,7 +94,21 @@ class Neon:
                 and '..' not in seg
                 and '.' not in seg
             )
-            if not (create or child) or self.parent in seg:
+            mine = self.child is not None and self.child != self.parent
+            ep_create = (
+                mine
+                and method == 'POST'
+                and seg == ['', 'projects', self.project, 'endpoints']
+                and ((body or {}).get('endpoint') or {}).get('branch_id') == self.child
+            )
+            ep_delete = (
+                mine
+                and method == 'DELETE'
+                and len(seg) == 5
+                and seg[:4] == ['', 'projects', self.project, 'endpoints']
+                and seg[4] in self.child_endpoints
+            )
+            if not (create or child or ep_create or ep_delete) or self.parent in seg:
                 sys.exit(f'REFUSED write: {method} {path}')
         data = json.dumps(body).encode() if body is not None else None
         for attempt in range(30):
@@ -309,7 +324,8 @@ def cmd_source(n, a):
     if not a.apply:
         print(
             f'plan: {"delete and " if old else ""}create {a.name} from the parent{at} with a '
-            f'read_only endpoint, reset the password of {a.role} on it; nothing written (dry run)'
+            f'read_write endpoint, reset the password of {a.role} on it, add a read_only '
+            'endpoint, delete the read_write endpoint; nothing written (dry run)'
         )
         return 0
     if old:
@@ -332,7 +348,7 @@ def cmd_source(n, a):
                 {'parent_id': n.parent, 'name': a.name},
                 **({'parent_lsn': a.lsn} if a.lsn else {}),
             ),
-            'endpoints': [{'type': 'read_only'}],
+            'endpoints': [{'type': 'read_write'}],
         },
     )
     b = r['branch']
@@ -343,8 +359,9 @@ def cmd_source(n, a):
     if a.lsn and b.get('parent_lsn') != a.lsn:
         sys.exit(f'{a.name} has parent_lsn {b.get("parent_lsn") or "-"}, asked for {a.lsn}')
     eps = n.endpoints(b['id'])
-    if len(eps) != 1 or eps[0].get('type') != 'read_only':
-        sys.exit(f'{a.name} has {len(eps)} endpoint(s), want one read_only endpoint')
+    if len(eps) != 1 or eps[0].get('type') != 'read_write':
+        sys.exit(f'{a.name} has {len(eps)} endpoint(s), want one read_write endpoint')
+    rw = plain_id(eps[0]['id'], 'endpoint id')
     since = started()
     r = n.call(
         'POST',
@@ -353,6 +370,22 @@ def cmd_source(n, a):
     )
     pw = r['role']['password']
     n.settle(b['id'], 'password reset', r, since)
+    since = started()
+    r = n.call(
+        'POST',
+        f'/projects/{n.project}/endpoints',
+        {'endpoint': {'branch_id': b['id'], 'type': 'read_only'}},
+    )
+    n.settle(b['id'], 'read_only endpoint', r, since)
+    n.child_endpoints = {rw}
+    since = started()
+    r = n.call('DELETE', f'/projects/{n.project}/endpoints/{rw}')
+    n.child_endpoints = set()
+    n.settle(b['id'], 'read_write endpoint delete', r, since)
+    eps = n.endpoints(b['id'])
+    if len(eps) != 1 or eps[0].get('type') != 'read_only':
+        sys.exit(f'{a.name} has {len(eps)} endpoint(s) after the delete, want one read_only endpoint')
+    print(f'endpoints: read_write {rw} for the password reset, deleted; read_only {eps[0]["id"]} left')
     if any('\n' in v or '\r' in v for v in (eps[0]['host'], a.db, a.role, pw)):
         sys.exit('REFUSED: a credential value holds a line break')
     out = pathlib.Path(a.out)

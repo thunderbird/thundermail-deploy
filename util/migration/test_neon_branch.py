@@ -123,7 +123,24 @@ class FakeNeon:
                 self.endpoints = [e for e in self.endpoints if e['branch_id'] != bid]
                 return 200, {'branch': b}
             if method == 'POST' and rest.endswith('/reset_password'):
+                if not [
+                    e
+                    for e in self.endpoints
+                    if e['branch_id'] == bid and e['type'] == 'read_write'
+                ]:
+                    return 412, {'message': 'create read-write endpoint to manage roles on this branch'}
                 return 200, {'role': {'name': rest.split('/')[2], 'password': 'S3cret-only-here'}}
+        if method == 'POST' and path == pre + '/endpoints':
+            e = dict(body['endpoint'], id='ep-ro-n', host='ep-ro.example.test')
+            self.endpoints.append(e)
+            return 201, {'endpoint': e, 'operations': []}
+        m = re.fullmatch(pre + r'/endpoints/([^/]+)', path)
+        if m and method == 'DELETE':
+            gone = [e for e in self.endpoints if e['id'] == m.group(1)]
+            if not gone:
+                return 404, {'message': 'no endpoint'}
+            self.endpoints = [e for e in self.endpoints if e['id'] != m.group(1)]
+            return 200, {'endpoint': gone[0], 'operations': []}
         if method == 'POST' and path == pre + '/branches':
             bid = 'br-source-new'
             self.branches[bid] = {
@@ -277,6 +294,14 @@ class NeonBranch(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             n.call('POST', '/projects/%s/branches/%s/restore' % (P, PARENT), {})
         self.assertIn('REFUSED write', str(cm.exception))
+        n.child = CHILD
+        for method, path, body in (
+            ('DELETE', '/projects/%s/endpoints/ep-p' % P, None),
+            ('POST', '/projects/%s/endpoints' % P, {'endpoint': {'branch_id': PARENT}}),
+        ):
+            with self.assertRaises(SystemExit) as cm:
+                n.call(method, path, body)
+            self.assertIn('REFUSED write', str(cm.exception))
 
     def test_a_locked_project_is_retried(self):
         self.fake.lock_left = 2
@@ -308,18 +333,34 @@ class NeonBranch(unittest.TestCase):
         self.assertEqual(
             out.read_text().splitlines(),
             [
-                'STALWART_SOURCE_PG_HOST=ep-n.example.test',
+                'STALWART_SOURCE_PG_HOST=ep-ro.example.test',
                 'STALWART_SOURCE_PG_DB=stalwart',
                 'STALWART_SOURCE_PG_USER=stalwart_owner',
                 'STALWART_SOURCE_PG_PASSWORD=S3cret-only-here',
             ],
         )
         self.assertEqual(
-            [w[0] for w in self.writes()],
-            ['DELETE', 'POST', 'POST'],
+            [(m, p.split('/')[3] if len(p.split('/')) > 3 else p) for m, p in self.writes()],
+            [
+                ('DELETE', 'branches'),
+                ('POST', 'branches'),
+                ('POST', 'branches'),
+                ('POST', 'endpoints'),
+                ('DELETE', 'endpoints'),
+            ],
         )
         create = [b for m, p, b, _ in self.fake.log if m == 'POST' and p.endswith('/branches')][0]
-        self.assertEqual(create['endpoints'], [{'type': 'read_only'}])
+        self.assertEqual(create['endpoints'], [{'type': 'read_write'}])
+        self.assertTrue(self.writes()[2][1].endswith('/roles/stalwart_owner/reset_password'))
+        self.assertEqual(self.writes()[4][1], '/projects/%s/endpoints/ep-n' % P)
+        self.assertEqual(
+            [(e['id'], e['type']) for e in self.fake.endpoints if e['branch_id'] == 'br-source-new'],
+            [('ep-ro-n', 'read_only')],
+        )
+        self.assertIn(
+            'endpoints: read_write ep-n for the password reset, deleted; read_only ep-ro-n left',
+            p.stdout,
+        )
         self.assertIn('source proof: created_at ', p.stdout)
         self.assertIn('credential: role stalwart_owner password length 16 written to', p.stdout)
 
