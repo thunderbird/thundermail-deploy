@@ -303,7 +303,7 @@ the keying for the real hosts.
   on the four mail nodes and refuses after a `stop-legacy-stalwart` row of this cut. `stop` (W 4.3)
   runs `systemctl disable --now thundermail` on all six and refuses unless `window/gate.sh
   stop-legacy` passes. `start` (Rollback) writes a `start-legacy-stalwart` row, which voids an
-  earlier stop row for the W4 reset, then runs `systemctl enable --now thundermail; sleep 5;
+  earlier stop row for the W4 reset, then runs `systemctl enable --now thundermail && sleep 5 &&
   systemctl is-active thundermail` and passes only when every node prints `active`. It also sends
   to the reachable nodes when some are not `running` or not `Online`, then exits 1 naming the rest;
   the other modes refuse unless all six are reachable. `read` (W 4.3 after the stop, W 6.4,

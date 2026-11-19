@@ -23,7 +23,7 @@ POLL=${LEGACY_SSM_POLL:-5}
 case $MODE in
   restart) CMD='systemctl restart thundermail' ;;
   stop) CMD='systemctl disable --now thundermail' ;;
-  start) CMD='systemctl enable --now thundermail; sleep 5; systemctl is-active thundermail' ;;
+  start) CMD='systemctl enable --now thundermail && sleep 5 && systemctl is-active thundermail' ;;
   read) CMD='systemctl is-active thundermail; systemctl is-enabled thundermail; exit 0' ;;
 esac
 LOG=$EVIDENCE_DIR/legacy-stalwart-$MODE-$(mode)-$TS.log

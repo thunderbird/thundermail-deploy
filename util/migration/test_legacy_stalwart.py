@@ -102,7 +102,7 @@ RUNNING = ['Success', 0, 'active\nenabled\n']
 CUT = ['cut-ecs', '2026-11-19T04:00:00Z', '2026-11-19T04:00:00Z', 'tasks', '0']
 DRAINED = ['queue-drain', '2026-11-19T04:40:00Z', '2026-11-19T04:40:00Z', 'queued', '0']
 READ_DONE = ['w4-read-done', '2026-11-19T04:41:00Z', '2026-11-19T04:41:00Z', 'export', 'x']
-START = 'systemctl enable --now thundermail; sleep 5; systemctl is-active thundermail'
+START = 'systemctl enable --now thundermail && sleep 5 && systemctl is-active thundermail'
 
 
 class Sandbox(unittest.TestCase):
@@ -590,6 +590,33 @@ class LegacyStalwart(Sandbox):
             self.assertNotIn('apply: done', out)
             row = [x.split('\t') for x in self.tsv_text().splitlines()][-1]
             self.assertEqual((row[0], row[3:]), ('start-legacy-stalwart', ['nodes', '5']))
+
+    def test_start_command_fails_when_enable_fails_on_a_running_unit(self):
+        rc, out = self.run_tool('start', '--apply')
+        self.assertEqual(rc, 0, out)
+        cmd = self.sent()['params']['commands'][0]
+        node = self.t / 'node'
+        node.mkdir()
+        (node / 'systemctl').write_text(
+            '#!/bin/sh\n'
+            'case "$1" in\n'
+            '  enable) echo "Failed to enable unit" >&2; exit "$ENABLE_RC" ;;\n'
+            '  is-active) echo active ;;\n'
+            'esac\n'
+        )
+        (node / 'sleep').write_text('#!/bin/sh\n')
+        for f in ('systemctl', 'sleep'):
+            (node / f).chmod(0o755)
+        for enable_rc, want in (('1', 1), ('0', 0)):
+            p = subprocess.run(
+                [shutil.which('bash'), '-c', cmd],
+                capture_output=True,
+                text=True,
+                env={'PATH': '%s:/usr/bin:/bin' % node, 'ENABLE_RC': enable_rc},
+                timeout=30,
+            )
+            self.assertEqual(p.returncode, want, (enable_rc, p.stdout, p.stderr))
+            self.assertEqual(p.stdout, 'active\n' if want == 0 else '')
 
     def test_start_refuses_when_ssm_reaches_no_node(self):
         self.state({'nodes': {i: {'ping': 'ConnectionLost'} for i in ALL}})
