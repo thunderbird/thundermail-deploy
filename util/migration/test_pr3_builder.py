@@ -546,6 +546,20 @@ class Attempts(Base):
             self.values()['TIMING_TSV'], str(self.state / 'attempt-1' / 'timing-tb-prod.tsv'), out
         )
 
+    def test_an_unsafe_env_file_is_refused_before_it_is_read(self):
+        self.build_ns()
+        marker = self.t / 'sourced'
+        with open(self.envfile, 'a') as f:
+            f.write("touch '%s'\n" % marker)
+        self.envfile.chmod(0o664)
+        for attempt in ('1', '2'):
+            with self.subTest(attempt=attempt):
+                rc, out = self.build_ns(CUTOVER_ATTEMPT=attempt)
+                self.assertEqual(rc, 1, out)
+                self.assertIn('refusing %s' % self.envfile, out)
+                self.assertFalse(marker.exists(), out)
+                self.assertFalse((self.state / 'attempt-2').exists())
+
     def test_an_earlier_attempt_refuses_once_a_later_one_exists(self):
         self.build_ns()
         self.build_ns(CUTOVER_ATTEMPT='2')
