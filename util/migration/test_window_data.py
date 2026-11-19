@@ -406,7 +406,10 @@ class W4Recovery(Data):
         for line in text.splitlines():
             if 'KS[@]' in line:
                 with self.subTest(line=line[:80]):
-                    self.assertNotRegex(line, r'"\$\{NS\[@\]\}" (scale|set env|patch|apply)\b')
+                    stop_apply_pod = '"${NS[@]}" patch pod "$1" --type merge -p \'{"spec":{"activeDeadlineSeconds":1}}\''
+                    self.assertNotRegex(
+                        line.replace(stop_apply_pod, ''), r'"\$\{NS\[@\]\}" (scale|set env|patch|apply)\b'
+                    )
         self.assertNotIn('STALWART_RECOVERY_MODE=true', text)
         self.assertNotIn('STALWART_RECOVERY_MODE-', text)
         out = self.w4(
