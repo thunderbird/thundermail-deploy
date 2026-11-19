@@ -35,11 +35,24 @@ log_group() {
 declare -A TOK=() READ_END=()
 SEEN="" DEADLINE=""
 
+ro() {
+  local left
+  [ -n "$DEADLINE" ] || { "${RO[@]}" "$@"; return; }
+  left=$(( DEADLINE - $(date +%s) ))
+  [ "$left" -gt 0 ] || return 124
+  timeout "$left" "${RO[@]}" "$@"
+}
+
+call_failed() {
+  if [ "$1" = 124 ]; then echo "$2 did not answer within the ${READ_FOR}s of the timed read"; return 2; fi
+  echo "$2 failed"
+  return 1
+}
+
 events() {
-  local s=$1 tok=${TOK[$1]:-} out next lines
+  local s=$1 tok=${TOK[$1]:-} out next lines rc
   while :; do
-    [ -z "$DEADLINE" ] || [ "$(date +%s)" -lt "$DEADLINE" ] || return 2
-    out=$("${RO[@]}" logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-from-head ${tok:+--next-token "$tok"} --output json) || return 1
+    out=$(ro logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-from-head ${tok:+--next-token "$tok"} --output json) || { rc=$?; [ "$rc" != 124 ] || return 2; return 1; }
     lines=$(printf '%s' "$out" | jq -r '.events[] | [(.timestamp | tostring)] + (.message | first(capture("Task (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\] (?<w>[a-z]+)"), (capture("Discarding revoked task: (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "revoked"), (capture("Hard time limit \\([0-9.]+s\\) exceeded for (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "timeout"), {n: "-", i: "-", w: "-"}) | [.n, .i, .w]) | join(" ")') || return 1
     next=$(printf '%s' "$out" | jq -r '.nextForwardToken // ""') || return 1
     [ -z "$lines" ] || SEEN+=$lines$'\n'
@@ -67,11 +80,11 @@ held_count() {
 
 celery_read() {
   local svc desired running tasks t s rc streams now sum held rec fin age ign lines missing="" failed="" partial=""
-  svc=$("${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text) || { echo "ecs describe-services $CL/$SV failed"; return 1; }
+  svc=$(ro ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text) || { call_failed $? "ecs describe-services $CL/$SV"; return; }
   read -r desired running <<<"$svc"
-  tasks=$("${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text) || { echo "ecs list-tasks $CL/$SV failed"; return 1; }
+  tasks=$(ro ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text) || { call_failed $? "ecs list-tasks $CL/$SV"; return; }
   read -ra tasks <<<"$(tr '\t' ' ' <<<"$tasks")"
-  streams=$("${RO[@]}" logs describe-log-streams --log-group-name "$LOG_GROUP" --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text) || { echo "logs describe-log-streams failed"; return 1; }
+  streams=$(ro logs describe-log-streams --log-group-name "$LOG_GROUP" --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text) || { call_failed $? "logs describe-log-streams"; return; }
   for t in "${tasks[@]}"; do
     s=$(tr '\t' '\n' <<<"$streams" | grep -m1 -- "/${t##*/}\$" || :)
     [ -n "$s" ] || { missing="$missing ${t##*/}"; continue; }
@@ -124,7 +137,7 @@ plan() {
     printf '  + %s   (for each of LEGACY_ECS_TARGETS, against the 1.5 snapshot)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].desiredCount' --output text)"
   fi
   [ "$CMD" != wait ] || printf '  every %ss until held=0, at most %ss:\n' "$INTERVAL" "$TIMEOUT"
-  [ "$CMD" != timed ] || printf '  every %ss for at most %ss, ending early at held=0 (a held task never stops the read; a log history not read to its end by then is a failed read):\n' "$INTERVAL" "$READ_FOR"
+  [ "$CMD" != timed ] || printf '  every %ss for at most %ss, ending early at held=0 (a held task never stops the read; every read call ends at the limit, and a log history not read to its end by then is a failed read):\n' "$INTERVAL" "$READ_FOR"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-streams --log-group-name '<celery log group>' --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text)"
@@ -165,13 +178,18 @@ if [ "$CMD" = timed ]; then
   start=$(date +%s)
   end=$(( start + READ_FOR ))
   DEADLINE=$end
+  rounds=0
   while :; do
-    HELD="" READ_OK=0 LINES=0 CUT=0
-    celery_read || stop "celery read failed: a failed read is not an empty read"
+    CUT=0 rc=0
+    celery_read || rc=$?
+    if [ "$rc" = 2 ] && [ "$rounds" -gt 0 ]; then echo "  the read at the limit did not finish; the last complete read above stands"; break; fi
+    [ "$rc" = 0 ] || stop "celery read failed: a failed read is not an empty read"
+    rounds=$((rounds + 1))
     [ "$LINES" -gt 0 ] || stop "no Celery task line in the running workers' log streams: a failed read is not an empty read"
     [ "$READ_OK" = 1 ] && [ "$HELD" = 0 ] && break
     left=$(( end - $(date +%s) ))
-    [ "$CUT" = 0 ] && [ "$left" -gt 0 ] || break
+    [ "$CUT" = 0 ] || { echo "  the read stopped at the limit; tasks are counted from the events read by then"; break; }
+    [ "$left" -gt 0 ] || break
     sleep "$(( left < INTERVAL ? left : INTERVAL ))"
     [ "$(date +%s)" -lt "$end" ] || break
   done

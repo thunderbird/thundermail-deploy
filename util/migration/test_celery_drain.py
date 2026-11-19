@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -26,6 +27,9 @@ def opt(name):
 sub = args[args.index('--region') + 2:]
 cmd = ' '.join(sub[:2])
 out, rc = '', 0
+hang = st.get('hang', {}).get(cmd)
+if hang and st.get('reads', 0) + (cmd == 'ecs list-tasks') >= hang[0]:
+    time.sleep(hang[1])
 if cmd in st.get('fail', []):
     sys.stderr.write('Error when retrieving token from sso: Token has expired and refresh failed\n')
     sys.exit(255)
@@ -623,6 +627,38 @@ class CeleryDrain(Base):
         pages = [ln for ln in self.log().splitlines() if 'get-log-events' in ln]
         self.assertLess(len(pages), 6, pages)
         self.assertEqual(self.held_tsv(), [])
+
+    def test_a_slow_aws_call_cannot_hold_the_timed_read_past_its_limit(self):
+        self.snapshot()
+        held = {
+            STREAM + 'aaa': done(ID1),
+            STREAM + 'bbb': [[20000, line(0, TASK, ID2, 'received')]],
+        }
+        for cmd, why in (
+            ('logs describe-log-streams', 'logs describe-log-streams did not answer within the 2s'),
+            ('ecs list-tasks', 'ecs list-tasks %s/%s did not answer within the 2s' % (CL, SV)),
+            ('logs get-log-events', 'was not read to its end within 2s'),
+        ):
+            self.state(cycles=[held], hang={cmd: [1, 30]})
+            t0 = time.monotonic()
+            rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='2', TS=cmd[:4])
+            self.assertEqual(rc, 1, out)
+            self.assertLess(time.monotonic() - t0, 15, out)
+            self.assertIn(why, out)
+            self.assertIn('a failed read is not an empty read', out)
+        self.assertEqual(self.held_tsv(), [])
+        for cmd in ('logs describe-log-streams', 'logs get-log-events'):
+            self.state(cycles=[held], hang={cmd: [2, 30]})
+            t0 = time.monotonic()
+            rc, out = self.run_tool(
+                'timed', '--apply', CELERY_DRAIN_READ_FOR='3', TS='late' + cmd[:4]
+            )
+            self.assertEqual(rc, 0, out)
+            self.assertLess(time.monotonic() - t0, 15, out)
+            self.assertRegex(out, r'the read (at|stopped at) the limit')
+            self.assertIn('celery timed read: held=1 ignored=0 ', out)
+            rows = (self.t / 'ev' / ('celery-held-late%s.tsv' % cmd[:4])).read_text().splitlines()
+            self.assertEqual([r.split('\t')[1] for r in rows[1:]], [ID2])
 
     def test_timed_read_sleeps_no_further_than_its_limit(self):
         self.snapshot()
