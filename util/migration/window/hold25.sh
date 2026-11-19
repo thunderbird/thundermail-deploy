@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ALLOW_POS=1
+USAGE="usage: hold25.sh set|read|queue-hold|release-port25|release-queue|cancel-old [--older-than-days N] [--dry-run | --apply [--go 'operator words']]"
+OLD_DAYS=5
+OLD_SET=0
+A=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --older-than-days) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 64; }; OLD_DAYS=$2; OLD_SET=1; shift 2 ;;
+    *) A+=("$1"); shift ;;
+  esac
+done
+set -- "${A[@]+"${A[@]}"}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-USAGE="usage: hold25.sh set|read|queue-hold|release-port25|release-queue [--dry-run | --apply [--go 'operator words']]"
 MODE=${POS[0]:-}
-case "$MODE" in set|read|queue-hold|release-port25|release-queue) ;; *) echo "$USAGE" >&2; exit 64 ;; esac
+case "$MODE" in set|read|queue-hold|release-port25|release-queue|cancel-old) ;; *) echo "$USAGE" >&2; exit 64 ;; esac
 [ "${#POS[@]}" = 1 ] || { echo "$USAGE" >&2; exit 64; }
+[ "$OLD_SET" = 0 ] || [ "$MODE" = cancel-old ] || { echo "$USAGE" >&2; exit 64; }
+case "$OLD_DAYS" in ''|*[!0-9]*|0) echo "--older-than-days takes a whole number of days above 0, got '$OLD_DAYS'" >&2; exit 64 ;; esac
 [ "$TARGET_ENV" = tb-prod ] || { echo "hold25.sh holds tb-prod outbound mail only; TARGET_ENV=$TARGET_ENV" >&2; exit 64; }
 need TARGET_STALWART_SG
 SG=$TARGET_STALWART_SG
@@ -136,15 +148,22 @@ connect() {
   ACCOUNT=$(curl -s -m 15 -K <(curl_user "$STALWART_USER" "$STALWART_PASSWORD") "$STALWART_URL/jmap/session" | jq -re '.primaryAccounts["urn:stalwart:jmap"]') || { echo "no urn:stalwart:jmap account in the session of $STALWART_URL"; return 1; }
 }
 
-read_queue() {
-  local qids page list='[]' i now min cut=${1:-9999999999}
+queue_list() {
+  local qids page i
+  LIST='[]'
   page=$(call x:QueuedMessage/query "{\"limit\": $QUERY_LIMIT, \"calculateTotal\": true}") || return 1
   qids=$(jq -c '.ids' <<<"$page") || return 1
   jq -e '.total == (.ids | length)' <<<"$page" >/dev/null || { echo "queue: one query returned $(jq '.ids | length' <<<"$page") ids of total $(jq '.total' <<<"$page"); the queue cannot be read in one scan"; return 1; }
   for ((i = 0; i < $(jq length <<<"$qids"); i += 100)); do
     page=$(call x:QueuedMessage/get "$(jq -c --argjson i "$i" '{ids: .[$i:$i + 100]}' <<<"$qids")" | jq -c '.list') || return 1
-    list=$(printf '%s\n%s\n' "$list" "$page" | jq -cs '.[0] + .[1]') || return 1
+    LIST=$(printf '%s\n%s\n' "$LIST" "$page" | jq -cs '.[0] + .[1]') || return 1
   done
+}
+
+read_queue() {
+  local list now min cut=${1:-9999999999}
+  queue_list || return 1
+  list=$LIST
   now=$(date -u +%s)
   min=$((now + HELD_MIN_HOURS * 3600))
   Q=$(jq -c --argjson min "$min" --argjson now "$((now + 60))" --argjson cut "$cut" --argjson hold "$((HOLD_HOURS * 3600))" --argjson t "$now" '
@@ -296,6 +315,35 @@ release_queue() {
   [ "$(jq '.held | length' <<<"$Q")" = 0 ] || { echo "read back: messages still held"; return 1; }
 }
 
+old_list() {
+  queue_list || return 1
+  OLD=$(jq -c --argjson cut "$1" '
+    def t: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
+    map(select(.createdAt != null) | {id, at: .createdAt, created: (.createdAt | t), size: (.size // 0), rcpt: ((.recipients // {}) | length)})
+    | map(select(.created < $cut)) | sort_by(.created)' <<<"$LIST") || return 1
+}
+
+cancel_old() {
+  local cut n f i r bad
+  cut=$(( $(date -u +%s) - OLD_DAYS * 86400 ))
+  old_list "$cut" || return 1
+  n=$(jq length <<<"$OLD")
+  VALUE=$n
+  [ "$n" -gt 0 ] || { echo "cancel-old: no queued message older than $OLD_DAYS days"; return 0; }
+  f=$EVIDENCE_DIR/queue-cancel-old-$TS.tsv
+  ( umask 077; jq -r '(["id", "created", "size", "recipients"] | @tsv), (.[] | [.id, .at, .size, .rcpt] | @tsv)' <<<"$OLD" > "$f" )
+  echo "cancel-old: $n queued message(s) older than $OLD_DAYS days: oldest $(jq -r '.[0].at' <<<"$OLD"), newest $(jq -r '.[-1].at' <<<"$OLD"), total size $(jq 'map(.size) | add' <<<"$OLD") bytes; ids in $f"
+  if [ "$APPLY" = 0 ]; then printf '  + POST %s/jmap x:QueuedMessage/set destroy=<the %s ids of %s>\n' "$STALWART_URL" "$n" "$f"; return 0; fi
+  for ((i = 0; i < n; i += 50)); do
+    r=$(call x:QueuedMessage/set "$(jq -c --argjson i "$i" '{destroy: [.[$i:$i + 50][].id]}' <<<"$OLD")") || return 1
+    bad=$(jq -c '(.notDestroyed // {}) | select(length > 0) | to_entries | map({(.key): .value.type}) | add' <<<"$r")
+    [ -z "$bad" ] || { echo "not destroyed: $bad"; return 1; }
+  done
+  old_list "$cut" || return 1
+  [ "$(jq length <<<"$OLD")" = 0 ] || { echo "read back: $(jq length <<<"$OLD") queued message(s) older than $OLD_DAYS days are still queued"; return 1; }
+  echo "read back: no queued message older than $OLD_DAYS days is left"
+}
+
 gate_row() {
   [ -n "$(after_cut "$1")" ] && return 0
   [ "$APPLY" = 1 ] && stop "no $1 row in $TIMING_TSV since the last cut-ecs row: $2"
@@ -354,5 +402,10 @@ case "$MODE" in
     go_gate
     with_queue release_queue
     [ "$APPLY" = 0 ] || mark hold25-release-queue released "$VALUE" ;;
+  cancel-old)
+    [ -z "$(after_cut hold25-release-queue)" ] || stop "a hold25-release-queue row exists since the last cut-ecs row: the queue was released (7.7), so cancel-old no longer runs"
+    go_gate
+    with_queue cancel_old
+    [ "$APPLY" = 0 ] || mark hold25-cancel-old cancelled "$VALUE" ;;
 esac
 finish
