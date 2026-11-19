@@ -55,15 +55,21 @@ kube_args_ok() {
   [ "$seen" = 1 ] || [ "$sub" = kustomize ] || { echo "refusing kubectl: no --kubeconfig, kubectl would use the current context" >&2; return 64; }
 }
 kubectl() { kube_args_ok "$@" || return 64; command kubectl "$@"; }
+env_file_default() {
+  if [ "$TARGET_ENV" = tb-prod ]; then printf '%s' "$HOME/.local/state/talos/cutover-tb-prod.env"
+  else printf '%s' "/dev/shm/talos/cutover-$TARGET_ENV.env"; fi
+}
+env_perm() { if [ "${TARGET_ENV:-}" = tb-prod ]; then printf '/077'; else printf '/022'; fi; }
+env_perm_why() { if [ "${TARGET_ENV:-}" = tb-prod ]; then printf 'open to group or others (want the directory 700 and the file 600)'; else printf 'writable by group or others'; fi; }
 env_path_ok() {
-  local f=$1 d
-  d=$(dirname "$1")
-  [ ! -L "$d" ] && [ -O "$d" ] && [ -z "$(find "$d" -maxdepth 0 -perm /022)" ] || return 1
-  [ ! -e "$f" ] || { [ ! -L "$f" ] && [ -O "$f" ] && [ -z "$(find "$f" -maxdepth 0 -perm /022)" ]; }
+  local f=$1 d m
+  d=$(dirname "$1") m=$(env_perm)
+  [ ! -L "$d" ] && [ -O "$d" ] && [ -z "$(find "$d" -maxdepth 0 -perm "$m")" ] || return 1
+  [ ! -e "$f" ] || { [ ! -L "$f" ] && [ -O "$f" ] && [ -z "$(find "$f" -maxdepth 0 -perm "$m")" ]; }
 }
 env_target_ok() {
   local f
-  env_path_ok "$1" || { echo "refusing $1: it or its directory is a symlink, not owned by $(id -un), or writable by group or others" >&2; return 64; }
+  env_path_ok "$1" || { echo "refusing $1: it or its directory is a symlink, not owned by $(id -un), or $(env_perm_why)" >&2; return 64; }
   f=$(unset TARGET_ENV; set +eu; . "$1" >/dev/null 2>&1; printf '%s' "${TARGET_ENV:-}")
   [ "$f" = "$TARGET_ENV" ] || { [ -z "$f" ] && [ "$TARGET_ENV" = tb-stage ]; } || { echo "refusing $1: it was built for TARGET_ENV=${f:-<none>}, not $TARGET_ENV" >&2; return 64; }
 }
@@ -105,13 +111,15 @@ env_read() {
 load_cutover_env() {
   local want=$TARGET_ENV f
   ENV_FILE=${CUTOVER_ENV:-}
-  if [ -z "$ENV_FILE" ]; then
+  if [ -z "$ENV_FILE" ] && [ "$TARGET_ENV" = tb-prod ]; then
+    ENV_FILE=$(env_file_default)
+  elif [ -z "$ENV_FILE" ]; then
     ENV_FILE=/dev/shm/talos/cutover-$TARGET_ENV.env
     for f in "$ENV_FILE" "$HOME/.local/state/talos/cutover-$TARGET_ENV.env"; do [ ! -f "$f" ] || { ENV_FILE=$f; break; }; done
   fi
   if [ -f "$ENV_FILE" ]; then
-    if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm /022)" ]; then
-      echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others" >&2
+    if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm "$(env_perm)")" ]; then
+      echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or $(env_perm_why)" >&2
       exit 1
     fi
     env_target_ok "$ENV_FILE" || exit 64

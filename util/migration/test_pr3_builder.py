@@ -457,6 +457,24 @@ class Attempts(Base):
                 out[m.group(1)] = m.group(2)
         return out
 
+    def test_tb_prod_writes_its_env_file_on_disk_in_a_closed_directory(self):
+        talos = self.state.parent
+        talos.mkdir(parents=True, exist_ok=True)
+        talos.chmod(0o755)
+        f = talos / 'cutover-tb-prod.env'
+        rc, out = self.build_ns(CUTOVER_ENV='')
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn(
+            'refusing %s: it or its directory is a symlink, not owned by ' % f, out
+        )
+        self.assertIn('open to group or others (want the directory 700 and the file 600)', out)
+        self.assertFalse(f.exists())
+        talos.chmod(0o700)
+        rc, out = self.build_ns(CUTOVER_ENV='')
+        self.assertRegex(out, r'(?m)^written %s \(mode 600\) vars=' % re.escape(str(f)))
+        self.assertEqual(oct(f.stat().st_mode & 0o777), '0o600')
+        self.assertIn("CUTOVER_ENV='%s'" % f, f.read_text())
+
     def test_the_first_attempt_has_its_own_directories(self):
         rc, out = self.build_ns()
         v = self.values()

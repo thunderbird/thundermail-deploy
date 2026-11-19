@@ -6,13 +6,15 @@ exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environme
 profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
 and secrets are looked up at build time. A `REPLACE_ME_*` value (any case) is one a later change
 fills in; while one is left in `targets/$TARGET_ENV.sh` or `verify/$TARGET_ENV.env`, every `--apply` exits 64.
-Every script loads the env file itself at start (`$CUTOVER_ENV`, default
-`/dev/shm/talos/cutover-$TARGET_ENV.env`; tmpfs, gone on reboot: rebuild it), and its values win over
+Every script loads the env file itself at start (`$CUTOVER_ENV`; default on tb-prod
+`~/.local/state/talos/cutover-tb-prod.env` on disk, file 600 in a directory of 700, refused if group
+or others have any access; elsewhere `/dev/shm/talos/cutover-$TARGET_ENV.env` on tmpfs, gone on
+reboot: rebuild it), and its values win over
 the shell's; the builder is the exception. A shell command that reads a variable sources the file again first:
 
 ```bash
 export TARGET_ENV=tb-prod
-set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/timing.sh
+set -a; . "$HOME/.local/state/talos/cutover-tb-prod.env"; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
@@ -171,8 +173,9 @@ the keying for the real hosts.
 ## Window scripts
 
 `window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
-`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
-`/dev/shm/talos/cutover-$TARGET_ENV.env`, else `~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
+`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default on tb-prod
+`~/.local/state/talos/cutover-tb-prod.env`; elsewhere `/dev/shm/talos/cutover-$TARGET_ENV.env`, else
+`~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
 - `--dry-run` (default) runs `check-prereqs.sh --for <gate id>` (`GATE_ID`, else the script's
@@ -292,9 +295,44 @@ the keying for the real hosts.
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
   boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
   recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
-  applies the export. A second reset needs `--go`. `--phase boot` resumes an expired wait
+  applies the export inside the cluster (below). A second reset needs `--go`. `--phase boot` resumes an expired wait
   without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
   restore or blob step.
+- On tb-prod the apply runs in a one-shot pod next to Stalwart, never through a port-forward from
+  the workstation: the CLI sends 500 creates per request with a fixed 60 s timeout, and from
+  outside the region every request timed out. `apply-pod.yaml` holds `stalwart-cli` 1.0.13 pinned
+  by digest (an index with linux/amd64 and linux/arm64), the label
+  `app.kubernetes.io/name: stalwart-config-applier`, no service account token, a read-only root,
+  uid 65532, a 3600 s deadline, and the recovery admin from Secret `stalwart-recovery-admin`
+  (keys `STALWART_USER`, `STALWART_PASSWORD`) by reference, as the settings Job has it. W4 creates
+  it with the manifest on stdin and `STALWART_URL=http://<pod IP of the one Ready recovery
+  pod>:8080`, sends `$SECRET_DIR/export.json` through `kubectl attach -i` (stdin; the CLI runs
+  `apply --stdin`), waits at most `APPLY_POD_WAIT` (1800 s) from the send, attach included, for
+  the pod to end (on a timeout or a pod that is not Ready in 300 s it saves `kubectl describe pod`
+  to `$EVIDENCE_DIR/apply-pod-<TS>.txt` and the log first), writes the timestamped
+  log to `$SECRET_DIR/apply.log` and a copy with addresses masked to
+  `$EVIDENCE_DIR/apply-<TS>.log`, prints `apply: pod/<name> exit=<n> errors=<n> requests=<n>
+  longest request <s>s` from the CLI's `--debug` request lines (`apply_requests.py`), and
+  deletes the pod, also on a failure or an interrupt. No Service changes. The reads after it
+  (admin account id, account ids) run from the workstation through the checked port-forward,
+  which the step opens after the apply. The path: the
+  SecurityGroupPolicy `stalwart-config-applier` (tb-prod settings directory, PR 195) gives the
+  pod the Stalwart server security group, which the Stalwart pods carry too (`stalwart-server`),
+  and that group admits TCP 8080 from itself (rule `stalwart_mgmt` in platform-infrastructure
+  `pulumi/modules/thundermail_deploy.py`). The repo holds no NetworkPolicy. A failed batch stops
+  that object type and leaves the earlier batches committed, so a second apply would collide:
+  the `apply-start` row is written once the pod is Ready and its log shows `status=200` for
+  `GET /api/schema/<hash>`, the path 0.16 redirects `/api/schema` to (the CLI reached Stalwart; `APPLY_SCHEMA_WAIT`, default 90 s, else no row and
+  nothing sent), just before the export is sent, and an `apply-start` row after the pre-delete
+  with no `export-applied` row makes a rerun refuse (and `window/gate.sh merge-recovery` wait).
+  When the attach fails and the pod log has no `Plan:` line, W4 stops the pod
+  (`activeDeadlineSeconds` 1), reads its final log, and only when that read works and still has
+  no `Plan:` line deletes the pod and writes an `apply-unsent` row that lets the rerun send again.
+  An unreadable log keeps the rerun blocked. On tb-prod `check-prereqs.sh` asks for
+  `create pods/attach`, `get pods/log` and `patch pods` in `thundermail`. The run also fails when the CLI's `Plan:` counts per
+  operation type differ from the lines of `export.json` (a cut stdin stream), and
+  the retry is the revert of the recovery-mode PR and `--phase reset --apply --go` (about 20 to 25
+  minutes).
 - `window/legacy-stalwart.sh read --apply` (W 4.3, after the stop) refuses unless
   `window/gate.sh stop-legacy` passes, asks the six nodes of `LEGACY_STALWART_NODE_IDS` through SSM
   Run Command for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
