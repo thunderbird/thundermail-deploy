@@ -10,7 +10,10 @@ PHASE=1
 [ "$APPLY" = 1 ] && [ -n "$GO" ] && PHASE=2
 PROMOTION=$EVIDENCE_DIR/promotion-configs-$TS.yaml
 PROMOTION_RESTORE=$EVIDENCE_DIR/promotion-configs-restore$SUF-$TS.yaml
+DROPPED_DOMAINS_ARG=()
+[ "$TARGET_ENV" != tb-prod ] || DROPPED_DOMAINS_ARG=(--dropped-domains "$S/domains-dropped.json")
 UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname "$MAIL_HOST"
+  ${DROPPED_DOMAINS_ARG[@]+"${DROPPED_DOMAINS_ARG[@]}"}
   --skip WebHook --skip AllowedIp --skip MtaSts --skip MtaQueueQuota --skip Security --skip Calendar --skip AddressBook --skip Http)
 
 snap_settings() {

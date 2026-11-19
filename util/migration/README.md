@@ -268,7 +268,7 @@ the keying for the real hosts.
   reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
   (compared after NFKC and punycode, as 0.16 reads them). It prints one
   `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
-  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does any address in `principals.json` on a dropped Domain (a catch-all, which `convert` leaves out of the export and W5 puts back).
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does an address of `principals.json` on a dropped Domain. A catch-all there (`@<domain>`, which `convert` leaves out and W5 puts back) is a `warning:` line instead: `apply_unmigrated.py --dropped-domains` (W5 on tb-prod) skips it and prints the count. `domain_fix.py --dropped-list` writes the list that `verify/02_directory.py` reads (`DROPPED_DOMAINS`). Names are compared in the punycode form 0.16 stores (`shapes.norm_domain`).
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
   `class Domain:refused-by-0.16` lines, and the names convert drops itself as
   `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the

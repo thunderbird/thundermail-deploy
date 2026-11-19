@@ -224,7 +224,7 @@ class ReadPhase(Prod):
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
         'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }\n'
-        'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
+        'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
     def test_order_marks_and_a_queue_rerun_reads_the_queue_only(self):
