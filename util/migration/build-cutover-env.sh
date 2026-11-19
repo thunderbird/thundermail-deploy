@@ -94,6 +94,14 @@ neon_lookup() {
     fi
   done
 }
+neon_default_branch() {
+  local KEY
+  [ -n "$2" ] || return 0
+  KEY=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$1")
+  KEY=${KEY:-${NEON_KEY:-}}
+  [ -n "$KEY" ] || return 0
+  try neon_get "projects/$2/branches" | jq -r '[.branches[]? | select(.default == true or .primary == true) | .name] | if length == 1 then .[0] else empty end'
+}
 
 render_ref() {
   local d out
@@ -130,8 +138,8 @@ window_vars() {
   done
   r=$(neon_lookup STALWART_TARGET "$(jq -r '.host // empty' <<<"${cfg:-{\}}" | direct)")
   put NEON_PROJECT_STALWART_TARGET "$(op NEON_PROJECT_STALWART_TARGET)$([ -n "$(op NEON_PROJECT_STALWART_TARGET)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_TARGET in the environment, else Neon API: project whose endpoint id is the STALWART_TARGET_PG_HOST prefix"
-  v=$(op NEON_BRANCH_KC); put NEON_BRANCH_KC "${v:-main}" "NEON_BRANCH_KC in the environment, else main"
-  v=$(op NEON_BRANCH_ACCOUNTS); put NEON_BRANCH_ACCOUNTS "${v:-main}" "NEON_BRANCH_ACCOUNTS in the environment, else main"
+  v=$(op NEON_BRANCH_KC); [ -n "$v" ] || v=$(neon_default_branch KC "${NEON_PROJECT_KC_ID:-}"); put NEON_BRANCH_KC "$v" "NEON_BRANCH_KC in the environment, else Neon API: the default branch of NEON_PROJECT_KC"
+  v=$(op NEON_BRANCH_ACCOUNTS); [ -n "$v" ] || v=$(neon_default_branch ACCOUNTS "${NEON_PROJECT_ACCOUNTS_ID:-}"); put NEON_BRANCH_ACCOUNTS "$v" "NEON_BRANCH_ACCOUNTS in the environment, else Neon API: the default branch of NEON_PROJECT_ACCOUNTS"
   ids=$(try aws_legacy ec2 describe-instances --filters "Name=tag:Name,Values=$LEGACY_NODE_NAME_FILTER" Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | grep . | sort | tr '\n' ' ' | sed 's/ $//')
   [ "$(wc -w <<<"$ids")" = "$LEGACY_NODE_COUNT" ] || ids=""
   put LEGACY_STALWART_NODE_IDS "$ids" "aws ec2 describe-instances --profile $LEGACY_AWS_PROFILE Name=$LEGACY_NODE_NAME_FILTER running; empty unless exactly $LEGACY_NODE_COUNT"
@@ -213,9 +221,11 @@ build() {
   put NEON_PROJECT_STALWART_LEGACY "$(op NEON_PROJECT_STALWART_LEGACY)$([ -n "$(op NEON_PROJECT_STALWART_LEGACY)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_LEGACY in the environment, else Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
   put NEON_LEGACY_STALWART_BRANCH "$(cut -f2 <<<"$r")" "Neon API: branch of that endpoint"
   r=$(neon_lookup KC "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/keycloak-database-host" | direct)")
-  put NEON_PROJECT_KC "$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
+  NEON_PROJECT_KC_ID=$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")
+  put NEON_PROJECT_KC "$NEON_PROJECT_KC_ID" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
   r=$(neon_lookup ACCOUNTS "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/database-host" | direct)")
-  put NEON_PROJECT_ACCOUNTS "$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
+  NEON_PROJECT_ACCOUNTS_ID=$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")
+  put NEON_PROJECT_ACCOUNTS "$NEON_PROJECT_ACCOUNTS_ID" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
 
   put LEGACY_BLOB_BUCKET "$(try aws_legacy s3api list-buckets --query "Buckets[?contains(Name,'$LEGACY_BUCKET_MATCH') && ends_with(Name,'-stalwart-s3-store')].Name | [0]" --output text | grep -v '^None$' || true)" "aws s3api list-buckets --profile $LEGACY_AWS_PROFILE (name *$LEGACY_BUCKET_MATCH*-stalwart-s3-store)"
   put TARGET_BLOB_BUCKET "$(yq -r '.blobStoreBucket // ""' "$VALUES")" "$CONFIGS_OVERLAY/config/values.yaml blobStoreBucket"
@@ -417,11 +427,11 @@ check() {
   chk legacy-asg-targets count_eq "$(aws_legacy application-autoscaling describe-scalable-targets --service-namespace ecs --resource-ids $LEGACY_ASG_RESOURCE_IDS --query 'length(ScalableTargets)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_ASG_RESOURCE_IDS")" scalable_targets
   chk legacy-mgmt-instance count_eq "$(aws_legacy ec2 describe-instances --instance-ids "$LEGACY_MGMT_INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)" running state
   chk legacy-pub-lb count_eq "$(aws_legacy elbv2 describe-load-balancers --load-balancer-arns "$LEGACY_PUB_LB_ARN" --query 'length(LoadBalancers)' 2>/dev/null)" 1 load_balancers
-  in_window target-nlb "the mail load balancer opens in the window; then run build-cutover-env.sh --rebuild" nlb_live
+  chk target-nlb nlb_live
   chk argo-apps count_eq "$(khub -n argocd get application $ARGO_APPS -o name 2>/dev/null | grep -c .)" "$(wc -w <<<"$ARGO_APPS")" applications
   chk kargo-stage-accounts khub -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o name
-  in_window kargo-stage-configs "created by the Kargo stage PR merged in the window" khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
-  in_window kargo-warehouse-configs "created by the Kargo stage PR merged in the window" khub -n "$KARGO_PROJECT_CONFIGS" get warehouse "$KARGO_WAREHOUSE_CONFIGS" -o name
+  chk kargo-stage-configs khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
+  chk kargo-warehouse-configs khub -n "$KARGO_PROJECT_CONFIGS" get warehouse "$KARGO_WAREHOUSE_CONFIGS" -o name
   stage_chk cf-token-shared-scope shared_scope
   chk cf-token-agent agent_token
   stage_chk spf-final-txt spf_final

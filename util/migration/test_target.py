@@ -251,7 +251,7 @@ class Builder(Sandbox):
         self.assertIn("WINDOW_SHA='%s'" % head, text)
         self.assertNotIn('REHEARSAL', text)
         self.assertIn("INBOUND_TTL_WAIT='60'", text)
-        self.assertIn("NEON_BRANCH_KC='main'", text)
+        self.assertIn("NEON_BRANCH_KC=''", text)
         self.assertEqual(oct((self.t / 'shm' / 'cutover.env').stat().st_mode & 0o777), '0o600')
 
     def test_prod_refuses_an_open_window_without_rebuild(self):
@@ -292,9 +292,6 @@ class Builder(Sandbox):
             'legacy-url-loopback',
             'stalwart-legacy-healthz',
             'stalwart-target-healthz',
-            'target-nlb',
-            'kargo-stage-configs',
-            'kargo-warehouse-configs',
         ):
             self.assertRegex(out, r'(?m)^WAIT  %s +\S' % re.escape(name))
             self.assertNotRegex(out, r'(?m)^(PASS|FAIL)  %s ' % re.escape(name))

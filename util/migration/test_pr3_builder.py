@@ -343,6 +343,50 @@ class OperatorValues(Base):
         ):
             self.assertRegex(out, r'(?m)^(PASS|FAIL)  %s ' % re.escape(name))
 
+    def test_prod_check_reads_the_load_balancer_and_the_kargo_configs_stage(self):
+        self.build(**self.prod())
+        self.rules(
+            [
+                {'tool': 'kubectl', 'match': 'get stage %s -o name' % STAGE, 'out': 'stage/s'},
+                {'tool': 'kubectl', 'match': 'get warehouse \\S+ -o name', 'out': 'warehouse/w'},
+            ]
+        )
+        rc, out = self.run_sh(
+            [str(HERE / 'build-cutover-env.sh'), '--check'],
+            TIMING_TSV=str(self.t / 'ev' / 'timing.tsv'),
+            TARGET_ENV='tb-prod',
+        )
+        self.assertRegex(out, r'(?m)^PASS  kargo-stage-configs +stage/s$')
+        self.assertRegex(out, r'(?m)^PASS  kargo-warehouse-configs +warehouse/w$')
+        self.assertRegex(out, r'(?m)^FAIL  target-nlb +env=.* live=none state=none')
+        self.assertNotRegex(out, r'(?m)^WAIT  (target-nlb|kargo-)')
+
+    def test_prod_neon_branches_are_each_project_default(self):
+        home = self.t / 'home'
+        (home / '.neon-api.env').write_text('NEON_API_KEY=neon-key-1\n')
+        (home / '.neon-api.env').chmod(0o600)
+        neon = re.escape('https://console.neon.tech/api/v2/projects/')
+        branches = {
+            'pkc': [{'name': 'kc-main', 'default': True}, {'name': 'x', 'default': False}],
+            'pacc': [{'name': 'old', 'default': False}, {'name': 'acc-prod', 'default': True}],
+        }
+        rules = stage_rules(ecs='accounts-prod') + [
+            {'tool': 'curl', 'match': neon + '%s/branches$' % p, 'out': json.dumps({'branches': b})}
+            for p, b in branches.items()
+        ]
+        self.build(rules=rules, **self.prod(NEON_PROJECT_KC='pkc', NEON_PROJECT_ACCOUNTS='pacc'))
+        text = self.text()
+        self.assertIn("NEON_BRANCH_KC='kc-main'", text)
+        self.assertIn("NEON_BRANCH_ACCOUNTS='acc-prod'", text)
+        self.build(
+            rules=rules,
+            **self.prod(
+                NEON_PROJECT_KC='pkc', NEON_PROJECT_ACCOUNTS='pacc', NEON_BRANCH_KC='chosen'
+            ),
+        )
+        self.assertIn("NEON_BRANCH_KC='chosen'", self.text())
+        self.assertNotIn('neon-key-1', self.text())
+
 
 class EnvLock(Base):
     def test_the_builder_waits_for_a_writer_and_keeps_its_append(self):
@@ -626,6 +670,11 @@ class ProdBuildBeforeTheWindow(Base):
             },
             {
                 'tool': 'curl',
+                'match': re.escape(neon + 'projects/p1/branches') + '$',
+                'out': json.dumps({'branches': [{'name': 'production', 'default': True}]}),
+            },
+            {
+                'tool': 'curl',
                 'match': 'zones[?]name=',
                 'out': json.dumps({'result': [{'id': 'z1'}]}),
             },
@@ -684,6 +733,7 @@ class ProdBuildBeforeTheWindow(Base):
             self.assertRegex(out, r'(?m)^%s +len=0 unset \(not written' % name)
         text = self.text()
         self.assertIn("TARGET_NLB_DNS='nlb.example.test'", text)
+        self.assertIn("NEON_BRANCH_KC='production'", text)
         self.assertNotIn('neon-key-1', out)
 
 
