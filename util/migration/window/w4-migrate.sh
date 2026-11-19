@@ -344,18 +344,10 @@ domain_fix_step() {
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
   grep '^warning: ' "$S/domain-fix.txt" > "$S/domain-fixed.txt" || true
-  VALUE=$(grep -c . "$S/domain-fixed.txt" || true)
-  echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature ($S/domain-fixed.txt)"
+  VALUE=$(grep -cE '^warning: dropping (Domain|DkimSignature) ' "$S/domain-fixed.txt" || true)
+  echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature; $(grep -c '^warning: not restoring the catch-all ' "$S/domain-fixed.txt" || true) catch-all(s) not restored ($S/domain-fixed.txt)"
 }
 
-keep_copy() {
-  local out rc=0
-  out=$(bash "$MIG_DIR/window/keep.sh" save "$(apply_flag)" 2>&1) || rc=$?
-  grep -E '^(kept|keep:|NEED|KEEP_GPG_RECIPIENT|gpg|STOP)' <<<"$out" || true
-  [ "$APPLY" = 1 ] || { grep -q '^NEED' <<<"$out" && NEEDS=$((NEEDS + 1)); return 0; }
-  VALUE=$(sed -n 's/^keep: \([0-9]*\) file.*/\1/p' <<<"$out")
-  [ "$rc" = 0 ]
-}
 
 read_done() {
   [ -s "$S/export.json" ] || { echo "no $S/export.json"; return 1; }
@@ -388,7 +380,6 @@ read_phase() {
     step retarget "" retarget
     [ "$APPLY" = 0 ] || mark w4-export sha256 "$(sha256sum "$S/export.json" | cut -d' ' -f1)"
   fi
-  step keep files keep_copy
   step queue-drain queued queue_drain
   [ "$APPLY" = 0 ] || step read-done "" read_done
 }
@@ -493,13 +484,14 @@ schema_before() {
 }
 
 auth_failed() { grep -q 'password authentication failed' <<<"$1" && grep -q '^rc=[1-9]' <<<"$1"; }
+read_only_refused() { grep -q 'in a read-only transaction' <<<"$1" && grep -q '^rc=[1-9]' <<<"$1"; }
 
 guard() {
   local hosts parent branch out pw
   printf '  + %s hosts --branch %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH"
   printf '  + runner: %s -c %s (cutover branch login through .pgpass)\n' "$(shq "${TPSQL[@]}")" "'select 1'"
   printf '  + runner: the same credential against the production endpoint: pass only on password authentication failed\n'
-  printf '  + runner: the %s credential: login on its host, then password authentication failed on production\n' "$SOURCE_BRANCH"
+  printf '  + runner: the %s credential: login on its host, a write there refused as read-only (in a rolled-back transaction), then password authentication failed on production\n' "$SOURCE_BRANCH"
   [ "$APPLY" = 1 ] || return 0
   hosts=$("${NB[@]}" hosts --branch "$CUTOVER_BRANCH") || { printf '%s\n' "$hosts"; return 1; }
   parent=$(sed -n 's/^parent_host=//p' <<<"$hosts") branch=$(sed -n 's/^branch_host=//p' <<<"$hosts")
@@ -521,6 +513,9 @@ guard() {
     else
       [ "$(head -1 <<<"$out")" = 1 ] && grep -qx 'rc=0' <<<"$out" || { echo "$SOURCE_BRANCH login failed: $(grep -v '^rc=' <<<"$out" | tail -1)"; return 1; }
       echo "$SOURCE_BRANCH login: ok"
+      out=$(printf '%s\n' "$pw" | "${POD[@]}" sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; psql -h "$1" -U "$2" -d "$3" -Atc "begin; create table w4_guard_probe (i int); rollback" 2>&1; echo "rc=$?"' sh "$h" "$STALWART_SOURCE_PG_USER" "$STALWART_SOURCE_PG_DB")
+      read_only_refused "$out" || { echo "GUARD FAILED: $SOURCE_BRANCH did not refuse a write as read-only: $(grep -v '^rc=' <<<"$out" | tail -1) ($(grep '^rc=' <<<"$out"))"; return 1; }
+      echo "$SOURCE_BRANCH refuses a write: read-only transaction"
     fi
   done
   mark guard result pass
@@ -608,7 +603,6 @@ reset_phase() {
   fi
   step neon-reset reset_at neon_reset
   step source-branch-create created_at source_branch
-  step keep-source files keep_copy
   step branch-check parent_lsn branch_check
   step schema-before schema schema_before
   step guard-check "" guard
@@ -627,11 +621,11 @@ prod_main() {
   case "$PHASE" in
     read)
       GATE_ID=go-W4-read prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh window/keep.sh gpg "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh "$PY"
       read_phase ;;
     reset|boot)
       GATE_ID=go-W4-reset prereqs
-      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env window/keep.sh gpg stalwart-cli python3 "$PY"
+      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
       need_recovery_pr
       if [ "$PHASE" = reset ]; then reset_phase; else [ "$APPLY" = 0 ] || boot_resume || stop "--phase boot has nothing to resume"; fi
       boot_phase ;;
@@ -639,7 +633,7 @@ prod_main() {
       [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
       GATE_ID=go-W4-read prereqs
       GATE_ID=go-W4-reset prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env window/keep.sh gpg stalwart-cli python3 "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
       need_recovery_pr
       read_phase
       reset_phase

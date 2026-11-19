@@ -64,10 +64,13 @@ def last_rows(progress):
 
 def replay(piece, batch, d):
     bd = d if piece == 'buckets' else d / batch
+    print(f'== piece {piece} batch {batch}: passed in an earlier run, its report again')
     for check in PIECES[piece]:
         out = bd / f'check-{check[:-3]}.txt'
         if out.exists():
+            sys.stdout.write(out.read_text())
             shutil.copy(out, f'{OUT}/check-{piece}-{batch}-{check[:-3]}.txt')
+    sys.stdout.flush()
 
 
 def run_batch(piece, batch, d, resume):

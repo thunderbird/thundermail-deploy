@@ -2,11 +2,13 @@
 set -euo pipefail
 MODE=build
 REBUILD=0
+MOVE_SHA=0
 for a in "$@"; do
   case "$a" in
     --check) MODE=check ;;
     --rebuild) REBUILD=1 ;;
-    -h|--help) echo 'usage: TARGET_ENV=<env> build-cutover-env.sh [--check | --rebuild]'; exit 0 ;;
+    --move-window-sha) MOVE_SHA=1 ;;
+    -h|--help) echo 'usage: TARGET_ENV=<env> build-cutover-env.sh [--check | --rebuild [--move-window-sha]]'; exit 0 ;;
     *) echo "unknown argument: $a" >&2; exit 2 ;;
   esac
 done
@@ -31,7 +33,7 @@ PROD_OPERATOR_REQUIRED="TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_US
 PREV_IGNORED=0
 if [ "$TARGET_ENV" = tb-prod ]; then
   SECRET_VARS=${SECRET_VARS/ STALWART_LEGACY_PG_PASSWORD/}
-  WINDOW_OPERATOR_VARS="${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/} KEEP_GPG_RECIPIENT"
+  WINDOW_OPERATOR_VARS=${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/}
 fi
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -133,11 +135,12 @@ held_replicas() {
   [ "$got" = "$want" ] && echo "#$pr head renders $name replicas=$got" || { echo "#$pr head renders $name replicas=${got:-none}, env file has $want"; return 1; }
 }
 window_vars() {
-  local app m alb ids vpc kcd=${KCD_DIR:-$HOME/src/tb/keycloak-customer-deploy} acd=${ACD_DIR:-$HOME/src/tb/accounts-deploy} v
+  local app m alb h ids vpc kcd=${KCD_DIR:-$HOME/src/tb/keycloak-customer-deploy} acd=${ACD_DIR:-$HOME/src/tb/accounts-deploy} v
   put TARGET_NLB_IPS "$([ -n "$nlb" ] && try doh_a "$nlb")" "DoH A records of TARGET_NLB_DNS at 1.1.1.1 (every address of the mail load balancer)"
   for app in keycloak-customer:AUTH accounts:ACCOUNTS; do
-    alb=$(try ktarget -n "${app%%:*}" get ingress -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
-    put "TBPROD_${app##*:}_ALB" "$alb" "kubectl -n ${app%%:*} get ingress .items[0].status.loadBalancer.ingress[0].hostname"
+    h=${app##*:}_HOST; h=${!h}
+    alb=$(try ktarget -n "${app%%:*}" get ingress -o json | jq -r --arg h "$h" '[.items[] | select(any(.spec.rules[]?; .host == $h)) | .status.loadBalancer.ingress[0].hostname // empty][0] // empty')
+    put "TBPROD_${app##*:}_ALB" "$alb" "kubectl -n ${app%%:*} get ingress: load balancer of the Ingress with a rule for host $h"
     put "TBPROD_${app##*:}_ALB_IP" "$([ -n "$alb" ] && try doh_a "$alb")" "DoH A records of TBPROD_${app##*:}_ALB at 1.1.1.1"
   done
   put KEYCLOAK_REPLICAS "$(try render_ref "$kcd" "origin/$IDENTITY_ENV_BRANCH" "$IDENTITY_OVERLAY" StatefulSet keycloak-customer)" "kubectl kustomize of $IDENTITY_OVERLAY at origin/$IDENTITY_ENV_BRANCH in KCD_DIR, StatefulSet keycloak-customer .spec.replicas"
@@ -155,13 +158,13 @@ window_vars() {
   put NEON_PROJECT_STALWART_TARGET "$(op NEON_PROJECT_STALWART_TARGET)$([ -n "$(op NEON_PROJECT_STALWART_TARGET)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_TARGET in the environment, else Neon API: project whose endpoint id is the STALWART_TARGET_PG_HOST prefix"
   v=$(op NEON_BRANCH_KC); [ -n "$v" ] || v=$(neon_default_branch KC "${NEON_PROJECT_KC_ID:-}"); put NEON_BRANCH_KC "$v" "NEON_BRANCH_KC in the environment, else Neon API: the default branch of NEON_PROJECT_KC"
   v=$(op NEON_BRANCH_ACCOUNTS); [ -n "$v" ] || v=$(neon_default_branch ACCOUNTS "${NEON_PROJECT_ACCOUNTS_ID:-}"); put NEON_BRANCH_ACCOUNTS "$v" "NEON_BRANCH_ACCOUNTS in the environment, else Neon API: the default branch of NEON_PROJECT_ACCOUNTS"
-  ids=$(try aws_legacy ec2 describe-instances --filters "Name=tag:Name,Values=$LEGACY_NODE_NAME_FILTER" Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | grep . | sort | tr '\n' ' ' | sed 's/ $//')
+  ids=$(try aws_legacy ec2 describe-instances --filters "Name=tag:Name,Values=$LEGACY_NODE_NAME_FILTER" Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | { grep . || true; } | sort | tr '\n' ' ' | sed 's/ $//')
   [ "$(wc -w <<<"$ids")" = "$LEGACY_NODE_COUNT" ] || ids=""
   put LEGACY_STALWART_NODE_IDS "$ids" "aws ec2 describe-instances --profile $LEGACY_AWS_PROFILE Name=$LEGACY_NODE_NAME_FILTER running; empty unless exactly $LEGACY_NODE_COUNT"
   put LEGACY_PG_SECRET_NAME "$LEGACY_PG_SECRET_NAME" "targets/$TARGET_ENV.sh"
   v=$(opw INBOUND_TTL_WAIT); put INBOUND_TTL_WAIT "${v:-60}" "INBOUND_TTL_WAIT appended in the window, else 60 (the inbound record TTL of #1726)"
-  v=""; [ "$REBUILD" != 1 ] || { v=$(prev WINDOW_SHA); [ -n "$v" ] || v=$(window_values WINDOW_SHA); }
-  put WINDOW_SHA "${v:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)}" "--rebuild: WINDOW_SHA of the previous file or window-values.tsv; else git rev-parse HEAD of TMD_CHECKOUT"
+  v=""; [ "$REBUILD" != 1 ] || [ "$MOVE_SHA" = 1 ] || { v=$(prev WINDOW_SHA); [ -n "$v" ] || v=$(window_values WINDOW_SHA); }
+  put WINDOW_SHA "${v:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)}" "--rebuild: WINDOW_SHA of the previous file or window-values.tsv (--move-window-sha: HEAD); else git rev-parse HEAD of TMD_CHECKOUT"
   put TMD_CHECKOUT "$REPO_DIR" "the thundermail-deploy checkout this builder runs from"
   put CUTOVER_ENV "$ENV_FILE" "this file"
   for v in $WINDOW_OPERATOR_VARS $(compgen -v W4_WAIT_ || true); do
@@ -317,7 +320,8 @@ build() {
   local tsv; tsv=$(op TIMING_TSV)
   [ "$TARGET_ENV" != tb-prod ] || case "$tsv" in "$EVIDENCE_DIR"/*) ;; *) tsv="" ;; esac
   put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
-  put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"
+  if [ "$TARGET_ENV" = tb-prod ]; then put SECRET_DIR "$SECRET_DIR" "directory for secret artifacts on disk (mode 700, files 600), kept over a reboot; deleted after the cutover (W8)"
+  else put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"; fi
   for side in "LEG:$LEGACY_AWS_PROFILE" "TGT:$TARGET_AWS_PROFILE"; do
     local p=${side%%:*}
     put "RCLONE_CONFIG_${p}_TYPE" s3 rclone
@@ -347,12 +351,6 @@ build() {
   mv "$tmp" "$ENV_FILE"
   exec 9>&-
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
-  if [ "$TARGET_ENV" = tb-prod ] && [ -s "$EVIDENCE_DIR/keep/manifest.tsv" ]; then
-    local f
-    while IFS=$'\t' read -r f _; do
-      [ -z "$f" ] || [ -s "$SECRET_DIR/$f" ] || printf '%s is missing from %s: bash %s/window/keep.sh restore --apply, then build-cutover-env.sh --rebuild again\n' "$f" "$SECRET_DIR" "$MIG_DIR"
-    done < "$EVIDENCE_DIR/keep/manifest.tsv"
-  fi
   old=$HOME/.local/state/talos/cutover-$TARGET_ENV.env
   [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
   [ "$missing" = 0 ]

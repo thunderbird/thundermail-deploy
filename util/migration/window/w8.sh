@@ -164,5 +164,6 @@ step accounts-ci-off state accounts_ci_off
 step thaw "" thaw
 step kargo-verify "" kargo_verify
 step accounts-ci-verify state accounts_ci_verify
-printf 'after #1577 signs off: rm -rf %s %s\n' "$SECRET_DIR" "$ENV_FILE"
+if [ "$TARGET_ENV" = tb-prod ]; then printf 'after #1577 signs off: rm -rf %s %s (the secret directories of every attempt, on disk)\n' "$(secret_root)" "$ENV_FILE"
+else printf 'after #1577 signs off: rm -rf %s %s\n' "$SECRET_DIR" "$ENV_FILE"; fi
 finish

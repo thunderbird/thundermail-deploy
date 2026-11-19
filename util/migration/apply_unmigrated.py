@@ -142,7 +142,7 @@ def plan(s):
     return out
 
 
-def catch_alls(principals_path):
+def catch_alls(principals_path, dropped=frozenset(), skipped=None):
     """v0.15 catch-alls: an account address of the form `@domain`. Returns {domain: owner's primary address}.
     `convert` drops them; in 0.16 a catch-all is the Domain's catchAllAddress."""
     p = json.load(open(principals_path))
@@ -156,6 +156,10 @@ def catch_alls(principals_path):
         for e in emails:
             if e.startswith("@"):
                 d = e[1:]
+                if norm_domain(d) in dropped:
+                    if skipped is not None:
+                        skipped.append(d)
+                    continue
                 if d in out and out[d] != primary:
                     sys.exit(f"catch-all @{d} is claimed by both {out[d]} and {primary}; fix it in v0.15 first")
                 out[d] = primary
@@ -269,11 +273,8 @@ def main():
         if a.dropped_domains:
             with open(a.dropped_domains, encoding="utf-8") as fh:
                 dropped = {norm_domain(x) for x in json.load(fh)["domains"]}
-        skipped = 0
-        for dom, addr in sorted(catch_alls(a.principals).items()):
-            if norm_domain(dom) in dropped:
-                skipped += 1
-                continue
+        left_out = []
+        for dom, addr in sorted(catch_alls(a.principals, dropped, left_out).items()):
             d = domains.get(norm_domain(dom))
             if not d:
                 failures += 1
@@ -290,7 +291,7 @@ def main():
                     print(f"    FAILED: {r.get('notUpdated') or 'not in updated'}")
 
     if a.principals and wanted("Domain", only, a.skip) and a.dropped_domains:
-        print(f"  skip   catch-alls on Domains dropped before the apply (domain_fix.py): {skipped}")
+        print(f"  skip   catch-alls on Domains dropped before the apply (domain_fix.py): {len(left_out)}")
 
     if a.apply:
         for obj, items in creates.items():

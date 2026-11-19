@@ -61,6 +61,16 @@ class Gate(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn('a read phase started at z after the last w4-read-done row', out)
 
+    def test_no_gate_passes_without_a_cut_ecs_row(self):
+        q0 = ('queue-drain', '2026-11-19T04:40:00Z', 'queued', '0')
+        done = ('w4-read-done', '2026-11-19T04:41:00Z', 'export', 'x')
+        rc, out = self.gate('stop-legacy', [q0, done])
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(
+            out,
+            r'^WAIT  stop-legacy: no cut-ecs row in \S+timing.tsv: W2 has not cut legacy in this attempt\n$',
+        )
+
     def test_merge_recovery_passes_again_after_a_timeout_and_a_resume(self):
         base = [
             CUT,
@@ -289,90 +299,62 @@ class StaleRuleIds(Prod):
         self.assertIn('rc=1', out)
 
 
-GPG = r"""#!{py}
-import base64, os, sys
-a = sys.argv[1:]
-open(os.environ['FAKE_LOG'], 'a').write('gpg ' + ' '.join(a) + '\n')
-out, src = a[a.index('--output') + 1], a[-1]
-data = open(src, 'rb').read()
-if '--encrypt' in a:
-    rcpt = a[a.index('--recipient') + 1]
-    open(out, 'wb').write(b'ENC ' + rcpt.encode() + b' ' + base64.b64encode(data))
-elif '--decrypt' in a:
-    open(out, 'wb').write(base64.b64decode(data.split(b' ', 2)[2]))
-"""
-
-
-class Keep(Prod):
-    def setUp(self):
-        super().setUp()
-        (self.t / 'bin' / 'gpg').write_text(GPG.format(py=sys.executable))
-        (self.t / 'bin' / 'gpg').chmod(0o755)
-        self.s = self.t / 'secret'
-        self.s.mkdir(mode=0o700)
-        (self.s / 'export.json').write_text('{"secret": "dkim-private-key"}\n')
-        (self.s / 'source-branch.env').write_text('STALWART_SOURCE_PG_PASSWORD=pw-9\n')
-
-    def keep(self, mode, recipient='ops@example.test', apply=1):
-        setup = (
-            'KEEP_DIR=%s/ev/keep KEEP_GPG_RECIPIENT=%s APPLY=%d\n'
-            'KEEP_FILES="export.json principals.json source-branch.env"\n'
-            'GPG=(gpg --batch --yes --quiet)\n' % (self.t, recipient, apply)
+class SecretDir(unittest.TestCase):
+    def sh(self, env_name, secret=None, home=None):
+        home = home or pathlib.Path(tempfile.mkdtemp())
+        env = {
+            'PATH': '/usr/bin:/bin',
+            'HOME': str(home),
+            'TARGET_ENV': env_name,
+            'CUTOVER_ENV': str(home / 'none.env'),
+            'EVIDENCE_DIR': str(home / 'ev'),
+        }
+        if secret is not None:
+            env['SECRET_DIR'] = str(secret)
+        p = subprocess.run(
+            ['bash', '-c', '. "$1/lib.sh"; printf "secret=%s\\n" "$SECRET_DIR"', 'x', str(HERE)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
         )
-        return self.fn(
-            'keep.sh', '%s; echo "rc=$? NEEDS=$NEEDS"' % mode, setup, env=self.env(TARGET_ENV='tb-prod')
-        )
+        return p.returncode, p.stdout + p.stderr, home
 
-    def test_save_encrypts_and_restore_puts_back_after_a_reboot(self):
-        out = self.keep('save')
-        self.assertIn('keep: 2 file(s) of', out)
-        self.assertIn('rc=0', out)
-        k = self.t / 'ev' / 'keep'
-        self.assertEqual(sorted(x.name for x in k.iterdir()), ['export.json.gpg', 'manifest.tsv', 'source-branch.env.gpg'])
-        for f in k.iterdir():
-            self.assertNotIn(b'dkim-private-key', f.read_bytes())
-            self.assertNotIn(b'pw-9', f.read_bytes())
-            self.assertEqual(oct(f.stat().st_mode & 0o777), '0o600')
-        for f in list(self.s.iterdir()):
-            f.unlink()
-        out = self.keep('restore')
-        self.assertIn('restored export.json', out)
-        self.assertIn('restored source-branch.env', out)
-        self.assertEqual((self.s / 'export.json').read_text(), '{"secret": "dkim-private-key"}\n')
-        self.assertEqual(oct((self.s / 'export.json').stat().st_mode & 0o777), '0o600')
-        out = self.keep('restore')
-        self.assertIn('present export.json', out)
-        (self.s / 'source-branch.env').write_text('STALWART_SOURCE_PG_PASSWORD=newer\n')
-        out = self.keep('restore')
-        self.assertIn('kept source-branch.env differs from the file in', out)
-        self.assertEqual((self.s / 'source-branch.env').read_text(), 'STALWART_SOURCE_PG_PASSWORD=newer\n')
+    def test_tb_prod_keeps_its_secret_files_on_disk(self):
+        rc, out, home = self.sh('tb-prod')
+        self.assertEqual(rc, 0, out)
+        want = home / '.local' / 'state' / 'talos' / 'cutover-tb-prod-secret' / 'attempt-1'
+        self.assertEqual(out, 'secret=%s\n' % want)
+        rc, out, _ = self.sh('tb-stage')
+        self.assertEqual(out, 'secret=/dev/shm/talos/cutover-tb-stage/secret-artifacts\n')
 
-    def test_a_tampered_copy_is_not_restored(self):
-        self.keep('save')
-        (self.s / 'export.json').unlink()
-        (self.t / 'ev' / 'keep' / 'export.json.gpg').write_bytes(b'ENC x ' + __import__('base64').b64encode(b'other'))
-        out = self.keep('restore')
-        self.assertIn('export.json: sha256 ', out)
-        self.assertIn('rc=1', out)
-        self.assertFalse((self.s / 'export.json').exists())
+    def test_tb_prod_refuses_a_secret_directory_open_to_others(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        (d / 'export.json').write_text('{}')
+        (d / 'export.json').chmod(0o600)
+        rc, out, _ = self.sh('tb-prod', d)
+        self.assertEqual(rc, 0, out)
+        for path, mode in ((d / 'export.json', 0o644), (d, 0o750)):
+            with self.subTest(path=path.name, mode=oct(mode)):
+                path.chmod(mode)
+                rc, out, _ = self.sh('tb-prod', d)
+                self.assertEqual(rc, 1, out)
+                self.assertIn(
+                    'refusing: %s, or a file in it, is a symlink, not owned by ' % d, out
+                )
+                self.assertIn('open to group or others (want the directory 700 and its files 600)', out)
+                path.chmod(0o600 if path.is_file() else 0o700)
+        (d / 'export.json').chmod(0o644)
+        rc, out, _ = self.sh('tb-stage', d)
+        self.assertEqual(rc, 0, out)
 
-    def test_no_recipient_is_a_need_in_the_dry_run_and_a_stop_on_apply(self):
-        out = self.keep('save', recipient='', apply=0)
-        self.assertIn('NEED  KEEP_GPG_RECIPIENT for the encrypted copies of', out)
-        self.assertIn('rc=0 NEEDS=1', out)
-        out = self.keep('save', recipient='')
-        self.assertIn('rc=1', out)
-        self.assertFalse((self.t / 'ev' / 'keep').exists())
-
-    def test_the_read_phase_keeps_the_export(self):
-        text = (HERE / 'window' / 'w4-migrate.sh').read_text()
-        body = text[text.index('read_phase() {') :]
-        body = body[: body.index('\n}\n')]
-        self.assertLess(body.index('mark w4-export sha256'), body.index('step keep files keep_copy'))
-        reset = text[text.index('reset_phase() {') :]
-        self.assertLess(
-            reset.index('step source-branch-create'), reset.index('step keep-source files keep_copy')
-        )
+    def test_no_gpg_and_no_keep_step_is_left(self):
+        self.assertFalse((HERE / 'window' / 'keep.sh').exists())
+        for rel in ('window/w4-migrate.sh', 'build-cutover-env.sh', 'check-prereqs.sh'):
+            text = (HERE / rel).read_text()
+            self.assertNotIn('gpg', text, rel)
+            self.assertNotIn('KEEP_GPG_RECIPIENT', text, rel)
+            self.assertNotIn('keep.sh', text, rel)
 
 
 def git(repo, *args):
@@ -442,6 +424,21 @@ class FreightFor(Harness):
         self.assertIn('rc=0 FREIGHT_FOUND=f-new', out)
         script = (HERE / 'window' / 'freight-for.sh').read_text()
         self.assertIn('step freight-for freight match', script)
+        out = self.fn(
+            'freight-for.sh',
+            'step freight-for freight match; finish; last_lines',
+            'PATH=%s:$PATH REPO_DIR=%s TMD_URL=%s PREVIEW_BRANCH=env/tb-prod-thundermail-stalwart-configs-preview '
+            'CFG_PATHS="overlays/tb-prod/stalwart-configs bases/stalwart-configs" SHA=%s '
+            'KARGO_PROJECT_CONFIGS=tb-stalwart-configs KARGO_WAREHOUSE_CONFIGS=deploy-thundermail-tb-prod01-git'
+            % (self.t / 'gitbin', clone, r, merge),
+            rules=rules[:1],
+        )
+        self.assertIn('   freight-for done (freight=f-new)', out)
+        self.assertEqual(
+            out.rstrip().splitlines()[-2:],
+            ['Freight f-new (preview commit %s) matches %s' % (preview, merge), 'f-new'],
+            out,
+        )
         p = subprocess.run(
             ['bash', str(HERE / 'window' / 'freight-for.sh'), 'nope'],
             capture_output=True,

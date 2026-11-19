@@ -22,8 +22,8 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   `start`, `checks`, `presync`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
   block per id. `start` holds only the rows that can pass before the first window step. It reads
   values from the env file first, then the environment, and never prints a value.
-- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
-  `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
+- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a call
+  other than `kubectl kustomize` has no `--kubeconfig`, when the value is empty, names a missing file or names the other environment's cluster,
   or when a flag picks another cluster or credential (`--context`, `--cluster`, `--server`, `--user`,
   `--token`, `--as`, the client certificate and TLS flags), so no script falls back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
   cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
@@ -37,11 +37,14 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV; it
   moves its own snapshots into `env-check/` so rollback never picks them. On tb-prod it prints
   `WAIT` (not a failure) for rows whose object only exists in the window (runner pod, SSM tunnel,
-  Stalwart, the mail load balancer, the Kargo configs stage) and skips the tb-stage-only rows.
+  Stalwart, the mail load balancer) and skips the tb-stage-only rows.
 - The tb-prod build writes `TMD_CHECKOUT` (the checkout it runs from), `WINDOW_SHA` (its `HEAD`;
   `--rebuild` keeps the recorded value) and `STALWART_URL=http://localhost:18081`, as tb-stage
-  does; `LANE_PF_PORT` replaces the port. The env file is built before the mail load balancer
-  exists, so `TARGET_NLB_DNS` is empty until `build-cutover-env.sh --rebuild` runs after it does.
+  does; `LANE_PF_PORT` replaces the port. After a tooling fix is checked out in the window,
+  `build-cutover-env.sh --rebuild --move-window-sha` sets `WINDOW_SHA` to the new `HEAD`. Before the
+  mail load balancer exists `TARGET_NLB_DNS` is empty; `build-cutover-env.sh --rebuild` fills it
+  once it does. `TBPROD_AUTH_ALB` and `TBPROD_ACCOUNTS_ALB` come from the Ingress with a rule
+  for `AUTH_HOST` or `ACCOUNTS_HOST`.
 - The Cloudflare token is `CF_API_TOKEN_AGENT` from `CF_TOKEN_FILE` (`~/.prod-cloudflare.env` for
   tb-prod, `~/.cloudflare.env` for tb-stage).
 - Restore scripts are dry-run by default and print what they would change; `--apply`
@@ -280,10 +283,12 @@ the keying for the real hosts.
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
   `STALWART_SOURCE_PG_*` of the env file, created at the `parent_lsn` the reset returned (row
   `reset-lsn`), so a `production` that moves between the two calls does not stop a good reset;
-  the reset proof fails when `parent_lsn` did not change. It then checks that both branches are
+  the reset proof fails when `parent_lsn` did not change. Neon resets a role password only on a
+  branch with a read-write endpoint, so the branch is created with one, the password is reset, a
+  read-only endpoint is added and the read-write endpoint is deleted. It then checks that both branches are
   `ready`, later than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
-  credentials log in on their branch, and the production endpoint answers `password
-  authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
+  credentials log in on their branch, the source branch refuses a write as read-only, and the
+  production endpoint answers `password authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
   boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
   recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
@@ -319,13 +324,13 @@ the keying for the real hosts.
   failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
   `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
   `verify-compare` wants both rows at 0 and no later `stop-W6`.
-- `window/keep.sh save` encrypts the files of `$SECRET_DIR` that a reboot would lose
-  (`export.json`, `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
-  `duplicates.txt`, `source-branch.env`) with gpg for `KEEP_GPG_RECIPIENT` (operator file) into
-  `$EVIDENCE_DIR/keep/` with a sha256 manifest; W4 runs it in every read phase, a rerun that
-  reuses the export too, and after the source branch. After a reboot: `build-cutover-env.sh --rebuild` (it names each kept file that is
-  missing), `window/keep.sh restore --apply` (gpg asks for the key), `--rebuild` again, which takes
-  `STALWART_SOURCE_PG_*` from the restored `source-branch.env`.
+- On tb-prod `$SECRET_DIR` is on disk, not tmpfs: `~/.local/state/talos/cutover-tb-prod-secret/attempt-<n>`
+  (mode 700, files 600 under umask 077), so a reboot loses none of `export.json`,
+  `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
+  `duplicates.txt`, `source-branch.env` or `apply.log`, and `--rebuild` finds them where they are
+  (it takes `STALWART_SOURCE_PG_*` from `source-branch.env`). Every script refuses a secret
+  directory, or a file in it, that is a symlink, not the operator's, or open to group or others.
+  W8 prints the delete for after #1577 signs off: `rm -rf ~/.local/state/talos/cutover-tb-prod-secret <env file>`.
 - `verify/02_directory.py` reads `DROPPED_DOMAINS` (`$SECRET_DIR/domains-dropped.json`, written by
   `domain_fix.py --dropped-list`): it leaves exactly those Domains out of the source set, prints
   their count, and compares the DkimSignature count of tb-prod with the export after the drop

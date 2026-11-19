@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -13,9 +14,11 @@ Sandbox = importlib.import_module('test_target').Sandbox
 Harness = importlib.import_module('test_window').Harness
 
 HERE = pathlib.Path(__file__).resolve().parent
+os.umask(0o077)
 KUBE = r"""#!{py}
 import json, os, re, sys
 AUTH = 'psql: error: FATAL:  password authentication failed for user "o"' + chr(10) + 'rc=2'
+RO = 'ERROR:  cannot execute CREATE TABLE in a read-only transaction' + chr(10) + 'rc=1'
 args = sys.argv[1:]
 a = ' '.join(args)
 open(os.environ['FAKE_LOG'], 'a').write('kubectl ' + a + '\n')
@@ -62,7 +65,9 @@ elif ' exec -i runner -c postgres -- sh -c ' in ' ' + a + ' ':
     elif 'read -r PGPASSWORD' in script:
         pw = sys.stdin.readline().rstrip('\n')
         st.setdefault('seen_pw', []).append(pw)
-        if host == st.get('source_host'):
+        if 'create table' in script:
+            out = st.get('source_write', RO)
+        elif host == st.get('source_host'):
             out = st.get('source_login', '1\nrc=0')
         else:
             out = st.get('prod_source', AUTH)
@@ -145,7 +150,7 @@ class Prod(Harness):
         super().setUp()
         b = self.t / 'bin'
         b.mkdir()
-        for name, src in (('kubectl', KUBE), ('nb', NB), ('gpg', '#!/bin/sh\nexit 0\n')):
+        for name, src in (('kubectl', KUBE), ('nb', NB)):
             (b / name).write_text(src.format(py=sys.executable))
             (b / name).chmod(0o755)
         if shutil.which('yq'):
@@ -223,7 +228,7 @@ class ReadPhase(Prod):
     BODY = (
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
-        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }; keep_copy() { echo KEEP; }\n'
+        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
@@ -239,7 +244,7 @@ class ReadPhase(Prod):
         self.assertIn('w4-read-done', names)
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
         self.assertIn('reusing the export of this cut', out)
-        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['KEEP', 'QUEUE'])
+        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['QUEUE'])
         self.assertEqual([r[0] for r in self.timing()].count('w4-read-start'), 2)
         out = self.w4(self.BODY + 'queue_drain() { echo QUEUE; return 1; }\nread_phase')
         gate = subprocess.run(
@@ -376,7 +381,18 @@ class ResetPhase(Prod):
     def test_the_guard_passes_only_on_password_authentication_failed(self):
         out = self.guard()
         self.assertIn('GUARD PASS\nrc=0', out)
-        self.assertEqual(self.kube_state()['seen_pw'], ['src-pw-123', 'src-pw-123'])
+        self.assertEqual(self.kube_state()['seen_pw'], ['src-pw-123'] * 3)
+        self.assertIn(
+            'tb-prod-cutover-source login: ok\n'
+            'tb-prod-cutover-source refuses a write: read-only transaction\n',
+            out,
+        )
+        long_auth = (
+            'psql: error: connection to server at "%s" (3.124.121.135), port 5432 failed: '
+            'ERROR:  password authentication failed for user "stalwart_owner"\nrc=2' % ('h' * 200)
+        )
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        self.assertIn('GUARD PASS\nrc=0', self.guard(prod_cutover=long_auth, prod_source=long_auth))
         self.assertNotIn('src-pw-123', '\n'.join(self.calls('kubectl')))
         self.assertIn('guard', [r[0] for r in self.timing()])
         for case, kube in (
@@ -389,6 +405,8 @@ class ResetPhase(Prod):
                 {'source_login': 'psql: error: FATAL: password authentication failed\nrc=2'},
             ),
             ('branch login', {'login': 'psql: error: could not connect'}),
+            ('source write accepted', {'source_write': 'BEGIN\nCREATE TABLE\nROLLBACK\nrc=0'}),
+            ('source write other error', {'source_write': 'psql: error: timeout expired\nrc=2'}),
         ):
             with self.subTest(case=case):
                 (self.t / 'ev' / 'timing.tsv').unlink(missing_ok=True)
