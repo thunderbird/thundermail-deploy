@@ -25,9 +25,11 @@ case "$GATE" in
     read=$(last w4-read-done) q=$(last queue-drain) s=$(last w4-read-start)
     [ -n "$read" ] || wait_ "no w4-read-done row after the last cut-ecs row: the read phase has not ended"
     [ -n "$q" ] && [ "$(line "$q")" -lt "$(line "$read")" ] || wait_ "no queue-drain row before the w4-read-done row"
-    [ "$(value "$q")" = 0 ] || wait_ "the last queue-drain row has value $(value "$q"), not 0"
+    acc=$(last queue-accept)
+    [ "$(value "$q")" = 0 ] || { [ -n "$acc" ] && [ "$(line "$acc")" -lt "$(line "$q")" ] && [ "$(value "$q")" -le "$(value "$acc")" ]; } || wait_ "the last queue-drain row has value $(value "$q"), not 0"
     [ -z "$s" ] || [ "$(line "$s")" -lt "$(line "$read")" ] || wait_ "a read phase started at $(at "$s") after the last w4-read-done row and has not ended: finish --phase read"
-    go "queue-drain 0 at $(at "$q"), w4-read-done at $(at "$read"); legacy Stalwart may be stopped" ;;
+    sfx=""; [ "$(value "$q")" = 0 ] || sfx=" (queue-accept up to $(value "$acc"))"
+    go "queue-drain $(value "$q")$sfx at $(at "$q"), w4-read-done at $(at "$read"); legacy Stalwart may be stopped" ;;
   merge-recovery)
     r=$(last reset) p=$(last pre-delete) l=$(last_of 'reset|pre-delete|recovery-wait|stop-W4') a=$(last apply-start) e=$(last export-applied) u=$(last apply-unsent)
     [ -n "$r" ] || wait_ "no reset row after the last cut-ecs row"

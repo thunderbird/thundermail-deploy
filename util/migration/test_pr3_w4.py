@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -291,6 +292,50 @@ class ReadPhase(Prod):
         ).group(1)
         self.assertIn('dump_legacy.py', prod)
         self.assertNotIn('PASSWORD', prod)
+
+
+class LegacyQueue(Prod):
+    ITEMS = [
+        {'id': 101, 'created': '2026-08-30T10:00:00Z', 'size': 2048, 'return_path': 'a@example.test', 'recipients': [{'address': 'b@example.test'}]},
+        {'id': 102, 'created': '2026-11-18T09:00:00Z', 'size': 512, 'return_path': 'c@example.test', 'recipients': [{'address': 'd@example.test'}, {'address': 'e@example.test'}]},
+        {'id': 103, 'created': '2026-11-19T01:00:00Z', 'size': 99, 'return_path': '', 'recipients': [{'address': 'f@example.test'}]},
+    ]
+
+    def queue(self, total, items=None, accept=None):
+        self.rows([CUT])
+        body = json.dumps({'data': {'items': self.ITEMS if items is None else items, 'total': total}})
+        stub = (
+            'OLD_STALWART_URL=https://127.0.0.1:18080 OLD_STALWART_USER=admin OLD_STALWART_PASSWORD=pw\n'
+            'legacy_tunnel() { :; }; curl_user() { :; }\n'
+            'curl() { case "$*" in *values=1*) printf "%%s" %s ;; *) printf "%%s" %s ;; esac; }\n'
+            % (shlex.quote(body), shlex.quote(json.dumps({'data': {'total': total}})))
+        )
+        acc = '' if accept is None else 'LEGACY_QUEUE_ACCEPT=%s\n' % accept
+        return self.w4(stub + acc + 'step queue-drain queued queue_drain; echo "rc=$?"')
+
+    def test_a_queue_above_zero_stops_unless_accepted(self):
+        out = self.queue(3)
+        self.assertIn('queue not drained: wait or flush, record it, then rerun (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least 3)', out)
+        self.assertNotIn('queue-accept', [r[0] for r in self.timing()])
+        self.assertIn('legacy queue total 3 is above LEGACY_QUEUE_ACCEPT=2: not accepted', self.queue(3, accept=2))
+        self.assertIn('LEGACY_QUEUE_ACCEPT=all is not a whole number', self.queue(3, accept='all'))
+        self.assertIn('the legacy queue list holds 2 message(s), the total is 3: not accepted', self.queue(3, self.ITEMS[:2], 40))
+        self.assertNotIn('queue-accept', [r[0] for r in self.timing()])
+
+    def test_an_accepted_queue_is_listed_without_addresses_and_passes(self):
+        out = self.queue(3, accept=40)
+        self.assertIn('legacy queue: 3 message(s) move with the data and stay held on the target (LEGACY_QUEUE_ACCEPT=40); list in ', out)
+        self.assertIn('queue-drain done (queued=3)', out)
+        self.assertNotIn('@', out)
+        rows = [r for r in self.timing() if r[0] in ('queue-accept', 'queue-drain')]
+        self.assertEqual([(r[0], r[3], r[4]) for r in rows], [('queue-accept', 'limit', '40'), ('queue-drain', 'queued', '3')])
+        (f,) = list((self.t / 'ev').glob('legacy-queue-*.tsv'))
+        self.assertEqual(
+            f.read_text().splitlines(),
+            ['id\tcreated\tsize\trecipients', '101\t2026-08-30T10:00:00Z\t2048\t1', '102\t2026-11-18T09:00:00Z\t512\t2', '103\t2026-11-19T01:00:00Z\t99\t1'],
+        )
+        self.assertEqual(oct(f.stat().st_mode & 0o777), '0o600')
+        self.assertIn('queue-drain done (queued=0)', self.queue(0))
 
 
 class ResetPhase(Prod):

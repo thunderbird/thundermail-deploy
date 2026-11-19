@@ -393,8 +393,15 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   Exit codes: 0 done (for `read`: all six stopped, or all six `active` and `enabled`), 1 `STOP`
   (a node failed, did not answer within `LEGACY_SSM_WAIT`, or `start` could not reach a node), 2
   `NEED` (nothing sent), 3 `read` found mixed states, 64 usage.
+- A legacy queue that does not drain: `LEGACY_QUEUE_ACCEPT=<n>` lets W4 `queue-drain` (and the
+  W 2.5 `block25.sh block` gate) pass when the legacy queue total is at most `n`. W4 then writes
+  the list (id, created, size, recipient count; no address) to
+  `$EVIDENCE_DIR/legacy-queue-<ts>.tsv`, a `queue-accept` row (value `n`) and the `queue-drain`
+  row with the total, and prints `legacy queue: <total> message(s) move with the data and stay
+  held on the target`. It is a named variable and not `--go`, because `--go` in `--phase read`
+  already means "dump again".
 - On tb-prod a step that fails writes no timing row, so every row a gate reads means a pass:
-  `queue-drain` (value 0), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
+  `queue-drain` (value 0, or at most an earlier `queue-accept` value), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
   `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
   A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
   verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)

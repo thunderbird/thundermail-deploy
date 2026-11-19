@@ -112,7 +112,8 @@ block_gates() {
   if [ -z "$miss" ]; then
     need OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD
     if ! legacy_queue; then miss="the legacy queue was not read"
-    elif [ "$LEGACY_QUEUE" != 0 ]; then miss="the legacy queue holds $LEGACY_QUEUE message(s): wait for 2.4"; fi
+    elif [ "$LEGACY_QUEUE" != 0 ] && { [[ ! ${LEGACY_QUEUE_ACCEPT:-} =~ ^[0-9]+$ ]] || [ "$LEGACY_QUEUE" -gt "$LEGACY_QUEUE_ACCEPT" ]; }; then miss="the legacy queue holds $LEGACY_QUEUE message(s): wait for 2.4 (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least $LEGACY_QUEUE)"
+    elif [ "$LEGACY_QUEUE" != 0 ]; then echo "legacy queue: $LEGACY_QUEUE message(s) stay queued on legacy and move with the data at 4.2 (LEGACY_QUEUE_ACCEPT=$LEGACY_QUEUE_ACCEPT)"; fi
   fi
   [ -n "$miss" ] || return 0
   [ "$APPLY" = 1 ] && stop "$miss"

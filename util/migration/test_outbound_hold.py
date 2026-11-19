@@ -1098,6 +1098,17 @@ class Block25(Base):
         self.assertEqual(self.writes(), [])
         self.assertNotIn('legacy-outbound-block', self.rows())
 
+    def test_block_accepts_a_legacy_queue_within_the_limit(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=3)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='2')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('the legacy queue holds 3 message(s): wait for 2.4 (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least 3)', p.stdout)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('legacy queue: 3 message(s) stay queued on legacy and move with the data at 4.2 (LEGACY_QUEUE_ACCEPT=40)', p.stdout)
+        self.assertIn('legacy-outbound-block', self.rows())
+
     def test_block_apply_then_restore(self):
         self.add_row('cut-ecs')
         p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5')
