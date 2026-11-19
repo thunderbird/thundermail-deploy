@@ -214,6 +214,7 @@ class Prod(Harness):
 
 
 CUT = ['cut-ecs', '2026-11-19T04:00:00Z', '2026-11-19T04:00:00Z', 'tasks', '0']
+EXPORT = ['w4-export', '2026-11-19T04:19:00Z', '2026-11-19T04:19:00Z', 'file', 'x']
 READ = ['w4-read-done', '2026-11-19T04:20:00Z', '2026-11-19T04:20:00Z', 'export', 'x']
 STOPPED = ['stop-legacy-stalwart', '2026-11-19T04:30:00Z', '2026-11-19T04:30:00Z', 'nodes', '6']
 
@@ -239,8 +240,16 @@ class ReadPhase(Prod):
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
         self.assertIn('reusing the export of this cut', out)
         self.assertEqual([x for x in out.split() if x in ('DUMP', 'QUEUE')], ['QUEUE'])
-        out = self.w4(self.BODY + 'GO=again\nread_phase')
+        out = self.w4(self.BODY + 'GO=again\nconvert() { echo CONVERT; return 1; }\nread_phase')
         self.assertIn('DUMP', out.split())
+        out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
+        self.assertNotIn('reusing the export of this cut', out)
+        self.assertIn('DUMP', out.split())
+        self.rows([CUT, EXPORT, READ, ['w4-export-start', 'b', 'b', 'file', 'x'], STOPPED])
+        self.kube({'replicas': 0, 'pods': []})
+        out = self.w4('mkdir -p "$S"; echo "{}" > "$S/export.json"\nreset_preflight; echo "rc=$?"')
+        self.assertIn('the export of the last read run did not pass its checks', out)
+        self.assertIn('rc=1', out)
 
     def test_the_tb_prod_dump_keeps_the_password_off_the_command_line(self):
         text = (self.MIG / 'window' / 'w4-migrate.sh').read_text()
@@ -261,21 +270,23 @@ class ResetPhase(Prod):
         )
 
     def test_the_reset_needs_the_read_phase_then_the_stop_and_no_pod(self):
-        out = self.preflight([CUT, READ, STOPPED])
+        out = self.preflight([CUT, EXPORT, READ, STOPPED])
         self.assertIn('rc=0 stop=2026-11-19T04:30:00Z', out)
         out = self.preflight([CUT, STOPPED])
         self.assertIn('no w4-read-done row after the last cut-ecs row', out)
         self.assertIn('rc=1', out)
-        out = self.preflight([CUT, READ])
+        out = self.preflight([CUT, EXPORT, READ])
         self.assertIn('no stop-legacy-stalwart row after the last cut-ecs row', out)
-        out = self.preflight([CUT, STOPPED, READ])
+        out = self.preflight([CUT, STOPPED, EXPORT, READ])
         self.assertIn('the stop-legacy-stalwart row comes before the w4-read-done row', out)
-        out = self.preflight([STOPPED, READ, CUT])
+        out = self.preflight([STOPPED, EXPORT, READ, CUT])
         self.assertIn('rc=1', out)
         out = self.preflight([READ, STOPPED])
         self.assertIn('no cut-ecs row in', out)
         self.assertIn('rc=1', out)
-        out = self.preflight([CUT, READ, STOPPED], replicas=1, pods=[pod('2026-11-19T04:40:00Z')])
+        out = self.preflight(
+            [CUT, EXPORT, READ, STOPPED], replicas=1, pods=[pod('2026-11-19T04:40:00Z')]
+        )
         self.assertIn('the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod', out)
 
     def test_reset_and_source_mark_rows_and_replace_the_env_names(self):
@@ -523,10 +534,10 @@ class Script(Prod):
             'last_reset_at',
             'x',
         ]
-        out = self.run_w4('--phase', 'reset', '--apply', rows=[CUT, READ, STOPPED, reset])
+        out = self.run_w4('--phase', 'reset', '--apply', rows=[CUT, EXPORT, READ, STOPPED, reset])
         self.assertIn('was already reset in this cut: a second reset needs', out)
         self.assertNotIn('nb ', '\n'.join(self.calls('nb')).replace('nb hosts', ''))
-        out = self.run_w4('--phase', 'boot', '--apply', rows=[CUT, READ, STOPPED])
+        out = self.run_w4('--phase', 'boot', '--apply', rows=[CUT, EXPORT, READ, STOPPED])
         self.assertIn('STOP W4 (apply): --phase boot has nothing to resume', out)
         prereqs = [
             x for x in (self.t / 'fake.log').read_text().splitlines() if x.startswith('prereqs')
@@ -639,6 +650,17 @@ class EnvLock(Sandbox):
         self.assertIn('cannot open the env file lock', out)
         self.assertIn('rc=1', out)
         self.assertNotIn('D=', env.read_text())
+
+    def test_check_prereqs_does_not_read_without_its_lock(self):
+        env = self.t / 'shm' / 'cutover.env'
+        env.write_text("TARGET_ENV='tb-prod'\nTMD_CHECKOUT='/elsewhere'\nWINDOW_SHA='abc'\n")
+        env.chmod(0o600)
+        (self.t / 'shm' / 'cutover.env.lock').mkdir()
+        self.rules([{'tool': 'curl', 'match': '.', 'out': '000'}])
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W4-reset'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(out, r'(?m)^NEED  checkout +TMD_CHECKOUT or WINDOW_SHA not in ')
 
     def test_check_prereqs_reads_the_env_file_after_a_writer(self):
         env = self.t / 'shm' / 'cutover.env'
