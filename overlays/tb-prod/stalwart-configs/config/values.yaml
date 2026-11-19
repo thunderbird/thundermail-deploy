@@ -17,7 +17,7 @@ dnsPublishSpf: false
 authBanRateCount: 5000
 scanBanRateCount: 1000
 addressBookName: Thundermail Address Book
-allowedIPs: REPLACE_ME_ALLOWED_IPS
+allowedIPs: {}
 webhookURL: https://accounts.tb.pro/api/v1/telemetry/stalwart/webhook/
 webhookEvents:
   message-ingest.ham: true
