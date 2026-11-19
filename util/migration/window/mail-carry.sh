@@ -41,7 +41,7 @@ run_py() {
 
 newest_export() {
   local d
-  for d in $(ls -1dt "$SECRET_DIR"/mail-export-*/ 2>/dev/null || true); do
+  for d in $(ls -1d "$SECRET_DIR"/mail-export-*/ 2>/dev/null | sort -r || true); do
     [ -s "$d/summary.json" ] && { printf '%s' "${d%/}"; return 0; }
   done
   return 0

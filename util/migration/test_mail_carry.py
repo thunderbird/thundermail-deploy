@@ -733,10 +733,10 @@ class Wrapper(tt.Sandbox):
 
     def test_import_takes_the_newest_complete_export_or_the_named_one(self):
         ok = [self.tunnel(), {'tool': 'curl', 'match': '18080/healthz/live', 'out': '200'}]
-        old = self.export_dir('mail-export-1')
-        os.utime(old, (1, 1))
-        new = self.export_dir('mail-export-2')
-        self.export_dir('mail-export-3', complete=False)
+        new = self.export_dir('mail-export-20261119T020000Z')
+        old = self.export_dir('mail-export-20261119T010000Z')
+        os.utime(new, (1, 1))
+        self.export_dir('mail-export-20261119T030000Z', complete=False)
         rc, out = self.carry('import', '--apply', rules=ok)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.py()[-1]['argv'][2:], ['import', '--from', str(new), '--apply'])
