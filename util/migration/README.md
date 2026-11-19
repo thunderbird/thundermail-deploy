@@ -281,10 +281,12 @@ the keying for the real hosts.
   row, or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
   `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
-  `STALWART_SOURCE_PG_*` of the env file. It then checks that both branches are `ready`, later
+  `STALWART_SOURCE_PG_*` of the env file: Neon resets a role password only on a branch with a
+  read-write endpoint, so the branch is created with one, the password is reset, a read-only
+  endpoint is added and the read-write endpoint is deleted. It then checks that both branches are `ready`, later
   than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
-  credentials log in on their branch, and the production endpoint answers `password
-  authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
+  credentials log in on their branch, the source branch refuses a write as read-only, and the
+  production endpoint answers `password authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
   boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
   recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
