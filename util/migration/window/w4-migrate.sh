@@ -435,6 +435,7 @@ source_branch() {
     printf -v "$n" '%s' "$v"
   done
   env_locked source_env_write || { echo "could not replace STALWART_SOURCE_PG_* in $ENV_FILE"; return 1; }
+  for n in STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER; do window_value "$n" "${!n}" || true; done
   printf '  + replaced STALWART_SOURCE_PG_HOST=%s STALWART_SOURCE_PG_DB=%s STALWART_SOURCE_PG_USER=%s STALWART_SOURCE_PG_PASSWORD (len=%s) in %s\n' "$STALWART_SOURCE_PG_HOST" "$STALWART_SOURCE_PG_DB" "$STALWART_SOURCE_PG_USER" "${#STALWART_SOURCE_PG_PASSWORD}" "$ENV_FILE"
   export STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD
   VALUE=$(sed -n 's/^created: .* created_at=\([^ ]*\) .*/\1/p' <<<"$out")
