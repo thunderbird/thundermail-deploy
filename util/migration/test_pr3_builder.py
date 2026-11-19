@@ -709,7 +709,23 @@ class ProdBuildBeforeTheWindow(Base):
             {'tool': 'kubectl', 'match': 'STALWART_USER', 'out': 'YWRtaW4='},
             {'tool': 'kubectl', 'match': 'STALWART_PASSWORD', 'out': 'cmVjcHcx'},
             {'tool': 'kubectl', 'match': 'get svc nginx', 'out': 'nlb.example.test'},
-            {'tool': 'kubectl', 'match': 'get ingress', 'out': 'alb.example.test'},
+            {
+                'tool': 'kubectl',
+                'match': 'get ingress -o json',
+                'out': json.dumps(
+                    {
+                        'items': [
+                            {
+                                'spec': {'rules': [{'host': host}]},
+                                'status': {
+                                    'loadBalancer': {'ingress': [{'hostname': 'alb.example.test'}]}
+                                },
+                            }
+                            for host in ('auth.tb.pro', 'accounts.tb.pro')
+                        ]
+                    }
+                ),
+            },
             {
                 'tool': 'kubectl',
                 'match': 'get application',
