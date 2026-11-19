@@ -530,7 +530,9 @@ class Hold25(Base):
         self.assertNotIn('users', self.state())
 
     def test_apply_refuses_while_targets_hold_a_placeholder(self):
-        (self.mig / 'targets' / 'tb-prod.sh').write_text(self.targets)
+        (self.mig / 'targets' / 'tb-prod.sh').write_text(
+            self.targets + 'E2E_USER_SECRET=REPLACE_ME_E2E_USER_SECRET\n'
+        )
         p = self.run_tool('hold25.sh', 'set', '--apply')
         self.assertEqual(p.returncode, 64)
         self.assertEqual(self.writes(), [])
