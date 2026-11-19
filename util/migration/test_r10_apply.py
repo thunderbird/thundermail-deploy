@@ -1,5 +1,6 @@
 import importlib
 import json
+import re
 import pathlib
 import sys
 import unittest
@@ -58,10 +59,15 @@ def ready(ip, name='stalwart-5d9f-a'):
     }
 
 
+SCHEMA_HASH = 'Pzykh-dZ4p6qVJ7wVulQvyF7-1aRB8fI6GcjdJMWK2Q'
 SCHEMA = (
-    '2026-11-19T05:09:56.000000000Z [debug] <- GET http://10.0.0.5:8080/api/schema status=200 OK '
-    'content-type=application/json content-length=9 content-encoding=identity\n'
-)
+    '2026-11-19T05:09:55.900000000Z [debug] -> GET http://10.0.0.5:8080/api/schema\n'
+    '2026-11-19T05:09:55.950000000Z [debug] <- GET http://10.0.0.5:8080/api/schema status=302 Found '
+    'content-type=(none) content-length=0 content-encoding=identity\n'
+    '2026-11-19T05:09:55.960000000Z [debug] -> GET http://10.0.0.5:8080/api/schema/%s\n'
+    '2026-11-19T05:09:56.000000000Z [debug] <- GET http://10.0.0.5:8080/api/schema/%s status=200 OK '
+    'content-type=application/json content-length=150150 content-encoding=gzip\n'
+) % (SCHEMA_HASH, SCHEMA_HASH)
 LOG_OK = SCHEMA + (
     '2026-11-19T05:10:00.000000001Z Plan: 0 destroy, 4 update, 5 create, 0 upsert, 0 reconcile (11980 objects)\n'
     '2026-11-19T05:10:00.100000000Z [debug] -> POST http://10.0.0.5:8080/jmap\n'
@@ -133,7 +139,7 @@ class InClusterApply(w4.Prod):
         self.assertNotIn('"object"', log)
         self.assertIn('delete pod stalwart-apply-20261112t000000z', (self.t / 'deleted').read_text())
         self.assertIn(
-            'apply: pod/stalwart-apply-20261112t000000z exit=0 attach=0 errors=0 requests=2 '
+            'apply: pod/stalwart-apply-20261112t000000z exit=0 attach=0 errors=0 requests=4 '
             'longest request 33.5s (the CLI gives up after 60s)',
             out,
         )
@@ -207,7 +213,8 @@ class InClusterApply(w4.Prod):
             'prod_apply; echo "rc=$?"'
         )
         self.assertIn(
-            'log shows no GET /api/schema status=200 within 1s: the CLI did not reach Stalwart at '
+            'log shows no status=200 for GET /api/schema or its /api/schema/<hash> redirect within 1s: '
+            'the CLI did not reach Stalwart at '
             'http://10.0.0.5:8080 (security group of the pod, credential or URL); nothing sent',
             out,
         )
@@ -217,8 +224,21 @@ class InClusterApply(w4.Prod):
         self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
         self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
         out = self.apply([list(r) for r in self.timing()])
-        self.assertIn('reached Stalwart (GET /api/schema status=200); sending ', out)
+        self.assertIn('reached Stalwart (GET /api/schema/<hash> status=200); sending ', out)
         self.assertIn('rc=0 VALUE=0', out)
+
+    def test_the_schema_check_reads_the_redirect_and_the_hashed_answer(self):
+        cases = (
+            ('redirect then hashed 200', SCHEMA, True),
+            ('a 200 on /api/schema itself', SCHEMA.replace('/api/schema/' + SCHEMA_HASH, '/api/schema'), True),
+            ('the redirect alone', SCHEMA.split('\n')[1] + '\n', False),
+            ('a 401 on the hashed path', SCHEMA.replace('status=200 OK', 'status=401 Unauthorized'), False),
+        )
+        for case, log, ok in cases:
+            with self.subTest(case=case):
+                self.state({'pods': [ready('10.0.0.5')], 'log': log})
+                out = self.w4('schema_seen stalwart-apply-x; echo "seen=$?"')
+                self.assertIn('seen=%d' % (0 if ok else 1), out)
 
     def test_a_failed_attach_before_the_plan_writes_a_row_the_rerun_accepts(self):
         self.state(
@@ -291,6 +311,13 @@ class InClusterApply(w4.Prod):
         self.assertIn('automountServiceAccountToken: false', text)
         self.assertIn('readOnlyRootFilesystem: true', text)
         self.assertIn('stdinOnce: true', text)
+        mounts = re.findall(r'(?m)^ +mountPath: (\S+)$', text)
+        self.assertEqual(mounts, ['/tmp'])
+        env = dict(re.findall(r'(?m)^ +- name: (\S+)\n +value: (\S+)$', text))
+        for name in ('HOME', 'XDG_CACHE_HOME'):
+            with self.subTest(name=name):
+                self.assertIn(name, env)
+                self.assertTrue(env[name] == '/tmp' or env[name].startswith('/tmp/'), env[name])
         for svc in (HERE.parent.parent / 'bases' / 'stalwart-mail').glob('service*.yaml'):
             self.assertNotIn('stalwart-config-applier', svc.read_text())
 

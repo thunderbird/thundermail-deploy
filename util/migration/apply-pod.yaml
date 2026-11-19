@@ -45,6 +45,10 @@ spec:
               key: STALWART_PASSWORD
         - name: NO_COLOR
           value: "1"
+        - name: HOME
+          value: /tmp
+        - name: XDG_CACHE_HOME
+          value: /tmp/cache
       resources:
         requests:
           cpu: 250m

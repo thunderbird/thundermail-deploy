@@ -566,7 +566,7 @@ recovery_ip() { "${KS[@]}" "${NS[@]}" get pods -l app=stalwart -o json | jq -r '
 apply_pod_phase() { "${KS[@]}" "${NS[@]}" get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null; }
 apply_pod_ended() { case "$(apply_pod_phase "$1")" in Succeeded|Failed) return 0 ;; *) return 1 ;; esac; }
 longest_request() { "$PY" "$MIG_DIR/apply_requests.py" "$1"; }
-schema_seen() { "${KS[@]}" "${NS[@]}" logs -c cli "pod/$1" 2>/dev/null | grep -qE '<- GET [^ ]*/api/schema status=200'; }
+schema_seen() { "${KS[@]}" "${NS[@]}" logs -c cli "pod/$1" 2>/dev/null | grep -qE '<- GET [^ ]*/api/schema(/[^ ]*)? status=200'; }
 apply_unplanned() {
   local log
   log=$("${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" 2>/dev/null) || { echo "the log of pod/$1 could not be read after the failed attach: the apply-start row stays"; return 1; }
@@ -609,8 +609,8 @@ incluster_apply_run() {
   local name=$1 url=$2 code req longest arc=0 plan want end left
   sed -e "s|__NAME__|$name|" -e "s|__STALWART_URL__|$url|" "$MIG_DIR/apply-pod.yaml" | "${KS[@]}" "${NS[@]}" create -f - >/dev/null || { echo "could not create pod/$name"; return 1; }
   "${KS[@]}" "${NS[@]}" wait --for=condition=Ready "pod/$name" --timeout=300s >/dev/null || { echo "pod/$name not Ready within 300s (image pull, scheduling or the security group of the pod)"; apply_diag "$name"; return 1; }
-  schema_wait "$name" || { echo "pod/$name log shows no GET /api/schema status=200 within ${APPLY_SCHEMA_WAIT:-90}s: the CLI did not reach Stalwart at $url (security group of the pod, credential or URL); nothing sent, no apply-start row"; apply_diag "$name"; return 1; }
-  echo "pod/$name reached Stalwart (GET /api/schema status=200); sending $(wc -c < "$S/export.json") bytes of export over stdin to $url"
+  schema_wait "$name" || { echo "pod/$name log shows no status=200 for GET /api/schema or its /api/schema/<hash> redirect within ${APPLY_SCHEMA_WAIT:-90}s: the CLI did not reach Stalwart at $url (security group of the pod, credential or URL); nothing sent, no apply-start row"; apply_diag "$name"; return 1; }
+  echo "pod/$name reached Stalwart (GET /api/schema/<hash> status=200); sending $(wc -c < "$S/export.json") bytes of export over stdin to $url"
   mark apply-start pod "$name" && [ -n "$(cut_row apply-start | awk -F'\t' -v n="$name" '$6 == n')" ] || { echo "could not write the apply-start row to $TIMING_TSV: the export is not sent"; return 1; }
   end=$(( $(date +%s) + APPLY_POD_WAIT ))
   timeout "$APPLY_POD_WAIT" "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?

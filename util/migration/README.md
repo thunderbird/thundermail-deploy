@@ -318,8 +318,8 @@ the keying for the real hosts.
   and that group admits TCP 8080 from itself (rule `stalwart_mgmt` in platform-infrastructure
   `pulumi/modules/thundermail_deploy.py`). The repo holds no NetworkPolicy. A failed batch stops
   that object type and leaves the earlier batches committed, so a second apply would collide:
-  the `apply-start` row is written once the pod is Ready and its log shows `GET /api/schema
-  status=200` (the CLI reached Stalwart; `APPLY_SCHEMA_WAIT`, default 90 s, else no row and
+  the `apply-start` row is written once the pod is Ready and its log shows `status=200` for
+  `GET /api/schema/<hash>`, the path 0.16 redirects `/api/schema` to (the CLI reached Stalwart; `APPLY_SCHEMA_WAIT`, default 90 s, else no row and
   nothing sent), just before the export is sent, and an `apply-start` row after the pre-delete
   with no `export-applied` row makes a rerun refuse (and `window/gate.sh merge-recovery` wait).
   When the attach fails and the pod log has no `Plan:` line, W4 stops the pod
