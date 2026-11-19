@@ -282,7 +282,7 @@ writes row `runner-removed`.
   reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
   (compared after NFKC and punycode, as 0.16 reads them). It prints one
   `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
-  stopping. A dropped Domain that an account, list or setting still uses stops it.
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does an address of `principals.json` on a dropped Domain. A catch-all there (`@<domain>`, which `convert` leaves out and W5 puts back) is a `warning:` line instead: `apply_unmigrated.py --dropped-domains` (W5 on tb-prod) skips it and prints the count. `domain_fix.py --dropped-list` writes the list that `verify/02_directory.py` reads (`DROPPED_DOMAINS`). Names are compared in the punycode form 0.16 stores (`shapes.norm_domain`).
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
   `class Domain:refused-by-0.16` lines, and the names convert drops itself as
   `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
@@ -311,8 +311,12 @@ writes row `runner-removed`.
   then writes a `blob-replication-wait` row. `compare` lists both buckets in parallel by key range
   (current versions; a delete marker or an absent key in tb-prod is missing), compares size and
   ETag, and with `--apply` copies each difference from legacy and writes a `blob-compare left N`
-  row. It deletes nothing. `STALWART_WEBADMIN`, `SPAM_TRAINER_KEY` and `SPAM_CLASSIFIER_KEY` must
-  match by checksum, or the run stops. Listings stay under `$EVIDENCE_DIR/blob-compare`, copies in
+  row. It deletes nothing. The blobs `STALWART_WEBADMIN`, `STALWART_SPAM_TRAIN_DATA.lz4` and
+  `STALWART_SPAM_CLASSIFIER_MODEL.lz4` must match by checksum, or the run stops; Stalwart stores
+  them under the base32 of the blob key in its own alphabet (`knkectcxifjfix7xivbecrcnjfha` and so
+  on), which is what the compare looks up and prints beside the name. `--workers` defaults to 48:
+  with one `aws` process per page a review measured 48 at a time at 16 minutes for the dry run and
+  9 more for the relist of `--apply` (16 at a time: 42 and 23). Listings stay under `$EVIDENCE_DIR/blob-compare`, copies in
   transit under `$SECRET_DIR`.
 - `setenv`, `setenv_secret` and the env file edits of W4 hold `flock` on `$ENV_FILE.lock`;
   `check-prereqs.sh` reads the env file under the same lock, shared.

@@ -339,7 +339,7 @@ neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon r
 
 domain_fix_step() {
   local rc=0
-  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" || rc=$?
+  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --principals "$S/principals.json" --dropped-list "$S/domains-dropped.json" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
@@ -410,6 +410,7 @@ reset_preflight() {
 neon_reset() {
   local out rc=0
   printf '  + %s reset --branch %s --after %s %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH" "$STOP_AT" "$(apply_flag)"
+  [ "$APPLY" = 0 ] || mark reset-sent branch "$CUTOVER_BRANCH"
   out=$("${NB[@]}" reset --branch "$CUTOVER_BRANCH" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
   printf '%s\n' "$out"
   neon_need "$rc" "neon_branch.py reset"
@@ -447,6 +448,7 @@ source_branch() {
     printf -v "$n" '%s' "$v"
   done
   env_locked source_env_write || { echo "could not replace STALWART_SOURCE_PG_* in $ENV_FILE"; return 1; }
+  for n in STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER; do window_value "$n" "${!n}" || true; done
   printf '  + replaced STALWART_SOURCE_PG_HOST=%s STALWART_SOURCE_PG_DB=%s STALWART_SOURCE_PG_USER=%s STALWART_SOURCE_PG_PASSWORD (len=%s) in %s\n' "$STALWART_SOURCE_PG_HOST" "$STALWART_SOURCE_PG_DB" "$STALWART_SOURCE_PG_USER" "${#STALWART_SOURCE_PG_PASSWORD}" "$ENV_FILE"
   export STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD
   VALUE=$(sed -n 's/^created: .* created_at=\([^ ]*\) .*/\1/p' <<<"$out")
@@ -547,7 +549,7 @@ prod_recovery_boot() {
 prod_apply() {
   local a p
   a=$(cut_line export-applied) p=$(cut_line pre-delete)
-  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; return 0; fi
+  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; port_forward; return; fi
   apply_export || return 1
   [ "$APPLY" = 0 ] || mark export-applied errors 0
 }
@@ -562,7 +564,9 @@ prod_recovery_hold() {
 
 boot_resume() {
   local r g p
-  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete)
+  local s
+  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete) s=$(cut_line reset-sent)
+  [ -z "$s" ] || [ -z "$r" ] || [ "$s" -lt "$r" ] || { echo "the last reset was sent ($(cut_time reset-sent)) and did not finish: it may have undone the pre-delete; rerun --phase reset --apply --go '<words>'"; return 1; }
   [ -n "$r" ] && [ -n "$g" ] && [ -n "$p" ] && [ "$g" -gt "$r" ] && [ "$p" -gt "$g" ] || { echo "nothing to resume: want reset, guard and pre-delete rows, in that order, after the last cut-ecs row"; return 1; }
   echo "resuming after the pre-delete of $(cut_time pre-delete); no second reset"
 }
@@ -578,7 +582,7 @@ reset_phase() {
   STOP_AT=""
   [ "$APPLY" = 0 ] || APPLY_ARG=(--apply)
   step reset-preflight "" reset_preflight
-  if [ "$APPLY" = 1 ] && [ -n "$(cut_row reset)" ]; then
+  if [ "$APPLY" = 1 ] && { [ -n "$(cut_row reset)" ] || [ -n "$(cut_row reset-sent)" ]; }; then
     [ -n "$GO" ] || stop "$CUTOVER_BRANCH was already reset in this cut: a second reset needs the operator's confirmation (--go); after an expired pod wait use --phase boot"
     go_gate
   fi

@@ -3,3 +3,4 @@ live messages missing from the search index:
 every domain has a DKIM key
 extra on target:
 received since the snapshot
+is above the export after the drop

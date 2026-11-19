@@ -20,6 +20,24 @@ def refs(value, cid):
     return 1 if value == '#' + cid else 0
 
 
+ADDRESS_FIELDS = ('name', 'emails')
+
+
+def addresses(principal):
+    def walk(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                yield from walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                yield from walk(v)
+        elif isinstance(value, str) and '@' in value:
+            yield value
+
+    for field in ADDRESS_FIELDS:
+        yield from walk(principal.get(field))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description='Drop the Domain records Stalwart 0.16 refuses (an invalid name, or one name '
@@ -28,6 +46,8 @@ def main(argv=None):
     )
     ap.add_argument('--export', required=True)
     ap.add_argument('--output')
+    ap.add_argument('--dropped-list')
+    ap.add_argument('--principals')
     a = ap.parse_args(argv)
     path = pathlib.Path(a.export)
     ops = [json.loads(x) for x in path.read_text(encoding='utf-8').splitlines() if x.strip()]
@@ -55,6 +75,36 @@ def main(argv=None):
                 'fix it on legacy, then dump again' % (names[cid], drop[cid], ', '.join(users)),
                 file=sys.stderr,
             )
+    catch_alls = []
+    if a.principals:
+        raw = json.loads(pathlib.Path(a.principals).read_text(encoding='utf-8'))
+        items = raw if isinstance(raw, list) else raw.get('items', raw)
+        forms = {}
+        for cid in drop:
+            for form in {names[cid].strip().lower(), domains.to_ascii(names[cid])}:
+                if form:
+                    forms[form] = cid
+        for p in items if isinstance(items, list) else []:
+            hits = {}
+            for addr in addresses(p):
+                host = addr.rpartition('@')[2].strip().lower()
+                if host in forms or domains.to_ascii(host) in forms:
+                    cid = forms.get(host) or forms[domains.to_ascii(host)]
+                    hits[cid] = hits.get(cid, True) and addr.strip().startswith('@')
+            for cid, catch_all_only in sorted(hits.items()):
+                if catch_all_only:
+                    catch_alls.append(
+                        "warning: not restoring the catch-all of legacy principal %s: its domain "
+                        '%r is dropped' % (p.get('id'), names[cid])
+                    )
+                    continue
+                used += 1
+                print(
+                    'error: Domain %r is refused by Stalwart 0.16 (%s) and still used by an '
+                    'address of legacy principal %s: fix it on legacy, then dump again'
+                    % (names[cid], drop[cid], p.get('id')),
+                    file=sys.stderr,
+                )
     if used:
         return 1
     for cid in sorted(drop):
@@ -79,7 +129,28 @@ def main(argv=None):
         ''.join(json.dumps(op, ensure_ascii=False) + '\n' for op in ops), encoding='utf-8'
     )
     tmp.replace(out)
-    for line in lines:
+    if a.dropped_list:
+        kept = sum(
+            len(op['value'])
+            for op in ops
+            if op.get('object') == 'DkimSignature' and op.get('@type') == 'create'
+        )
+        listed = pathlib.Path(a.dropped_list)
+        part = listed.with_name(listed.name + '.tmp')
+        part.write_text(
+            json.dumps(
+                {
+                    'domains': sorted(names[cid] for cid in drop),
+                    'dkim_dropped': gone,
+                    'dkim_kept': kept,
+                },
+                ensure_ascii=False,
+            )
+            + '\n',
+            encoding='utf-8',
+        )
+        part.replace(listed)
+    for line in lines + catch_alls:
         print(line)
     print(
         'domains checked=%d dropped=%d invalid=%d idna_pairs=%d dkim_dropped=%d'

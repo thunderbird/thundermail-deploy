@@ -75,7 +75,12 @@ def duration_ms(v):
 
 
 def norm_domain(d):
-    return d.strip().lower()
+    s = d.strip().lower()
+    if s.isascii():
+        return s
+    from domains import to_ascii
+
+    return to_ascii(s) or s
 
 
 def norm_addr(addr):
