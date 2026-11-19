@@ -268,7 +268,7 @@ the keying for the real hosts.
   reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
   (compared after NFKC and punycode, as 0.16 reads them). It prints one
   `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
-  stopping. A dropped Domain that an account, list or setting still uses stops it.
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does any address in `principals.json` on a dropped Domain (a catch-all, which `convert` leaves out of the export and W5 puts back).
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
   `class Domain:refused-by-0.16` lines, and the names convert drops itself as
   `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
