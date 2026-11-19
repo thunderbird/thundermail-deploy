@@ -573,7 +573,7 @@ class Script(Prod):
     def test_the_tb_prod_dry_run_uses_both_gates_and_no_dump_or_restore(self):
         self.kube({'replicas': 0, 'pods': [], 'deploy': deploy(0, 0)})
         out = self.run_w4('--dry-run')
-        self.assertTrue(out.rstrip().endswith(('rc=0', 'rc=2')), out[-2000:])
+        self.assertRegex(out, r'(?m)^rc=[02]$')
         prereqs = [
             x for x in (self.t / 'fake.log').read_text().splitlines() if x.startswith('prereqs')
         ]

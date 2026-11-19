@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
+os.umask(0o077)
 REPO = HERE.parent.parent
 REAL = (
     'awk base64 basename bash cat chmod cp cut date dirname env find grep head id jq ls mkdir '
@@ -222,6 +223,19 @@ class Builder(Sandbox):
         rc, out = self.build(HERE, **self.prod_env(TEST_USER='someone@stage-thundermail.com'))
         self.assertNotEqual(rc, 0)
         self.assertRegex(out, r'TEST_USER +len=\d+ CONTAINS stage')
+
+    def test_prod_takes_a_direct_database_host_as_it_is(self):
+        rules = [
+            dict(r, out=r['out'].replace('ep-tgt-pooler.example.test', 'ep-tgt.example.test'))
+            if r['match'] == 'get cm stalwart-config'
+            else r
+            for r in stage_rules(ecs='accounts-prod')
+        ]
+        (self.t / 'kc-target').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
+        self.build(HERE, **self.prod_env(rules=rules))
+        text = (self.t / 'shm' / 'cutover.env').read_text()
+        self.assertIn("STALWART_TARGET_PG_HOST='ep-tgt.example.test'", text)
+        self.assertNotIn('pooler', text.replace('-pooler stripped', ''))
 
     def test_prod_marks_placeholders_and_writes_the_window_names(self):
         rc, out = self.build(HERE, **self.prod_env())
@@ -622,6 +636,30 @@ class KubeconfigGuard(Sandbox):
         )
         self.assertRegex(out, r'(?m)^NEED  kube-tb-prod ')
         self.assertNotIn('auth can-i', self.log())
+
+    def test_prod_target_rbac_covers_the_apply_pod_attach_and_log(self):
+        self.rules(
+            [
+                {'tool': 'kubectl', 'match': '--subresource=attach', 'out': 'no\n'},
+                {'tool': 'kubectl', 'match': 'auth can-i', 'out': 'yes\n'},
+            ]
+        )
+        work = self.t / 'work'
+        work.mkdir()
+        (work / 'kc-prod').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
+        (work / 'kc-stage').write_text(kubeconfig('kc-stage', 'mzla-eks-tb-stage01'))
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W4'], TARGET_ENV='tb-prod', WORK_DIR=str(work)
+        )
+        self.assertRegex(out, r'(?m)^NEED  kube-tb-prod +can-i no: create:pods/attach@thundermail$')
+        self.assertIn('auth can-i get pods -n thundermail --subresource=log', self.log())
+        (self.t / 'fake.log').unlink()
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W4'], TARGET_ENV='tb-stage', WORK_DIR=str(work)
+        )
+        self.assertIn('auth can-i', self.log())
+        self.assertNotIn('--subresource=attach', self.log())
+        self.assertNotIn('--subresource=log', self.log().replace('get pods -n accounts --subresource=log', ''))
 
     def test_the_stage_kubeconfig_name_still_works(self):
         rc, out = self.guard(
@@ -1253,6 +1291,39 @@ class CrossEnvironment(Sandbox):
         self.prod_build()
         self.assertIn("ADMIN_MERGE='1'", (self.t / 'shm' / 'cutover.env').read_text())
 
+    def test_tb_prod_reads_its_env_file_from_disk_and_refuses_one_others_can_read(self):
+        state = self.t / 'home' / '.local' / 'state' / 'talos'
+        state.mkdir(parents=True, exist_ok=True)
+        state.chmod(0o700)
+        f = state / 'cutover-tb-prod.env'
+        f.write_text("TARGET_ENV='tb-prod'\nWINDOW_SHA='from-disk'\n")
+        f.chmod(0o600)
+        show = '. %s/lib.sh; printf "file=%%s sha=%%s\\n" "$ENV_FILE" "${WINDOW_SHA:-}"' % HERE
+        rc, out = self.run_sh(['-c', show], TARGET_ENV='tb-prod', CUTOVER_ENV='')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out, 'file=%s sha=from-disk\n' % f)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod', CUTOVER_ENV=''
+        )
+        self.assertNotIn('refusing', out)
+        for path, mode in ((f, 0o640), (state, 0o750)):
+            with self.subTest(path=path.name, mode=oct(mode)):
+                path.chmod(mode)
+                rc, out = self.run_sh(['-c', show], TARGET_ENV='tb-prod', CUTOVER_ENV='')
+                self.assertNotEqual(rc, 0, out)
+                self.assertRegex(
+                    out, r'not owned by \S+, or open to group or others \(want the directory 700 and the file 600\)'
+                )
+                self.assertNotIn('sha=from-disk', out)
+                path.chmod(0o600 if path.is_file() else 0o700)
+        stage = state / 'cutover-tb-stage.env'
+        stage.write_text("TARGET_ENV='tb-stage'\nWINDOW_SHA='stage-disk'\n")
+        stage.chmod(0o640)
+        state.chmod(0o750)
+        rc, out = self.run_sh(['-c', show], TARGET_ENV='tb-stage', CUTOVER_ENV='')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out, 'file=%s sha=stage-disk\n' % stage)
+
     def test_prereqs_never_source_an_env_file_others_can_write(self):
         plant = self.t / 'plant'
         plant.mkdir()
@@ -1267,7 +1338,7 @@ class CrossEnvironment(Sandbox):
             with self.subTest(script=args[0]):
                 rc, out = self.run_sh(args, TARGET_ENV='tb-prod', CUTOVER_ENV=str(f), FREEZE_PR='7', PI_DIR=str(self.t))
                 self.assertIn(rc, (1, 64), out)
-                self.assertIn('writable by group or others', out)
+                self.assertIn('open to group or others (want the directory 700 and the file 600)', out)
                 self.assertFalse((self.t / 'PWNED').exists())
 
     def test_thaw_and_prereqs_refuse_an_env_file_of_the_other_environment(self):

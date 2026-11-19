@@ -403,7 +403,7 @@ reset_preflight() {
   elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
   elif [ -n "$start" ] && [ "$start" -gt "$stop" ]; then echo "a start-legacy-stalwart row follows the stop-legacy-stalwart row: legacy Stalwart was started again; stop and read it again (W 4.3)"; bad=1
   else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
-  if runner_up; then echo "runner Running"; else echo "runner pod is not Running"; bad=1; fi
+  if runner_up; then echo "runner Running"; else echo "runner pod is not Running: bash $MIG_DIR/window/runner-start.sh --apply"; bad=1; fi
   no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }
   [ "$bad" = 0 ] && return 0
   [ "$APPLY" = 1 ] && return 1
@@ -561,12 +561,97 @@ prod_recovery_boot() {
   VALUE=$WANT_SCHEMA
 }
 
+APPLY_POD_WAIT=${APPLY_POD_WAIT:-1800}
+APPLY_SCHEMA_WAIT=${APPLY_SCHEMA_WAIT:-90}
+recovery_ip() { "${KS[@]}" "${NS[@]}" get pods -l app=stalwart -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.conditions[]?; .type == "Ready" and .status == "True")) | .status.podIP // empty] | if length == 1 then .[0] else empty end'; }
+apply_pod_phase() { "${KS[@]}" "${NS[@]}" get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null; }
+apply_pod_ended() { case "$(apply_pod_phase "$1")" in Succeeded|Failed) return 0 ;; *) return 1 ;; esac; }
+longest_request() { "$PY" "$MIG_DIR/apply_requests.py" "$1"; }
+schema_seen() { "${KS[@]}" "${NS[@]}" logs -c cli "pod/$1" 2>/dev/null | grep -qE '<- GET [^ ]*/api/schema(/[^ ]*)? status=200'; }
+apply_unplanned() {
+  local log
+  log=$("${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" 2>/dev/null) || { echo "the log of pod/$1 could not be read after the failed attach: the apply-start row stays"; return 1; }
+  ! grep -qE '^[^ ]+ Plan: ' <<<"$log" || return 1
+  "${KS[@]}" "${NS[@]}" patch pod "$1" --type merge -p '{"spec":{"activeDeadlineSeconds":1}}' >/dev/null 2>&1 || { echo "could not stop pod/$1 (patch activeDeadlineSeconds): the apply-start row stays"; return 1; }
+  until_ok 120 apply_pod_ended "$1" || { echo "pod/$1 did not stop within 120s: the apply-start row stays"; return 1; }
+  ( umask 077; "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" > "$S/apply.log" ) || { echo "the final log of pod/$1 could not be read: the apply-start row stays"; return 1; }
+  ! grep -qE '^[^ ]+ Plan: ' "$S/apply.log" || { echo "the final log of pod/$1 has a Plan: line: the apply may have written, the apply-start row stays"; return 1; }
+}
+schema_wait() { local end=$(( $(date +%s) + ${APPLY_SCHEMA_WAIT:-90} )); until schema_seen "$1"; do [ "$(date +%s)" -lt "$end" ] || return 1; sleep 2; done; }
+
+incluster_apply() {
+  local name ip url rc=0
+  name=apply-$(tr '[:upper:]' '[:lower:]' <<<"$TS")
+  name=stalwart-${name//[^a-z0-9-]/}
+  printf '  + render %s as pod %s: CLI %s, STALWART_URL http://<pod IP of the one Ready recovery pod>:8080, STALWART_USER and STALWART_PASSWORD from Secret stalwart-recovery-admin by reference; %s create -f - (manifest on stdin)\n' "$MIG_DIR/apply-pod.yaml" "$name" "$(sed -n 's/^ *image: //p' "$MIG_DIR/apply-pod.yaml")" "$(shq "${KS[@]}" "${NS[@]}")"
+  printf '  + %s attach -i -c cli pod/%s < %s (the export goes over stdin, not on a command line or into the pod spec)\n' "$(shq "${KS[@]}" "${NS[@]}")" "$name" "$S/export.json"
+  printf '  + wait up to %ss for the pod to end; logs --timestamps to %s; delete pod/%s (also when the apply fails)\n' "$APPLY_POD_WAIT" "$S/apply.log" "$name"
+  [ "$APPLY" = 1 ] || return 0
+  [ -s "$S/export.json" ] || { echo "no $S/export.json"; return 1; }
+  ip=$(recovery_ip) || true
+  [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not exactly one Ready stalwart pod with an IPv4 pod IP: no apply pod"; return 1; }
+  url=http://$ip:8080
+  APPLY_POD=$name
+  incluster_apply_run "$name" "$url" || rc=$?
+  "${KS[@]}" "${NS[@]}" delete pod "$name" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || echo "pod/$name was not deleted: delete it by hand"
+  APPLY_POD=""
+  return "$rc"
+}
+
+apply_diag() {
+  ( umask 077
+    "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" > "$S/apply.log" 2>&1 || true
+    "${KS[@]}" "${NS[@]}" describe pod "$1" > "$EVIDENCE_DIR/apply-pod-$TS.txt" 2>&1 || true
+    sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log" )
+  echo "pod/$1 status and events in $EVIDENCE_DIR/apply-pod-$TS.txt, its log in $S/apply.log"
+}
+
+incluster_apply_run() {
+  local name=$1 url=$2 code req longest arc=0 plan want end left
+  sed -e "s|__NAME__|$name|" -e "s|__STALWART_URL__|$url|" "$MIG_DIR/apply-pod.yaml" | "${KS[@]}" "${NS[@]}" create -f - >/dev/null || { echo "could not create pod/$name"; return 1; }
+  "${KS[@]}" "${NS[@]}" wait --for=condition=Ready "pod/$name" --timeout=300s >/dev/null || { echo "pod/$name not Ready within 300s (image pull, scheduling or the security group of the pod)"; apply_diag "$name"; return 1; }
+  schema_wait "$name" || { echo "pod/$name log shows no status=200 for GET /api/schema or its /api/schema/<hash> redirect within ${APPLY_SCHEMA_WAIT:-90}s: the CLI did not reach Stalwart at $url (security group of the pod, credential or URL); nothing sent, no apply-start row"; apply_diag "$name"; return 1; }
+  echo "pod/$name reached Stalwart (GET /api/schema/<hash> status=200); sending $(wc -c < "$S/export.json") bytes of export over stdin to $url"
+  mark apply-start pod "$name" && [ -n "$(cut_row apply-start | awk -F'\t' -v n="$name" '$6 == n')" ] || { echo "could not write the apply-start row to $TIMING_TSV: the export is not sent"; return 1; }
+  end=$(( $(date +%s) + APPLY_POD_WAIT ))
+  timeout "$APPLY_POD_WAIT" "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?
+  if [ "$arc" != 0 ] && apply_unplanned "$name"; then
+    echo "attach to pod/$name failed (exit $arc, $S/apply.attach); the pod was stopped and its final log has no Plan: line: nothing was applied"
+    sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log"
+    "${KS[@]}" "${NS[@]}" delete pod "$name" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || { echo "pod/$name was not deleted: delete it by hand, then rerun"; return 1; }
+    mark apply-unsent pod "$name" || echo "could not write the apply-unsent row to $TIMING_TSV: a rerun will refuse"
+    echo "apply-unsent row written: a rerun of --phase boot --apply may send the export again"
+    return 1
+  fi
+  left=$(( end - $(date +%s) ))
+  [ "$left" -gt 0 ] || left=1
+  until_ok "$left" apply_pod_ended "$name" || { echo "pod/$name still $(apply_pod_phase "$name") ${APPLY_POD_WAIT}s after the export was sent"; apply_diag "$name"; return 1; }
+  ( umask 077; "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$name" > "$S/apply.log" ) || { echo "could not read the log of pod/$name"; return 1; }
+  sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log"
+  code=$("${KS[@]}" "${NS[@]}" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')
+  read -r req longest <<<"$(longest_request "$S/apply.log")"
+  VALUE=$(grep -c '✗' "$S/apply.log" || true)
+  grep -E '^[^ ]+ (Plan:|Done:|error:)' "$EVIDENCE_DIR/apply-$TS.log" | cut -d' ' -f2- || true
+  plan=$(sed -n 's/^[^ ]* Plan: \([0-9]*\) destroy, \([0-9]*\) update, \([0-9]*\) create, \([0-9]*\) upsert, \([0-9]*\) reconcile .*/destroy=\1 update=\2 create=\3 upsert=\4 reconcile=\5/p' "$S/apply.log" | head -1)
+  want=$(jq -r '.["@type"]' "$S/export.json" | awk '{n[$1]++} END {printf "destroy=%d update=%d create=%d upsert=%d reconcile=%d", n["destroy"], n["update"], n["create"], n["upsert"], n["reconcile"]}')
+  echo "apply: pod/$name exit=${code:-none} attach=$arc errors=$VALUE requests=${req:-0} longest request ${longest:-0}s (the CLI gives up after 60s); $S/apply.log, addresses masked in $EVIDENCE_DIR/apply-$TS.log"
+  [ "$plan" = "$want" ] || { echo "the CLI planned ${plan:-nothing}, export.json holds $want: the export did not arrive whole over stdin"; return 1; }
+  [ "$code" = 0 ] && [ "$VALUE" = 0 ]
+}
+
 prod_apply() {
-  local a p
-  a=$(cut_line export-applied) p=$(cut_line pre-delete)
-  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; port_forward; return; fi
-  apply_export || return 1
-  [ "$APPLY" = 0 ] || mark export-applied errors 0
+  local a p s u done=0
+  a=$(cut_line export-applied) p=$(cut_line pre-delete) s=$(cut_line apply-start) u=$(cut_line apply-unsent)
+  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; done=1
+  elif [ "$APPLY" = 1 ] && [ -n "$s" ] && [ -n "$p" ] && [ "$s" -gt "$p" ] && { [ -z "$u" ] || [ "$u" -lt "$s" ]; }; then
+    echo "an apply started after this pre-delete and did not finish (apply-start row): its earlier batches are committed, so a second apply would collide. Retry: revert the recovery-mode PR, then bash $0 --phase reset --apply --go '<words>' (about 20 to 25 minutes: revert sync, reset, guard, pre-delete, boot, 555 s apply)"
+    return 1
+  fi
+  if [ "$done" = 0 ]; then
+    incluster_apply || return 1
+    [ "$APPLY" = 0 ] || mark export-applied errors 0
+  fi
+  [ "$APPLY" = 0 ] || port_forward || { echo "no port-forward to Stalwart for the reads after the apply (admin account id, account ids)"; return 1; }
 }
 
 prod_recovery_hold() {
@@ -625,7 +710,7 @@ prod_main() {
       read_phase ;;
     reset|boot)
       GATE_ID=go-W4-reset prereqs
-      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env apply-pod.yaml apply_requests.py stalwart-cli python3 "$PY"
       need_recovery_pr
       if [ "$PHASE" = reset ]; then reset_phase; else [ "$APPLY" = 0 ] || boot_resume || stop "--phase boot has nothing to resume"; fi
       boot_phase ;;
@@ -633,7 +718,7 @@ prod_main() {
       [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
       GATE_ID=go-W4-read prereqs
       GATE_ID=go-W4-reset prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env apply-pod.yaml apply_requests.py stalwart-cli python3 "$PY"
       need_recovery_pr
       read_phase
       reset_phase
@@ -642,6 +727,8 @@ prod_main() {
 }
 
 if [ "$TARGET_ENV" = tb-prod ]; then
+  APPLY_POD=""
+  trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null || true; [ -z "$MAIL_PF" ] || kill "$MAIL_PF" 2>/dev/null || true; [ -z "$APPLY_POD" ] || "${KS[@]}" -n thundermail delete pod "$APPLY_POD" --ignore-not-found --wait=false >/dev/null 2>&1 || true' EXIT
   prod_main
   finish
   exit 0

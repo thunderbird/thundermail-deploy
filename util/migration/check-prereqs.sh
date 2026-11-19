@@ -32,7 +32,7 @@ done
 . "$(dirname "${BASH_SOURCE[0]}")/target.sh"
 
 WORK_DIR=${WORK_DIR:-$HOME/.local/state/talos}
-ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
+ENV_FILE=${CUTOVER_ENV:-$(env_file_default)}
 [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
 OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 KC_TARGET=${KUBECONFIG_TARGET:-$WORK_DIR/$TARGET_KUBECONFIG_NAME}
@@ -98,7 +98,9 @@ load_operator_env "$OPERATOR_ENV"
 c_operator_env() { mode600 "$OPERATOR_ENV" && echo "$OPERATOR_ENV mode 600, $(grep -cE '^(export )?[A-Za-z_][A-Za-z0-9_]*=' "$OPERATOR_ENV") name(s), $(n=0; while IFS= read -r v; do [ -z "${!v:-}" ] || n=$((n + 1)); done < <(sed -n 's/^\(export \)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$OPERATOR_ENV"); echo "$n") set" || { echo "$OPERATOR_ENV missing or not mode 600"; return 1; }; }
 c_sso() { aws sts get-caller-identity --profile "$1" --query Arn --output text 2>/dev/null | grep -q AWSReservedSSO_AdministratorAccess && echo "AdministratorAccess via $1" || { echo "no session for $1 (aws sso login --sso-session mzla)"; return 1; }; }
 c_kube_target() {
-  can_all "$KC_TARGET" 'patch deployments thundermail' 'patch deployments thundermail scale' 'create pods thundermail' 'delete pods thundermail' \
+  local apply_pod=()
+  [ "$TARGET_ENV" != tb-prod ] || apply_pod=('create pods thundermail attach' 'get pods thundermail log' 'patch pods thundermail')
+  can_all "$KC_TARGET" "${apply_pod[@]}" 'patch deployments thundermail' 'patch deployments thundermail scale' 'create pods thundermail' 'delete pods thundermail' \
     'create pods thundermail exec' 'create pods thundermail portforward' 'create secrets thundermail' 'delete secrets thundermail' \
     'get secrets thundermail' 'get endpointslices.discovery.k8s.io thundermail' 'get jobs.batch thundermail' 'get externalsecrets.external-secrets.io thundermail' \
     'patch deployments accounts scale' 'create pods accounts exec' 'patch externalsecrets.external-secrets.io accounts' 'get pods accounts log' \
