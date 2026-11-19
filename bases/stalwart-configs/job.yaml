@@ -31,13 +31,13 @@ spec:
                 --output-format=json \
                 --indent=0 \
                 'load("/etc/stalwart-values/values.yaml") as $values
+                | select(.object != "DataRetention" or $values.dataRetention != null)
                 | select(
                   .object != "DnsServer"
                   or (.["@type"] == "upsert")
                   == (($values.dnsManagement // "Manual") == "Automatic")
                 )
                 | select(.object != "WebHook" or $values.webhookURL != null)
-                | select(.object != "DataRetention" or $values.dataRetention != null)
                 | (
                   .. | select(tag == "!!map")
                 ) |= with_entries(
@@ -87,10 +87,6 @@ spec:
                 ) = $values.addressBookName
                 |
                 (
-                  .. | select(. == "__DATA_RETENTION__")
-                ) = $values.dataRetention
-                |
-                (
                   select(.object == "AllowedIp") | .value
                 ) *= ($values.allowedIPs // {})
                 |
@@ -105,6 +101,10 @@ spec:
                 (
                   .. | select(. == "__DNS_PUBLISH_SPF__")
                 ) = $values.dnsPublishSpf
+                |
+                (
+                  .. | select(. == "__DATA_RETENTION__")
+                ) = $values.dataRetention
                 |
                 with(
                   select(($values.dnsManagement // "Manual") == "Automatic");
