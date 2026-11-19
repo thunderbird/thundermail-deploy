@@ -475,10 +475,10 @@ class Compare(Harness):
     def fill(self):
         L, T = self.state['buckets'][LEGACY], self.state['buckets'][TBPROD]
         L += [
-            obj('STALWART_WEBADMIN', 'webadmin-015'),
-            obj('SPAM_TRAINER_KEY', 'trainer'),
-            obj('SPAM_CLASSIFIER_KEY', 'classifier-new', version='v2'),
-            obj('SPAM_CLASSIFIER_KEY', 'classifier-old', latest=False),
+            obj('knkectcxifjfix7xivbecrcnjfha', 'webadmin-015'),
+            obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 'trainer'),
+            obj('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'classifier-new', version='v2'),
+            obj('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'classifier-old', latest=False),
             obj('0abc', 'same'),
             obj('a', 'boundary key'),
             obj('aaaa', 'gone in tb'),
@@ -490,9 +490,9 @@ class Compare(Harness):
             obj('~tail', 'after alphabet'),
         ]
         T += [
-            obj('STALWART_WEBADMIN', 'webadmin-016'),
-            obj('SPAM_TRAINER_KEY', 'trainer'),
-            obj('SPAM_CLASSIFIER_KEY', 'classifier-old'),
+            obj('knkectcxifjfix7xivbecrcnjfha', 'webadmin-016'),
+            obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 'trainer'),
+            obj('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'classifier-old'),
             obj('0abc', 'same'),
             obj('a', 'boundary key'),
             dm('aaaa', version='d9'),
@@ -554,12 +554,12 @@ class Compare(Harness):
         )
         self.assertIn('dry run: nothing copied', out)
         self.assertIn(
-            'named SPAM_TRAINER_KEY legacy=%s/7 tb-prod=%s/7 match'
+            'named STALWART_SPAM_TRAIN_DATA.lz4 (knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di) legacy=%s/7 tb-prod=%s/7 match'
             % ((hashlib.md5(b'trainer').hexdigest(),) * 2),
             out,
         )
-        self.assertRegex(out, r'named STALWART_WEBADMIN legacy=\w+/12 tb-prod=\w+/12 differ')
-        self.assertRegex(out, r'named SPAM_CLASSIFIER_KEY legacy=\w+/14 tb-prod=\w+/14 differ')
+        self.assertRegex(out, r'named STALWART_WEBADMIN \(knkectcxifjfix7xivbecrcnjfha\) legacy=\w+/12 tb-prod=\w+/12 differ')
+        self.assertRegex(out, r'named STALWART_SPAM_CLASSIFIER_MODEL\.lz4 \(knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna\) legacy=\w+/14 tb-prod=\w+/14 differ')
         self.assertIn('NEED  6 difference(s) left: run compare --apply', out)
         self.assertEqual(
             self.last(r),
@@ -581,10 +581,21 @@ class Compare(Harness):
         checks = sorted(
             json.loads(x)['key'] for x in (run / 'checksum.jsonl').read_text().splitlines()
         )
-        self.assertEqual(checks, ['SPAM_CLASSIFIER_KEY', 'STALWART_WEBADMIN', 'cccc'])
+        self.assertEqual(checks, ['cccc', 'knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'knkectcxifjfix7xivbecrcnjfha'])
         sizes = [json.loads(x) for x in (run / 'size.jsonl').read_text().splitlines()]
         self.assertEqual(
             [(d['key'], d['size'], d['tb_prod_size']) for d in sizes], [('bbbb', 11, 16)]
+        )
+
+    def test_the_named_keys_are_the_s3_keys_stalwart_writes(self):
+        m = tool()
+        self.assertEqual(
+            sorted(m.NAMED.items()),
+            [
+                ('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'STALWART_SPAM_CLASSIFIER_MODEL.lz4'),
+                ('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 'STALWART_SPAM_TRAIN_DATA.lz4'),
+                ('knkectcxifjfix7xivbecrcnjfha', 'STALWART_WEBADMIN'),
+            ],
         )
 
     def test_apply_copies_differences_then_rerun_passes(self):
@@ -592,7 +603,7 @@ class Compare(Harness):
         self.fill()
         r = self.compare('--apply')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN legacy=(\S+) tb-prod=\1 copied, match')
+        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN \(knkectcxifjfix7xivbecrcnjfha\) legacy=(\S+) tb-prod=\1 copied, match')
         self.assertIn('PASS  blob compare: 0 differences left', r.stdout)
         self.assertTrue(self.last(r).startswith('blob-compare mode=apply result=pass '))
         self.assertIn(' copied=6 failed=0 left=0 ', self.last(r) + ' ')
@@ -632,12 +643,16 @@ class Compare(Harness):
 
     def test_the_three_named_keys_must_match(self):
         self.cut()
-        self.state['buckets'][LEGACY] = [obj('k1', 'one'), obj('SPAM_TRAINER_KEY', 't')]
-        self.state['buckets'][TBPROD] = [obj('k1', 'one'), obj('SPAM_TRAINER_KEY', 't')]
+        self.state['buckets'][LEGACY] = [obj('k1', 'one'), obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 't')]
+        self.state['buckets'][TBPROD] = [obj('k1', 'one'), obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 't')]
         r = self.compare()
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn('named STALWART_WEBADMIN absent in both buckets', r.stdout)
-        self.assertIn('NEED  named key(s) not matching by checksum in both buckets: ', r.stdout)
+        self.assertIn('named STALWART_WEBADMIN (knkectcxifjfix7xivbecrcnjfha) absent in both buckets', r.stdout)
+        self.assertIn(
+            'NEED  named key(s) not matching by checksum in both buckets: '
+            'STALWART_WEBADMIN STALWART_SPAM_CLASSIFIER_MODEL.lz4',
+            r.stdout,
+        )
         r = self.compare('--apply')
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn('STOP  named key(s) not matching by checksum in both buckets: ', r.stdout)
@@ -720,13 +735,13 @@ class Compare(Harness):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.state['buckets'][TBPROD] = [
             obj('k1', 'one'),
-            obj('STALWART_WEBADMIN', 'changed-after-the-dry-run'),
-            *[obj(k, 'n' + k) for k in m.NAMED if k != 'STALWART_WEBADMIN'],
+            obj('knkectcxifjfix7xivbecrcnjfha', 'changed-after-the-dry-run'),
+            *[obj(k, 'n' + k) for k in m.NAMED if m.NAMED[k] != 'STALWART_WEBADMIN'],
         ]
         r = self.compare('--apply')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(TBPROD, {c['opts']['bucket'] for c in self.lists()})
-        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN legacy=(\S+) tb-prod=\1 copied, match')
+        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN \(knkectcxifjfix7xivbecrcnjfha\) legacy=(\S+) tb-prod=\1 copied, match')
 
     def test_a_run_leaves_other_runs_temporary_files(self):
         self.cut()
