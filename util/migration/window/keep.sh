@@ -52,6 +52,7 @@ restore() {
     case "$f" in ''|*/*) continue ;; esac
     have=$( [ -f "$SECRET_DIR/$f" ] && sha256sum "$SECRET_DIR/$f" | cut -d' ' -f1 || true)
     if [ "$have" = "$want" ]; then printf 'present %s (sha256 %s)\n' "$f" "${want:0:12}"; continue; fi
+    if [ -n "$have" ]; then printf 'kept %s differs from the file in %s (sha256 %s, kept %s): left as is\n' "$f" "$SECRET_DIR" "${have:0:12}" "${want:0:12}"; continue; fi
     printf 'restore %s from %s\n' "$f" "$KEEP_DIR/$f.gpg"
     [ "$APPLY" = 1 ] || continue
     ( umask 077; mkdir -p "$SECRET_DIR"; "${GPG[@]}" --decrypt --output "$SECRET_DIR/$f.part" "$KEEP_DIR/$f.gpg" ) || { echo "gpg could not decrypt $f"; rm -f "$SECRET_DIR/$f.part"; bad=1; continue; }

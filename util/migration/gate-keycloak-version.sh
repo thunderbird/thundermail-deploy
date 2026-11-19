@@ -20,7 +20,7 @@ sts_image() {
 }
 kc_version() {
   local err rc=0 out v
-  podman image exists "$1" 2>/dev/null || echo "pulling $1 (not in the local podman store)" >&2
+  [ "$TARGET_ENV" != tb-prod ] || podman image exists "$1" 2>/dev/null || echo "pulling $1 (not in the local podman store)" >&2
   err=$(mktemp)
   out=$(podman run --rm --entrypoint /opt/keycloak/bin/kc.sh "$1" --version 2>"$err") || rc=$?
   v=$(awk '$1 == "Keycloak" {print $2; exit}' <<<"$out")

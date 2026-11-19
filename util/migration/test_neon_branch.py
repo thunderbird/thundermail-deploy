@@ -112,8 +112,8 @@ class FakeNeon:
             if method == 'POST' and rest == '/restore':
                 if self.reset_moves:
                     b['last_reset_at'] = now()
-                    b['parent_lsn'] = '0/%X' % self.head
-                    self.head += 0x10
+                    b['parent_lsn'] = '0/%X' % self.head if self.head is not None else None
+                    self.head = self.head + 0x10 if self.head is not None else None
                 return 200, {'branch': b}
             if method == 'DELETE' and not rest:
                 del self.branches[bid]
@@ -389,15 +389,26 @@ class NeonBranch(unittest.TestCase):
         p = self.run_tool(*src, '--lsn', '0/1; drop')
         self.assertIn("REFUSED: --lsn '0/1; drop' is not an LSN", p.stderr)
 
-    def test_a_reset_that_left_the_lsn_fails(self):
+    def test_a_retry_reset_at_the_same_lsn_passes_and_no_lsn_fails(self):
         self.fake.branches[CHILD]['parent_lsn'] = '0/999'
-        self.fake.reset_moves = True
         self.fake.head = 0x999
-        p = self.run_tool(
-            'reset', '--branch', 'tb-prod-cutover', '--after', '2026-11-19T00:00:00Z', '--apply'
-        )
+        args = ('reset', '--branch', 'tb-prod-cutover', '--after', '2026-11-19T00:00:00Z', '--apply')
+        p = self.run_tool(*args)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('parent_lsn=0/999 ', p.stdout)
+        self.fake.head = None
+        orig = self.fake.route
+
+        def route(method, path, body):
+            code, out = orig(method, path, body)
+            if path.endswith('/restore'):
+                self.fake.branches[CHILD]['parent_lsn'] = None
+            return code, out
+
+        self.fake.route = route
+        p = self.run_tool(*args)
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
-        self.assertIn('reset proof FAILED: parent_lsn 0/999 after the reset (before 0/999)', p.stdout)
+        self.assertIn('reset proof FAILED: no parent_lsn after the reset', p.stdout)
 
     def test_a_redirect_is_not_followed(self):
         self.fake.redirect = True

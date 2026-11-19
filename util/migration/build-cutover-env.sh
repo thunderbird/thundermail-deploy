@@ -331,7 +331,7 @@ build() {
     case "${PUT:- }" in *" $name "*) continue ;; esac
     local v; v=$(op "$name")
     case "$name" in TEST_SENDER_APP_PASSWORD|STALWART_SOURCE_PG_*|STALWART_ADMIN_ACCOUNT_ID) [ -z "$(prev "$name")" ] || v=$(prev "$name") ;; esac
-    case "$name" in STALWART_SOURCE_PG_*) [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || [ ! -s "$SECRET_DIR/source-branch.env" ] || { v=$(sed -n "s/^$name=//p" "$SECRET_DIR/source-branch.env" | tail -1); [ -z "$v" ] || printf '%-30s from %s\n' "$name" "$SECRET_DIR/source-branch.env"; } ;; esac
+    case "$TARGET_ENV:$name" in tb-prod:STALWART_SOURCE_PG_*) [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || [ ! -s "$SECRET_DIR/source-branch.env" ] || { v=$(sed -n "s/^$name=//p" "$SECRET_DIR/source-branch.env" | tail -1); [ -z "$v" ] || printf '%-30s from %s\n' "$name" "$SECRET_DIR/source-branch.env"; } ;; esac
     if [ -z "$v" ] && [ "${REBUILD:-0}" = 1 ]; then
       case " $SECRET_VARS TEST_SENDER_APP_PASSWORD STALWART_SOURCE_PG_PASSWORD " in *" $name "*) ;; *) v=$(window_values "$name") ;; esac
       [ -n "$v" ] || printf '%-30s not restored: no copy in %s\n' "$name" "$EVIDENCE_DIR/window-values.tsv"
