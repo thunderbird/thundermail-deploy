@@ -2,11 +2,13 @@
 set -euo pipefail
 MODE=build
 REBUILD=0
+MOVE_SHA=0
 for a in "$@"; do
   case "$a" in
     --check) MODE=check ;;
     --rebuild) REBUILD=1 ;;
-    -h|--help) echo 'usage: TARGET_ENV=<env> build-cutover-env.sh [--check | --rebuild]'; exit 0 ;;
+    --move-window-sha) MOVE_SHA=1 ;;
+    -h|--help) echo 'usage: TARGET_ENV=<env> build-cutover-env.sh [--check | --rebuild [--move-window-sha]]'; exit 0 ;;
     *) echo "unknown argument: $a" >&2; exit 2 ;;
   esac
 done
@@ -133,11 +135,12 @@ held_replicas() {
   [ "$got" = "$want" ] && echo "#$pr head renders $name replicas=$got" || { echo "#$pr head renders $name replicas=${got:-none}, env file has $want"; return 1; }
 }
 window_vars() {
-  local app m alb ids vpc kcd=${KCD_DIR:-$HOME/src/tb/keycloak-customer-deploy} acd=${ACD_DIR:-$HOME/src/tb/accounts-deploy} v
+  local app m alb h ids vpc kcd=${KCD_DIR:-$HOME/src/tb/keycloak-customer-deploy} acd=${ACD_DIR:-$HOME/src/tb/accounts-deploy} v
   put TARGET_NLB_IPS "$([ -n "$nlb" ] && try doh_a "$nlb")" "DoH A records of TARGET_NLB_DNS at 1.1.1.1 (every address of the mail load balancer)"
   for app in keycloak-customer:AUTH accounts:ACCOUNTS; do
-    alb=$(try ktarget -n "${app%%:*}" get ingress -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
-    put "TBPROD_${app##*:}_ALB" "$alb" "kubectl -n ${app%%:*} get ingress .items[0].status.loadBalancer.ingress[0].hostname"
+    h=${app##*:}_HOST; h=${!h}
+    alb=$(try ktarget -n "${app%%:*}" get ingress -o json | jq -r --arg h "$h" '[.items[] | select(any(.spec.rules[]?; .host == $h)) | .status.loadBalancer.ingress[0].hostname // empty][0] // empty')
+    put "TBPROD_${app##*:}_ALB" "$alb" "kubectl -n ${app%%:*} get ingress: load balancer of the Ingress with a rule for host $h"
     put "TBPROD_${app##*:}_ALB_IP" "$([ -n "$alb" ] && try doh_a "$alb")" "DoH A records of TBPROD_${app##*:}_ALB at 1.1.1.1"
   done
   put KEYCLOAK_REPLICAS "$(try render_ref "$kcd" "origin/$IDENTITY_ENV_BRANCH" "$IDENTITY_OVERLAY" StatefulSet keycloak-customer)" "kubectl kustomize of $IDENTITY_OVERLAY at origin/$IDENTITY_ENV_BRANCH in KCD_DIR, StatefulSet keycloak-customer .spec.replicas"
@@ -155,13 +158,13 @@ window_vars() {
   put NEON_PROJECT_STALWART_TARGET "$(op NEON_PROJECT_STALWART_TARGET)$([ -n "$(op NEON_PROJECT_STALWART_TARGET)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_TARGET in the environment, else Neon API: project whose endpoint id is the STALWART_TARGET_PG_HOST prefix"
   v=$(op NEON_BRANCH_KC); [ -n "$v" ] || v=$(neon_default_branch KC "${NEON_PROJECT_KC_ID:-}"); put NEON_BRANCH_KC "$v" "NEON_BRANCH_KC in the environment, else Neon API: the default branch of NEON_PROJECT_KC"
   v=$(op NEON_BRANCH_ACCOUNTS); [ -n "$v" ] || v=$(neon_default_branch ACCOUNTS "${NEON_PROJECT_ACCOUNTS_ID:-}"); put NEON_BRANCH_ACCOUNTS "$v" "NEON_BRANCH_ACCOUNTS in the environment, else Neon API: the default branch of NEON_PROJECT_ACCOUNTS"
-  ids=$(try aws_legacy ec2 describe-instances --filters "Name=tag:Name,Values=$LEGACY_NODE_NAME_FILTER" Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | grep . | sort | tr '\n' ' ' | sed 's/ $//')
+  ids=$(try aws_legacy ec2 describe-instances --filters "Name=tag:Name,Values=$LEGACY_NODE_NAME_FILTER" Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | { grep . || true; } | sort | tr '\n' ' ' | sed 's/ $//')
   [ "$(wc -w <<<"$ids")" = "$LEGACY_NODE_COUNT" ] || ids=""
   put LEGACY_STALWART_NODE_IDS "$ids" "aws ec2 describe-instances --profile $LEGACY_AWS_PROFILE Name=$LEGACY_NODE_NAME_FILTER running; empty unless exactly $LEGACY_NODE_COUNT"
   put LEGACY_PG_SECRET_NAME "$LEGACY_PG_SECRET_NAME" "targets/$TARGET_ENV.sh"
   v=$(opw INBOUND_TTL_WAIT); put INBOUND_TTL_WAIT "${v:-60}" "INBOUND_TTL_WAIT appended in the window, else 60 (the inbound record TTL of #1726)"
-  v=""; [ "$REBUILD" != 1 ] || { v=$(prev WINDOW_SHA); [ -n "$v" ] || v=$(window_values WINDOW_SHA); }
-  put WINDOW_SHA "${v:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)}" "--rebuild: WINDOW_SHA of the previous file or window-values.tsv; else git rev-parse HEAD of TMD_CHECKOUT"
+  v=""; [ "$REBUILD" != 1 ] || [ "$MOVE_SHA" = 1 ] || { v=$(prev WINDOW_SHA); [ -n "$v" ] || v=$(window_values WINDOW_SHA); }
+  put WINDOW_SHA "${v:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)}" "--rebuild: WINDOW_SHA of the previous file or window-values.tsv (--move-window-sha: HEAD); else git rev-parse HEAD of TMD_CHECKOUT"
   put TMD_CHECKOUT "$REPO_DIR" "the thundermail-deploy checkout this builder runs from"
   put CUTOVER_ENV "$ENV_FILE" "this file"
   for v in $WINDOW_OPERATOR_VARS $(compgen -v W4_WAIT_ || true); do
