@@ -236,6 +236,14 @@ class RunnerStart(unittest.TestCase):
         self.assertIn('  + kubectl --kubeconfig %s get node n1' % self.kc, out2)
         self.assertEqual(self.rows(), ['runner-start'])
 
+    def test_a_dry_run_keeps_an_existing_secret_file(self):
+        self.secret_dir.mkdir(parents=True)
+        f = self.secret_dir / 'legacy-pg-20261119T010000Z.yaml'
+        f.write_text('{}')
+        rc, out = self.run_tool()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(f.exists())
+
     def test_an_interrupt_leaves_no_secret_file(self):
         self.state(sgps=SGPS, term=True)
         rc, out = self.run_tool('--apply')
@@ -430,15 +438,21 @@ class RunnerStart(unittest.TestCase):
         self.assertEqual(rc, 64, out)
 
 
-class W4RunnerHint(importlib.import_module('test_pr3_w4').Prod):
-    def test_w4_names_the_tb_prod_start_command(self):
-        self.kube({'runner': 'Pending'})
-        body = 'APPLY=0; preflight 2>&1 | head -1'
+W4 = importlib.import_module('test_pr3_w4')
+
+
+class W4RunnerHint(W4.Prod):
+    def test_the_reset_gate_names_the_tb_prod_start_command(self):
+        self.rows([W4.CUT, W4.EXPORT, W4.READ, W4.STOPPED])
+        body = 'mkdir -p "$S"; echo "{}" > "$S/export.json"\nreset_preflight; echo "rc=$?"'
+        self.kube({'replicas': 0, 'pods': [], 'runner': 'Pending'})
         out = self.w4(body)
-        want = 'NEED  runner pod not Running: bash %s/window/runner-start.sh --apply before W4'
+        want = 'runner pod is not Running: bash %s/window/runner-start.sh --apply\n'
         self.assertIn(want % self.MIG, out)
-        out = self.w4(body, target='tb-stage')
-        self.assertIn('NEED  runner pod not Running: apply util/migration/runner-pod.yaml', out)
+        self.assertIn('rc=1', out)
+        self.kube({'replicas': 0, 'pods': [], 'runner': 'Running'})
+        out = self.w4(body)
+        self.assertIn('runner Running\n', out)
         self.assertNotIn('runner-start.sh', out)
 
 

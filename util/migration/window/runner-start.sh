@@ -83,7 +83,7 @@ render() {
 }
 
 start() {
-  trap 'rm -f "$SECRET_FILE"' EXIT
+  [ "$APPLY" = 0 ] || trap 'rm -f "$SECRET_FILE"' EXIT
   run env SECRET_DIR="$SECRET_DIR" TS="$TS" bash "$MIG_DIR/runner-pod.sh" --secret || return 1
   run "${K[@]}" create -f "$SECRET_FILE" || { rm -f "$SECRET_FILE"; return 1; }
   run rm -f "$SECRET_FILE"

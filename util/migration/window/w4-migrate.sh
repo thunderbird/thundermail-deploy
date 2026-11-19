@@ -87,10 +87,10 @@ retake() {
 preflight() {
   local r state
   if [ "$APPLY" = 0 ] && ! runner_up; then
-    printf 'NEED  runner pod not Running: %s before W4 (dry run continues)\n' "$([ "$TARGET_ENV" = tb-prod ] && echo "bash $MIG_DIR/window/runner-start.sh --apply" || echo 'apply util/migration/runner-pod.yaml')"
+    printf 'NEED  runner pod not Running: apply util/migration/runner-pod.yaml before W4 (dry run continues)\n'
     NEEDS=$((NEEDS + 1))
   else
-    until_ok 60 runner_up || { echo "runner pod is not Running: $([ "$TARGET_ENV" = tb-prod ] && echo "bash $MIG_DIR/window/runner-start.sh --apply" || echo 're-apply util/migration/runner-pod.yaml')"; return 1; }
+    until_ok 60 runner_up || { echo "runner pod is not Running: re-apply util/migration/runner-pod.yaml"; return 1; }
     echo "runner Running"
   fi
   if runner_up; then
@@ -398,7 +398,7 @@ reset_preflight() {
   if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
   elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
   else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
-  if runner_up; then echo "runner Running"; else echo "runner pod is not Running"; bad=1; fi
+  if runner_up; then echo "runner Running"; else echo "runner pod is not Running: bash $MIG_DIR/window/runner-start.sh --apply"; bad=1; fi
   no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }
   [ "$bad" = 0 ] && return 0
   [ "$APPLY" = 1 ] && return 1
