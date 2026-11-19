@@ -1077,7 +1077,7 @@ class Runner(Sandbox):
             'KC_LEGACY_PG_HOST': 'b',
             'KC_LEGACY_PG_PASSWORD': 'p2',
             'ACCOUNTS_LEGACY_PG_HOST': 'b',
-            'ACCOUNTS_LEGACY_PG_PASSWORD': 'p3',
+            'ACCOUNTS_LEGACY_PG_PASSWORD': 'Pw-3!',
         }
         rc, out = self.run_sh([str(HERE / 'runner-pod.sh'), '--secret'], **env)
         self.assertEqual(rc, 1)
@@ -1090,7 +1090,7 @@ class Runner(Sandbox):
         doc = json.loads(path.read_text())
         self.assertEqual(doc['metadata']['name'], 'rehearsal-legacy-pg')
         self.assertEqual(doc['stringData']['accounts-host'], 'c')
-        self.assertNotIn('p3', out)
+        self.assertNotIn('Pw-3!', out)
 
 
 class ZoneCapture(Sandbox):
@@ -1379,11 +1379,13 @@ class CrossEnvironment(Sandbox):
         plant.mkdir()
         plant.chmod(0o777)
         f = plant / 'cutover.env'
-        f.write_text("touch %s/PWNED; TARGET_ENV='tb-prod'\n" % self.t)
+        f.write_text(": > %s/PWNED; TARGET_ENV='tb-prod'\n" % self.t)
         f.chmod(0o666)
         for args in (
             [str(HERE / 'check-prereqs.sh'), '--for', 'start'],
             [str(HERE / 'thaw.sh'), '--dry-run'],
+            [str(HERE / 'build-cutover-env.sh')],
+            [str(HERE / 'build-cutover-env.sh'), '--check'],
         ):
             with self.subTest(script=args[0]):
                 rc, out = self.run_sh(args, TARGET_ENV='tb-prod', CUTOVER_ENV=str(f), FREEZE_PR='7', PI_DIR=str(self.t))
