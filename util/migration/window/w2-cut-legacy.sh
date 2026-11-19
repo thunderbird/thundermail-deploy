@@ -61,7 +61,7 @@ resume() {
 mgmt() {
   local body
   legacy_tunnel || return 1
-  body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/principal?types=domain") || { echo "mgmt API on $OLD_STALWART_URL did not answer"; return 1; }
+  body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/principal?types=domain&limit=1") || { echo "mgmt API on $OLD_STALWART_URL did not answer"; return 1; }
   jq -e '.data' <<<"$body" >/dev/null 2>&1 || { echo "mgmt API on $OLD_STALWART_URL answered without data"; return 1; }
   echo "mgmt API answers on $OLD_STALWART_URL (domains=$(jq -r '.data.total // (.data.items | length)' <<<"$body"))"
 }

@@ -177,7 +177,7 @@ c_kc_admin_legacy() {
   [ "$code" = 200 ] && echo "token endpoint 200" || { echo "token endpoint $code"; return 1; }
 }
 c_stalwart_legacy() {
-  local code; code=$(legacy_api "/api/principal?types=domain") || { echo "$code"; return 1; }
+  local code; code=$(legacy_api "/api/principal?types=domain&limit=1") || { echo "$code"; return 1; }
   [ "$code" = 200 ] && echo "mgmt API 200 with the admin password over the SSM tunnel" || { echo "mgmt API $code"; return 1; }
 }
 c_stalwart_recovery() { sm "$TARGET_AWS_PROFILE" "$STALWART_RECOVERY_SECRET" | jq -Rs -e 'try (fromjson|.recovery_admin|test(":")) catch false' >/dev/null 2>&1 && echo "SM recovery_admin key present; API not probed (needs a port-forward)" || { echo "SM $STALWART_RECOVERY_SECRET has no recovery_admin user:password"; return 1; }; }
