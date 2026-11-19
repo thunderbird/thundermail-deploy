@@ -104,6 +104,7 @@ class InClusterApply(w4.Prod):
             w4.READ,
             w4.STOPPED,
             w4.BOUND[:4] + [digests],
+            ['reset', 'x', 'x', 'last_reset_at', 'x'],
             ['pre-delete', 'x', 'x', 'deleted', '9'],
         ]
         self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
