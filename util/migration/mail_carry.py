@@ -33,6 +33,10 @@ class Stop(Exception):
     pass
 
 
+class NotFound(Stop):
+    pass
+
+
 class Need(Exception):
     pass
 
@@ -143,7 +147,9 @@ class Jmap:
                 if retry and again and attempt < 5:
                     time.sleep(1.5 * (attempt + 1))
                     continue
-                raise Stop('HTTP %s from %s' % (e.code, path.split('?')[0]))
+                raise (NotFound if e.code == 404 else Stop)(
+                    'HTTP %s from %s' % (e.code, path.split('?')[0])
+                )
             except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
                 if retry and attempt < 5:
                     time.sleep(2 * (attempt + 1))
@@ -261,6 +267,13 @@ def export_account(j, account, since):
     return account, len(ids), msgs
 
 
+def expunged(j, account, m):
+    r = j.one('Email/get', {'accountId': account['id'], 'ids': [m['email']], 'properties': ['id']})
+    return m['email'] in (r.get('notFound') or []) and not any(
+        e.get('id') == m['email'] for e in r.get('list') or []
+    )
+
+
 def cmd_export(a):
     since = parse_time(a.since)
     start = datetime.datetime.now(UTC)
@@ -284,27 +297,40 @@ def cmd_export(a):
         results = list(ex.map(lambda x: export_account(j, x, since), accounts))
     results.sort(key=lambda r: dec(r[0]['id']))
     scanned = sum(r[1] for r in results)
-    msgs = [m for r in results for m in r[2]]
     if a.apply:
         out = private_dir(out, True)
-    total = 0
+    total = written = deleted = 0
     with open(out / 'manifest.jsonl', 'w') if a.apply else open(os.devnull, 'w') as man:
         for account, _, ms in results:
             if not ms:
                 continue
             size = sum(m['size'] for m in ms)
-            total += size
             print('account=%d messages=%d bytes=%d' % (dec(account['id']), len(ms), size))
             if not a.apply:
+                total += size
+                written += len(ms)
                 continue
             d = out / str(ms[0]['account'])
             d.mkdir(mode=0o700, exist_ok=True)
             for m in ms:
-                body = j.raw(
-                    '/jmap/download/%s/%s/m.eml'
-                    % (account['id'], urllib.parse.quote(m['blob'], safe='')),
-                    timeout=300,
-                )
+                try:
+                    body = j.raw(
+                        '/jmap/download/%s/%s/m.eml'
+                        % (account['id'], urllib.parse.quote(m['blob'], safe='')),
+                        timeout=300,
+                    )
+                except NotFound as exc:
+                    if not expunged(j, account, m):
+                        raise Stop(
+                            'account=%d email=%s: %s, Email/get still returns it'
+                            % (m['account'], m['email'], exc)
+                        )
+                    deleted += 1
+                    print(
+                        'account=%d email=%s: expunged since the scan, not exported'
+                        % (m['account'], m['email'])
+                    )
+                    continue
                 if len(body) != m['size']:
                     raise Stop(
                         'account=%d email=%s: downloaded %d bytes, the store says %d'
@@ -317,38 +343,42 @@ def cmd_export(a):
                 m['file'] = '%s/%s' % (d.name, f.name)
                 m['sha256'] = hashlib.sha256(body).hexdigest()
                 man.write(json.dumps(m, sort_keys=True) + '\n')
+                total += m['size']
+                written += 1
     with_mail = sum(1 for r in results if r[2])
     summary = {
         'since': z(since),
         'accounts': len(accounts),
         'with_mail': with_mail,
-        'messages': len(msgs),
+        'messages': written,
         'bytes': total,
         'scanned': scanned,
+        'deleted_since_scan': deleted,
     }
     if a.apply:
         (out / 'summary.json').write_text(json.dumps(summary, sort_keys=True) + '\n')
     else:
         print(
             'plan: write %d messages (%d bytes) of %d accounts to %s (mode 700), nothing written'
-            % (len(msgs), total, with_mail, out)
+            % (written, total, with_mail, out)
         )
     print(
         'mail-export: since=%s accounts=%d with_mail=%d messages=%d bytes=%d scanned=%d '
-        'mode=%s dir=%s'
+        'deleted_since_scan=%d mode=%s dir=%s'
         % (
             z(since),
             len(accounts),
             with_mail,
-            len(msgs),
+            written,
             total,
             scanned,
+            deleted,
             'apply' if a.apply else 'dry-run',
             out,
         )
     )
     if a.apply:
-        timing_row('mail-export', start, 'messages', len(msgs))
+        timing_row('mail-export', start, 'messages', written)
     return 0
 
 

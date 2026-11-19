@@ -38,7 +38,7 @@ class Server:
             'Basic ' + base64.b64encode(b'admin:' + password.encode()).decode(),
         )
         self.accounts, self.principals, self.blobs, self.calls = {}, [], {}, []
-        self.indexed = set()
+        self.indexed, self.expunge_at_download = set(), set()
         self.fail_download = self.truncate = self.short_total = self.mailbox_fail = False
         self.readback_delta = self.commit_then_500 = 0
         srv = self
@@ -62,6 +62,11 @@ class Server:
                 u = urllib.parse.urlsplit(self.path)
                 if u.path.startswith('/jmap/download/'):
                     _, _, _, acc, blob, _ = u.path.split('/', 5)
+                    emails = srv.accounts.get(acc, {}).get('emails', {})
+                    for eid in [i for i in srv.expunge_at_download if i in emails]:
+                        if emails[eid]['blobId'] == blob:
+                            del emails[eid]
+                            del srv.blobs[blob]
                     if srv.fail_download or blob not in srv.blobs:
                         return self.send(404, {'detail': 'blob'})
                     data = srv.blobs[blob][:-1] if srv.truncate else srv.blobs[blob]
@@ -180,11 +185,12 @@ class Server:
             for i in args['ids']:
                 if i in acc['emails']:
                     e = acc['emails'][i]
-                    got = {p: e[p] for p in args['properties']}
+                    got = {p: e[p] for p in args['properties'] if p != 'id'}
                     if args['properties'] == ['size']:
                         got['size'] += self.readback_delta
                     lst.append({'id': i, **got})
-            return [name, {'list': lst, 'notFound': []}, cid]
+            missing = [i for i in args['ids'] if i not in acc['emails']]
+            return [name, {'list': lst, 'notFound': missing}, cid]
         if name == 'Email/set' and self.kind == 15:
             done = {}
             for eid, patch in args['update'].items():
@@ -285,7 +291,7 @@ class Tool(unittest.TestCase):
         self.assertIn('account=1 messages=2 bytes=', out)
         self.assertIn('account=2 messages=1 bytes=', out)
         self.assertIn('messages=3', out.splitlines()[-1])
-        self.assertIn('scanned=4', out)
+        self.assertIn('scanned=4 deleted_since_scan=0 ', out)
         self.assertIn('nothing written', out)
         self.assertFalse(self.out.exists())
         self.assertFalse(self.out.parent.exists())
@@ -319,12 +325,34 @@ class Tool(unittest.TestCase):
         self.v16.fail_download = True
         rc, out = self.export('--apply')
         self.assertEqual(rc, 1, out)
-        self.assertIn('STOP  HTTP 404', out)
+        self.assertIn(': HTTP 404 from /jmap/download/', out)
+        self.assertIn('Email/get still returns it', out)
         self.assertEqual(self.rows(), [])
         self.assertFalse((self.out / 'summary.json').exists())
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
         self.assertEqual(rc, 2, out)
         self.assertIn('no complete export', out)
+
+    def test_a_message_expunged_after_the_scan_is_counted_and_the_export_goes_on(self):
+        gone = self.v16.put(self.alice16, raw('gone', 'alice', 'g'), '2026-11-19T18:08:00Z')
+        self.v16.expunge_at_download.add(gone)
+        rc, out = self.export('--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('account=1 email=%s: expunged since the scan, not exported' % gone, out)
+        last = [x for x in out.splitlines() if x.startswith('mail-export: ')][-1]
+        self.assertIn(' messages=3 ', last)
+        self.assertIn(' deleted_since_scan=1 ', last)
+        summary = json.loads((self.out / 'summary.json').read_text())
+        self.assertEqual((summary['messages'], summary['deleted_since_scan']), (3, 1))
+        man = [json.loads(x) for x in (self.out / 'manifest.jsonl').read_text().splitlines()]
+        self.assertEqual(len(man), 3)
+        self.assertNotIn(gone, [m['email'] for m in man])
+        self.assertFalse((self.out / '1' / ('%s.eml' % gone)).exists())
+        self.assertEqual(summary['bytes'], sum(m['size'] for m in man))
+        self.assertEqual(self.rows()[0][3:], ['messages', '3'])
+        rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('in_legacy=3', out)
 
     def test_urls_must_be_loopback_and_the_import_never_targets_tb_prod(self):
         rc, out = self.export(STALWART_URL='http://192.0.2.1:18081')
