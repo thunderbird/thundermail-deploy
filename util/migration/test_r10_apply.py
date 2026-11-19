@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import json
 import re
@@ -92,6 +93,20 @@ class InClusterApply(w4.Prod):
         (self.t / 'secret' / 'export.json').write_text(
             '{"@type":"update","object":"X"}\n' * 4 + '{"@type":"create","object":"Domain"}\n' * 5
         )
+        for _, f, c in w4.FILES[1:]:
+            (self.t / 'secret' / f).write_text(c + '\n')
+        digests = ','.join(
+            '%s=%s' % (k, hashlib.sha256((self.t / 'secret' / f).read_bytes()).hexdigest()) for k, f, _ in w4.FILES
+        )
+        self.base = [
+            w4.CUT,
+            w4.EXPORT[:4] + [digests],
+            w4.READ,
+            w4.STOPPED,
+            w4.BOUND[:4] + [digests],
+            ['reset', 'x', 'x', 'last_reset_at', 'x'],
+            ['pre-delete', 'x', 'x', 'deleted', '9'],
+        ]
         self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
 
     def state(self, st):
@@ -106,7 +121,7 @@ class InClusterApply(w4.Prod):
     def apply(self, rows=None, wait=30):
         self.wait = wait
 
-        self.rows(rows or [w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
+        self.rows(rows or self.base)
         return self.w4(
             'export STALWART_PASSWORD=recovery-pw-1; APPLY_POD_WAIT=%d\n'
             'port_forward() { echo PF-OK; }\n'
@@ -207,7 +222,7 @@ class InClusterApply(w4.Prod):
 
     def test_no_schema_answer_in_the_log_means_no_row_and_no_send(self):
         self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK.replace(SCHEMA, '')})
-        self.rows([w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
+        self.rows(self.base)
         out = self.w4(
             'APPLY_POD_WAIT=30 APPLY_SCHEMA_WAIT=1; port_forward() { echo PF-OK; }\n'
             'prod_apply; echo "rc=$?"'
@@ -280,7 +295,7 @@ class InClusterApply(w4.Prod):
         self.assertIn('an apply started after this pre-delete and did not finish', out)
 
     def test_no_apply_start_row_means_no_send(self):
-        self.rows([w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
+        self.rows(self.base)
         out = self.w4(
             'APPLY_POD_WAIT=30; port_forward() { echo PF-OK; }\n'
             'mark() { return 1; }\nprod_apply; echo "rc=$?"'

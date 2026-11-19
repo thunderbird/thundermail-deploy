@@ -709,10 +709,7 @@ class ResetAfterStart(W4.Prod):
     def preflight(self, rows):
         self.rows(rows)
         self.kube({'replicas': 0, 'pods': []})
-        return self.w4(
-            'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
-            'reset_preflight; echo "rc=$? stop=$STOP_AT"'
-        )
+        return self.w4(W4.FILES_SH + 'reset_preflight; echo "rc=$? stop=$STOP_AT"')
 
     def test_a_start_after_the_stop_row_refuses_the_reset(self):
         start = ['start-legacy-stalwart', 'x', '2026-11-19T04:40:00Z', 'nodes', '6']

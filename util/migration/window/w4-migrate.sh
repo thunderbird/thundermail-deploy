@@ -365,16 +365,46 @@ read_done() {
   echo "legacy-read phase done: $S/export.json; legacy Stalwart may be stopped now (W 4.3)"
 }
 
+export_digests() {
+  local n f out=""
+  for n in export:export.json kept:principals.kept.json stubs:stubs-dropped.json; do
+    f=$S/${n#*:}
+    [ -s "$f" ] || return 1
+    out="$out${out:+,}${n%%:*}=$(sha256sum "$f" | cut -d' ' -f1)"
+  done
+  printf '%s\n' "$out"
+}
+
 export_ok() {
-  local e s st want
+  local e s st want have
   e=$(cut_line w4-export) s=$(cut_line w4-export-start) st=$(cut_line start-legacy-stalwart)
   [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ] || return 1
   [ -z "$st" ] || [ "$e" -gt "$st" ] || { echo "a start-legacy-stalwart row follows the w4-export row: legacy Stalwart ran again after the export, so it is stale"; return 1; }
   want=$(cut_row w4-export | awk -F'\t' '$5 == "sha256" {print $6}')
-  [ -z "$want" ] || [ "$(sha256sum "$S/export.json" | cut -d' ' -f1)" = "$want" ]
+  have=$(export_digests) || { echo "$S lacks export.json, principals.kept.json or stubs-dropped.json of the export"; return 1; }
+  [ -n "$want" ] && [ "$have" = "$want" ] || { echo "the w4-export row does not hold the sha256 of export.json, principals.kept.json and stubs-dropped.json now in $S: an older or changed export"; return 1; }
+}
+
+export_current() {
+  local read stop start bound bad=0
+  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart) start=$(cut_line start-legacy-stalwart)
+  STOP_AT=$(cut_time stop-legacy-stalwart)
+  if [ -n "$read" ] && ! export_ok; then echo "the export of the last read run did not pass its checks (no w4-export row after the last w4-export-start row)"; read=""; fi
+  if ! awk -F'\t' '$1 == "cut-ecs" {f = 1} END {exit !f}' "$TIMING_TSV" 2>/dev/null; then echo "no cut-ecs row in $TIMING_TSV: W2 has not cut legacy in this attempt"; bad=1; fi
+  if [ -z "$read" ] || [ ! -s "$S/export.json" ]; then echo "no w4-read-done row after the last cut-ecs row (or no $S/export.json): run --phase read first"; bad=1; fi
+  if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
+  elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
+  elif [ -n "$start" ] && [ "$start" -gt "$stop" ]; then echo "a start-legacy-stalwart row follows the stop-legacy-stalwart row: legacy Stalwart was started again; stop and read it again (W 4.3)"; bad=1
+  else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
+  if [ "${1:-reset}" = boot ] && [ "$bad" = 0 ]; then
+    bound=$(cut_row reset-export | awk -F'\t' '$5 == "sha256" {print $6}')
+    if [ -z "$bound" ] || [ "$bound" != "$(export_digests)" ] || [ -z "$(cut_line reset)" ] || [ "$(cut_line reset-export)" -gt "$(cut_line reset)" ]; then echo "the export files in $S are not the ones the reset checked (reset-export row): a read ran after the reset; rerun --phase reset --apply --go '<words>'"; bad=1; fi
+  fi
+  [ "$bad" = 0 ]
 }
 
 read_phase() {
+  local d
   [ "$APPLY" = 0 ] || mark w4-read-start export "$S/export.json"
   if [ "$APPLY" = 1 ] && [ -z "$GO" ] && export_ok; then
     echo "reusing the export of this cut (w4-export row, $S/export.json): only queue-drain runs; --go '<words>' dumps again"
@@ -390,7 +420,10 @@ read_phase() {
     fi
     step domains changes domain_fix_step
     step retarget "" retarget
-    [ "$APPLY" = 0 ] || mark w4-export sha256 "$(sha256sum "$S/export.json" | cut -d' ' -f1)"
+    if [ "$APPLY" = 1 ]; then
+      d=$(export_digests) || stop "export.json, principals.kept.json or stubs-dropped.json is missing from $S"
+      mark w4-export sha256 "$d"
+    fi
   fi
   step queue-drain queued queue_drain
   [ "$APPLY" = 0 ] || step read-done "" read_done
@@ -405,16 +438,8 @@ no_stalwart() {
 }
 
 reset_preflight() {
-  local read stop start bad=0
-  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart) start=$(cut_line start-legacy-stalwart)
-  STOP_AT=$(cut_time stop-legacy-stalwart)
-  if [ -n "$read" ] && ! export_ok; then echo "the export of the last read run did not pass its checks (no w4-export row after the last w4-export-start row)"; read=""; fi
-  if ! awk -F'\t' '$1 == "cut-ecs" {f = 1} END {exit !f}' "$TIMING_TSV" 2>/dev/null; then echo "no cut-ecs row in $TIMING_TSV: W2 has not cut legacy in this attempt"; bad=1; fi
-  if [ -z "$read" ] || [ ! -s "$S/export.json" ]; then echo "no w4-read-done row after the last cut-ecs row (or no $S/export.json): run --phase read first"; bad=1; fi
-  if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
-  elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
-  elif [ -n "$start" ] && [ "$start" -gt "$stop" ]; then echo "a start-legacy-stalwart row follows the stop-legacy-stalwart row: legacy Stalwart was started again; stop and read it again (W 4.3)"; bad=1
-  else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
+  local bad=0
+  export_current reset || bad=1
   if runner_up; then echo "runner Running"; else echo "runner pod is not Running: bash $MIG_DIR/window/runner-start.sh --apply"; bad=1; fi
   no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }
   [ "$bad" = 0 ] && return 0
@@ -660,6 +685,7 @@ prod_apply() {
     return 1
   fi
   if [ "$done" = 0 ]; then
+    [ "$APPLY" = 0 ] || export_current boot || { echo "the export is not the one the reset checked: nothing sent"; return 1; }
     incluster_apply || return 1
     [ "$APPLY" = 0 ] || mark export-applied errors 0
   fi
@@ -680,6 +706,7 @@ boot_resume() {
   r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete) s=$(cut_line reset-sent)
   [ -z "$s" ] || [ -z "$r" ] || [ "$s" -lt "$r" ] || { echo "the last reset was sent ($(cut_time reset-sent)) and did not finish: it may have undone the pre-delete; rerun --phase reset --apply --go '<words>'"; return 1; }
   [ -n "$r" ] && [ -n "$g" ] && [ -n "$p" ] && [ "$g" -gt "$r" ] && [ "$p" -gt "$g" ] || { echo "nothing to resume: want reset, guard and pre-delete rows, in that order, after the last cut-ecs row"; return 1; }
+  export_current boot || return 1
   echo "resuming after the pre-delete of $(cut_time pre-delete); no second reset"
 }
 
@@ -698,6 +725,7 @@ reset_phase() {
     [ -n "$GO" ] || stop "$CUTOVER_BRANCH was already reset in this cut: a second reset needs the operator's confirmation (--go); after an expired pod wait use --phase boot"
     go_gate
   fi
+  [ "$APPLY" = 0 ] || mark reset-export sha256 "$(export_digests)" || stop "could not write the reset-export row"
   step neon-reset reset_at neon_reset
   step source-branch-create created_at source_branch
   step branch-check parent_lsn branch_check
