@@ -118,8 +118,13 @@ class CatchAllsOnDroppedOrUnicodeDomains(unittest.TestCase):
             {"id": 1, "type": "individual", "name": "u", "emails": ["u@a.example.com", "@a.example.com"]},
             {"id": 2, "type": "individual", "name": "v", "emails": ["v@a.example.com", "@mail.example.notatld"]},
             {"id": 3, "type": "individual", "name": "w", "emails": ["w@a.example.com", "@m\u00fcnchen.example.com"]},
+            {"id": 4, "type": "individual", "name": "x", "emails": ["x@a.example.com", "@b\u00fccher.example.com"]},
+            {"id": 5, "type": "individual", "name": "y", "emails": ["y@a.example.com", "@xn--bcher-kva.example.com"]},
         ], ensure_ascii=False))
-        (t / "dropped.json").write_text(json.dumps({"domains": ["mail.example.notatld"], "dkim_dropped": 0, "dkim_kept": 0}))
+        (t / "dropped.json").write_text(json.dumps(
+            {"domains": ["mail.example.notatld", "b\u00fccher.example.com", "xn--bcher-kva.example.com"], "dkim_dropped": 0, "dkim_kept": 0},
+            ensure_ascii=False,
+        ))
         env = dict(os.environ, STALWART_URL="http://127.0.0.1:%d" % srv.server_port, STALWART_USER="a", STALWART_PASSWORD="p")
         env.pop("OLD_STALWART_URL", None)
         p = subprocess.run(
@@ -129,7 +134,8 @@ class CatchAllsOnDroppedOrUnicodeDomains(unittest.TestCase):
             capture_output=True, text=True, env=env, timeout=60,
         )
         self.assertNotIn("FAILED", p.stdout, p.stdout + p.stderr)
-        self.assertIn("skip   catch-alls on Domains dropped before the apply (domain_fix.py): 1", p.stdout)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("skip   catch-alls on Domains dropped before the apply (domain_fix.py): 3", p.stdout)
         self.assertIn("update catch-all @xn--mnchen-3ya.example.com", p.stdout)
         self.assertIn("update catch-all @a.example.com", p.stdout)
 
