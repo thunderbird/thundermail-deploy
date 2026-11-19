@@ -329,12 +329,23 @@ the keying for the real hosts.
 - `blob_compare.py wait` and `compare` (tb-prod, W 4.6) need the `stop-legacy-stalwart` row after
   the last `cut-ecs` row. `wait --apply` polls rule `tb-prod-cutover` until both pending metrics
   read 0 three times after the stop and the failed operations since `REPL_FAILED_SINCE` sum to 0,
-  then writes a `blob-replication-wait` row. `compare` lists both buckets in parallel by key range
-  (current versions; a delete marker or an absent key in tb-prod is missing), compares size and
-  ETag, and with `--apply` copies each difference from legacy and writes a `blob-compare left N`
-  row. It deletes nothing. `STALWART_WEBADMIN`, `SPAM_TRAINER_KEY` and `SPAM_CLASSIFIER_KEY` must
-  match by checksum, or the run stops. Listings stay under `$EVIDENCE_DIR/blob-compare`, copies in
-  transit under `$SECRET_DIR`.
+  then writes a `blob-replication-wait` row. `compare --apply` without that row runs the same
+  wait first (same `--timeout` and `--interval`, the row written only on a pass) and compares
+  only after a pass; a timeout stops with exit 1, no row and no copy. `compare` lists both buckets
+  in parallel by key range (current versions; a delete marker or an absent key in tb-prod is
+  missing), compares size and ETag, and with `--apply` copies each difference from legacy and
+  writes a `blob-compare left N` row. It deletes nothing. `STALWART_WEBADMIN`, `SPAM_TRAINER_KEY`
+  and `SPAM_CLASSIFIER_KEY` must match by checksum, or the run stops. Listings stay under
+  `$EVIDENCE_DIR/blob-compare`, copies in transit under `$SECRET_DIR`.
+- The listing does not start the aws CLI per page. Each shard keeps one HTTPS connection to
+  `<bucket>.s3.eu-central-1.amazonaws.com` and signs `ListObjectVersions` (SigV4) with credentials
+  from `aws configure export-credentials`, fetched once per read-only profile and again when they
+  expire within 5 minutes. Copies still use the CLI. After the listing it prints
+  `listed <side> pages=<n> versions=<n> in <s>s (<w> workers, one connection per shard)` for each
+  side. A page on a kept-alive connection is estimated, not measured, at 0.3 to 0.6 s (the CLI took
+  1.7 to 1.8 s), so the about 21,800 pages of both buckets at 16 workers take about 7 to 14
+  minutes; `## Done when` step 8 of the Tooling issue measures it. `BLOB_S3_ENDPOINT` is for the
+  tests only (`BLOB_TEST=1` and a loopback `http://` address).
 - `setenv`, `setenv_secret` and the env file edits of W4 hold `flock` on `$ENV_FILE.lock`;
   `check-prereqs.sh` reads the env file under the same lock, shared.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
