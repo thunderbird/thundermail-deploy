@@ -19,6 +19,7 @@ HELD_RAW="" HELD_TSV=$EVIDENCE_DIR/celery-held-$TS.tsv
 IGNORE=${CELERY_DRAIN_IGNORE:-}
 [[ -z $IGNORE || $IGNORE =~ ^[0-9a-f-]+(,[0-9a-f-]+)*$ ]] || { echo "CELERY_DRAIN_IGNORE takes Celery task ids separated by commas (got '$IGNORE')" >&2; exit 64; }
 W2_RESTORE=$EVIDENCE_DIR/cut-legacy-restore.txt
+REVISIONS=$EVIDENCE_DIR/ecs-revisions-before.txt
 read -ra CELERY <<<"$(tr ' ' '\n' <<<"$LEGACY_ECS_TARGETS" | grep -- '-celery-' | tr '\n' ' ' || :)"
 [ "${#CELERY[@]}" = 1 ] || stop "LEGACY_ECS_TARGETS names ${#CELERY[@]} Celery services, not 1: $LEGACY_ECS_TARGETS"
 CL=${CELERY[0]%%/*}
@@ -117,6 +118,32 @@ ecs_snapshot() {
   echo "ECS snapshot of 1.5: $ECS_BEFORE"
 }
 
+revisions() {
+  local t
+  [ -s "$REVISIONS" ] || { echo "no $REVISIONS: run the ECS loop of 1.5 first"; return 1; }
+  for t in $LEGACY_ECS_TARGETS; do
+    awk -F'\t' -v s="${t##*/}" '$1 == s {f = 1} END {exit !f}' "$REVISIONS" || { echo "$REVISIONS names no service ${t##*/}: run the ECS loop of 1.5 again"; return 1; }
+  done
+  echo "ECS revisions of 1.5: $REVISIONS"
+}
+
+same_services() {
+  local t want wantd have name td d moved="" bad=0
+  for t in $LEGACY_ECS_TARGETS; do
+    want=$(awk -F'\t' -v s="${t##*/}" '$1 == s {print $2; exit}' "$REVISIONS")
+    wantd=$(jq -r --arg c "${t%%/*}" --arg s "${t##*/}" '[.services[] | select(.cluster == $c and .serviceName == $s) | .desiredCount][0] // "none"' "$ECS_BEFORE")
+    have=$("${RO[@]}" ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[0].[serviceName,taskDefinition,desiredCount]' --output text) || { echo "ecs describe-services $t failed"; return 1; }
+    IFS=$'\t' read -r name td d <<<"$have"
+    printf '  %s task=%s saved=%s desired=%s saved=%s\n' "$t" "${td##*/}" "${want##*/}" "$d" "$wantd"
+    [ "$name" = "${t##*/}" ] && [ "$td" = "$want" ] || bad=1
+    [ "$d" = "$wantd" ] || moved="$moved ${t##*/}"
+  done
+  [ "$bad" = 0 ] || { echo "a service name or task definition differs from 1.5 $REVISIONS"; return 1; }
+  echo "service names and task definitions equal 1.5"
+  if [ -n "$moved" ]; then echo "desired count differs from the 1.5 snapshot for$moved: autoscaling moves it; the timed read goes on"
+  else echo "desired counts equal the 1.5 snapshot"; fi
+}
+
 same_desired() {
   local t want have bad=0
   for t in $LEGACY_ECS_TARGETS; do
@@ -133,9 +160,8 @@ plan() {
   printf '== %s %s: read-only, profile mzla-legacy-ro; changes no desired count, task or broker\n' "$W" "$CMD"
   printf 'CELERY_DRAIN_IGNORE: %s\n' "${IGNORE:-none}"
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-groups --log-group-name-prefix "$LEGACY_ECS_CLUSTER_PREFIX" --query 'logGroups[].logGroupName' --output text)"
-  if [ "$CMD" != read ]; then
-    printf '  + %s   (for each of LEGACY_ECS_TARGETS, against the 1.5 snapshot)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].desiredCount' --output text)"
-  fi
+  [ "$CMD" != wait ] || printf '  + %s   (for each of LEGACY_ECS_TARGETS, against the 1.5 snapshot)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].desiredCount' --output text)"
+  [ "$CMD" != timed ] || printf '  + %s   (for each of LEGACY_ECS_TARGETS: name and task definition against %s, a stop on a difference; desired count against the 1.5 snapshot, printed only)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].[serviceName,taskDefinition,desiredCount]' --output text)" "$REVISIONS"
   [ "$CMD" != wait ] || printf '  every %ss until held=0, at most %ss:\n' "$INTERVAL" "$TIMEOUT"
   [ "$CMD" != timed ] || printf '  every %ss for at most %ss, ending early at held=0 (a held task never stops the read; every read call ends at the limit, and a log history not read to its end by then is a failed read):\n' "$INTERVAL" "$READ_FOR"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text)"
@@ -143,7 +169,7 @@ plan() {
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-streams --log-group-name '<celery log group>' --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text)"
   printf '  + %s   (one per running task: its whole stream once, then the new events after the forward token)\n' "$(shq "${RO[@]}" logs get-log-events --log-group-name '<celery log group>' --log-stream-name '<stream of the task>' --start-from-head --output json)"
   [ "$CMD" != wait ] || printf '  then the desired count check above again, and row celery-drain held 0\n'
-  [ "$CMD" != timed ] || printf '  then the desired count check above again, the tasks still held to %s, and row celery-read held <n>\n' "$HELD_TSV"
+  [ "$CMD" != timed ] || printf '  then the service check above again, the tasks still held to %s, and row celery-read held <n>\n' "$HELD_TSV"
 }
 
 write_held() {
@@ -161,6 +187,11 @@ if [ "$CMD" != read ]; then
   elif [ "$APPLY" = 1 ]; then stop "$out"
   else printf 'NEED  %s\n' "$out"; NEEDS=$((NEEDS + 1)); fi
 fi
+if [ "$CMD" = timed ]; then
+  if rev=$(revisions); then printf '%s\n' "$rev"
+  elif [ "$APPLY" = 1 ]; then stop "$rev"
+  else printf 'NEED  %s\n' "$rev"; NEEDS=$((NEEDS + 1)); fi
+fi
 [ "$APPLY" = 1 ] || { finish; exit 0; }
 
 log_group || stop "no single Celery log group"
@@ -172,8 +203,8 @@ if [ "$CMD" = read ]; then
 fi
 
 ECS_BEFORE=$(sed -n 's/^ECS snapshot of 1.5: //p' <<<"$out")
-same_desired || stop "desired counts differ from the 1.5 snapshot before the $CMD"
 if [ "$CMD" = timed ]; then
+  same_services || stop "service names or task definitions differ from 1.5 before the timed read"
   HELD_RAW=$EVIDENCE_DIR/celery-held-$TS.raw
   start=$(date +%s)
   end=$(( start + READ_FOR ))
@@ -193,7 +224,7 @@ if [ "$CMD" = timed ]; then
     sleep "$(( left < INTERVAL ? left : INTERVAL ))"
     [ "$(date +%s)" -lt "$end" ] || break
   done
-  same_desired || stop "desired counts differ from the 1.5 snapshot after the timed read"
+  same_services || stop "service names or task definitions differ from 1.5 after the timed read"
   write_held
   mark celery-read held "$HELD"
   [ "$READ_OK" = 1 ] || echo "  note: the last read is not a drained read (see above); its tasks are recorded all the same"
@@ -201,6 +232,7 @@ if [ "$CMD" = timed ]; then
   finish
   exit 0
 fi
+same_desired || stop "desired counts differ from the 1.5 snapshot before the wait"
 end=$(( $(date +%s) + TIMEOUT ))
 while :; do
   HELD="" READ_OK=0
