@@ -40,6 +40,7 @@ class Server:
         self.accounts, self.principals, self.blobs, self.calls = {}, [], {}, []
         self.indexed, self.expunge_at_download = set(), set()
         self.state, self.delete_after_first_page, self.churn = {}, None, set()
+        self.no_state = set()
         self.admin = 'adm0' if kind == 16 else None
         self.fail_download = self.truncate = self.short_total = self.mailbox_fail = False
         self.readback_delta = self.commit_then_500 = 0
@@ -152,7 +153,8 @@ class Server:
         if name.startswith('x:Account/') and args.get('accountId') != self.admin:
             return ['error', {'type': 'accountNotFound'}, cid]
         if name == 'x:Account/query' and self.kind == 16:
-            return [name, {'ids': sorted(self.accounts), 'total': len(self.accounts)}, cid]
+            out = {'ids': sorted(self.accounts), 'total': len(self.accounts), 'queryState': 'n'}
+            return [name, out, cid]
         if name == 'x:Account/get' and self.kind == 16:
             lst = [
                 {'id': i, **{k: self.accounts[i][k] for k in ('name', 'emailAddress', '@type')}}
@@ -193,8 +195,10 @@ class Server:
             out = {
                 'ids': ids[pos : pos + lim],
                 'total': total,
-                'queryState': self.state.get(aid, 0),
+                'queryState': 's%d' % self.state.get(aid, 0),
             }
+            if aid in self.no_state:
+                del out['queryState']
             gone = self.delete_after_first_page
             if aid in self.churn or (pos == 0 and gone and gone[0] == aid):
                 if aid not in self.churn:
@@ -403,6 +407,19 @@ class Tool(unittest.TestCase):
         self.assertIn('scanned=%d ' % (3 + page + 1), out)
         man = (self.out / 'manifest.jsonl').read_text()
         self.assertIn('"email": "m00999"', man)
+
+    def test_an_answer_without_query_state_stops_the_export(self):
+        page = mc.QUERY_PAGE
+        self.many(self.bob16, 0, page - 1)
+        self.v16.put(self.bob16, raw('late', 'bob', 'l'), '2026-11-19T18:09:00Z', eid='m%05d' % 999)
+        self.many(self.bob16, page, 1)
+        self.v16.delete_after_first_page = (self.bob16, 'm00000')
+        self.v16.no_state.add(self.bob16)
+        rc, out = self.export('--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STOP  Email/query: the server sent no queryState', out)
+        self.assertFalse((self.out / 'summary.json').exists())
+        self.assertEqual(self.rows(), [])
 
     def test_a_list_that_keeps_changing_stops_the_export(self):
         self.many(self.bob16, 0, mc.QUERY_PAGE)
