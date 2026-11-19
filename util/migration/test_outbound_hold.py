@@ -52,6 +52,11 @@ a = ' '.join(args)
 for f in st.get('fail', []):
     if f in a:
         sys.stderr.write('An error occurred (Fake)\n'); sys.exit(255)
+for f in list(st.get('fail_once', [])):
+    if f in a:
+        st['fail_once'].remove(f)
+        json.dump(st, open(p, 'w'))
+        sys.stderr.write('An error occurred (Fake)\n'); sys.exit(255)
 out = None
 if 'eks describe-cluster' in a:
     out = st['cluster_vpc']
@@ -69,6 +74,7 @@ elif 'ec2 authorize-security-group-egress' in a:
                 if m['createdAt'] == 'now':
                     m['createdAt'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(at))
             st['queue'].update(st.pop('on_open', {{}}))
+            st.update(st.pop('after_open', {{}}))
             for i in st.pop('attempts', {{}}):
                 st.setdefault('delivered', []).append(i)
                 st['queue'].pop(i, None)
@@ -158,15 +164,26 @@ elif url.endswith('/jmap'):
     req = json.loads(args[args.index('--data') + 1])
     m, a, tag = req['methodCalls'][0]
     q = st['queue']
+    if st.get('jmap_down'):
+        print('upstream connect error')
+        sys.exit(0)
     if m == 'x:QueuedMessage/query':
         cap = min(a.get('limit', 500), st.get('query_cap', 5000))
         ids = sorted(q)[a.get('position', 0):a.get('position', 0) + cap]
-        res = {{'ids': ids, 'limit': cap}}
+        res = {{'ids': ids}}
+        if a.get('calculateTotal'):
+            res['total'] = len(q)
         for i in st.pop('drop_after_query', []):
             q.pop(i, None)
     elif m == 'x:QueuedMessage/get':
         res = {{'list': [dict(q[i], id=i) for i in a['ids'] if i in q]}}
     elif m == 'x:QueuedMessage/set':
+        if st.pop('slow_set', False):
+            c = os.environ['FAKE_CLOCK']
+            open(c, 'w').write(str(float(open(c).read() or 0) + 45))
+        for i in st.pop('start_before_set', []):
+            snap = json.loads(json.dumps(q[i]))
+            st.setdefault('attempts', {{}})[i] = {{'left': 200, 'snap': snap}}
         if st.get('set_error'):
             bad = {{k: {{'type': st['set_error']}} for k in a['update']}}
             res = {{'updated': {{}}, 'notUpdated': bad}}
@@ -176,6 +193,9 @@ elif url.endswith('/jmap'):
                     if r['status']['@type'] != 'PermanentFailure':
                         r['retryDue'] = v['nextRetry']
             res = {{'updated': {{k: None for k in a['update']}}}}
+            if st.pop('fail_after_set', False):
+                bad = {{k: {{'type': 'serverFail'}} for k in a['update']}}
+                res = {{'updated': {{}}, 'notUpdated': bad}}
     out = {{'methodResponses': [[m, res, tag]]}}
 json.dump(st, open(p, 'w'))
 print(json.dumps(out))
@@ -716,7 +736,7 @@ class Hold25(Base):
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertEqual(self.state().get('delivered', []), [])
-        self.assertRegex(p.stdout, r'longest 27(19|20) s')
+        self.assertRegex(p.stdout, r'longest 27(49|50) s')
         self.assertIn('held again, overwritten by a delivery attempt that ended: ids=41', p.stdout)
         self.assertGreater(self.due('41'), self.fake_now() + 23 * 3600)
 
@@ -727,7 +747,7 @@ class Hold25(Base):
         self.add_row('hold25-queue-hold')
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertRegex(p.stdout, r'drain: expected wait at most 54(39|40) s')
+        self.assertRegex(p.stdout, r'drain: expected wait at most 54(69|70) s')
         self.assertLess(p.stdout.index('drain: expected wait'), p.stdout.index('drain: done'))
         self.assertGreaterEqual(sum(self.state()['sleeps']), 5430)
         self.assertEqual(self.egress(), {('-1', -1, -1)})
@@ -753,7 +773,7 @@ class Hold25(Base):
         first = self.run_tool('hold25.sh', 'queue-hold', '--apply')
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         self.assertRegex(
-            first.stdout, r'past its longest possible delivery attempt at \S+ \(in 13(59|60) s\)'
+            first.stdout, r'past its longest possible delivery attempt at \S+ \(in 13(89|90) s\)'
         )
         mem = (self.ev / 'hold25-memory.json').read_text()
         due = {i: self.due(i) for i in ('11', '12')}
@@ -783,8 +803,8 @@ class Hold25(Base):
         self.assertIn(
             'drain: held again, overwritten by a delivery attempt that ended: ids=44', p.stdout
         )
-        self.assertIn('drain: expected wait at most 0 s', p.stdout)
-        self.assertEqual(self.state().get('sleeps', []), [])
+        self.assertRegex(p.stdout, r'drain: expected wait at most (29|30) s')
+        self.assertLessEqual(sum(self.state().get('sleeps', [])), 30)
         self.assertEqual(self.state().get('delivered', []), [])
 
     def test_release_port25_forgets_a_hold_after_two_unseen_attempts(self):
@@ -799,7 +819,7 @@ class Hold25(Base):
         self.save(st)
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertRegex(p.stdout, r'drain: expected wait at most 13(59|60) s')
+        self.assertRegex(p.stdout, r'drain: expected wait at most 13(89|90) s')
         self.assertGreaterEqual(sum(self.state()['sleeps']), 1350)
 
     def test_release_port25_opens_at_once_for_mail_held_long_before(self):
@@ -880,9 +900,114 @@ class Hold25(Base):
         self.add_row('hold25-queue-hold')
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertNotEqual(p.returncode, 0)
-        self.assertIn('queue: one query returned 3 ids, its limit', p.stdout)
+        self.assertIn('queue: one query returned 3 ids of total 4', p.stdout)
         self.assertEqual(self.egress(), CLOSED)
         self.assertNotIn('x:QueuedMessage/set', p.stdout)
+
+    def test_release_port25_waits_for_an_attempt_that_starts_before_the_hold_commits(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.edit(pods=['stalwart-a'], queue={'46': msg(time.time() + 20)}, start_before_set=['46'])
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertEqual(self.state()['ended'], ['46'])
+        self.assertIn('held again, overwritten by a delivery attempt that ended: ids=46', p.stdout)
+
+    def test_release_port25_rewrites_a_full_wait_after_a_slow_hold_write(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.edit(
+            pods=['stalwart-a'],
+            queue={'47': msg(time.time() + 40)},
+            start_before_set=['47'],
+            slow_set=True,
+        )
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertIn('hold write finished more than 30 s after the queue read', p.stdout)
+        self.assertEqual(self.state()['ended'], ['47'])
+
+    def test_release_port25_rerun_after_a_failed_hold_write_does_not_trust_it(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.edit(
+            pods=['stalwart-a'],
+            queue={'48': msg(time.time() + 40)},
+            start_before_set=['48'],
+            fail_after_set=True,
+        )
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(self.egress(), CLOSED)
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5 again')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertGreaterEqual(sum(self.state()['sleeps']), 1350)
+
+    def test_release_port25_moves_the_stop_past_a_full_wait_after_a_slow_write(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        five = msg(time.time() + 3000, domains=('a.test', 'b.test', 'c.test', 'd.test', 'e.test'))
+        self.edit(pods=['stalwart-a'], queue={'49': five}, slow_set=True)
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('drain: a full wait was written until', p.stdout)
+        self.assertGreaterEqual(sum(self.state()['sleeps']), 5 * 1360 - 10)
+        self.assertEqual(self.egress(), {('-1', -1, -1)})
+
+    def test_release_port25_closes_port_25_when_opening_fails_part_way(self):
+        self.held_for_release()
+        self.clock.write_text('1400')
+        self.edit(fail_once=['revoke-security-group-egress'])
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(self.egress(), CLOSED)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('opening port 25 failed part way: closing port 25 again', p.stdout)
+        self.assertNotIn('hold25-release-port25', self.rows())
+
+    def test_release_port25_counts_mail_that_relies_on_the_estimate(self):
+        self.held_for_release()
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn(
+            'drain: 1 remote message(s) passed their estimated bound less than 1360 s ago', p.stdout
+        )
+        self.assertIn('QUEUE_DOMAIN_ATTEMPT_SECONDS=2720', p.stdout)
+        self.assertLess(
+            p.stdout.index('passed their estimated bound'), p.stdout.index('authorize-')
+        )
+
+    def test_release_port25_waits_longer_when_rerun_with_a_higher_domain_bound(self):
+        self.held_for_release()
+        self.clock.write_text('1400')
+        p = self.run_tool(
+            'hold25.sh',
+            'release-port25',
+            '--apply',
+            '--go',
+            'go 7.5',
+            QUEUE_DOMAIN_ATTEMPT_SECONDS='2720',
+        )
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertGreaterEqual(sum(self.state().get('sleeps', [])), 1300)
+
+    def test_release_port25_closes_port_25_when_the_read_after_opening_fails(self):
+        for n, after in enumerate(({'jmap_down': True}, {'query_cap': 1})):
+            with self.subTest(after=after):
+                if n:
+                    self.tearDown()
+                    self.setUp()
+                self.held_for_release()
+                self.edit(after_open=after)
+                p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+                self.assertEqual(self.egress(), CLOSED)
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn(
+                    'queue hold after opening port 25 failed: closing port 25 again', p.stdout
+                )
+                self.assertNotIn('hold25-release-port25', self.rows())
 
     def test_release_port25_keeps_port_25_closed_when_the_drain_runs_out(self):
         self.held_for_release()
@@ -909,7 +1034,7 @@ class Hold25(Base):
         p = self.run_tool('hold25.sh', 'release-port25')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertRegex(
-            p.stdout, r'drain: --apply would wait up to 13(59|60) s, read the queue every 300 s'
+            p.stdout, r'drain: --apply would wait up to 13(89|90) s, read the queue every 300 s'
         )
         self.assertEqual(self.state().get('sleeps', []), [])
         self.assertEqual(self.egress(), CLOSED)
