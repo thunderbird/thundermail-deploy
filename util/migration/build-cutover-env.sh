@@ -47,6 +47,15 @@ k8s_secret() { ktarget -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64
 direct() { sed 's/-pooler//'; }
 doh_a() { curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data] | sort | join(" ")'; }
 opw() { local v; v=$(op "$1"); [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || v=$(window_values "$1"); printf '%s' "$v"; }
+MAILBOX_CHECK=$(op TEST_MAILBOX_CHECK)
+case "$MAILBOX_CHECK" in
+  '') ;;
+  manual)
+    for v in TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD; do
+      OPERATOR_VARS=${OPERATOR_VARS/ $v/} SECRET_VARS=${SECRET_VARS/ $v/} PROD_OPERATOR_REQUIRED=${PROD_OPERATOR_REQUIRED/ $v/}
+    done ;;
+  *) die "TEST_MAILBOX_CHECK=$MAILBOX_CHECK: the only value is manual (the operator reads TEST_MAILBOX by hand); remove it to log in over IMAP" ;;
+esac
 window_values() { [ -f "$EVIDENCE_DIR/window-values.tsv" ] && awk -F'\t' -v n="$1" '$1 == n {v = $2; f = 1} END {if (f) printf "%s", v}' "$EVIDENCE_DIR/window-values.tsv" || true; }
 attempt_of() { [ -f "$1" ] || return 0; ( unset CUTOVER_ATTEMPT; set +eu; . "$1" >/dev/null 2>&1; printf '%s' "${CUTOVER_ATTEMPT:-1}" ); }
 attempt_guard() {
@@ -303,9 +312,14 @@ build() {
   [ -n "$nlb" ] || nlb=$(try aws_target elbv2 describe-load-balancers --names "$TARGET_NLB_NAME" --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)
   put TARGET_NLB_DNS "$nlb" "kubectl -n thundermail get svc nginx .status.loadBalancer.ingress[0].hostname, resolved live on every build (else aws elbv2 --names $TARGET_NLB_NAME)"
   oput TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox; must be TEST_USER's Keycloak email (the backup address)"
-  oput TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
-  oput TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
-  oput TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
+  if [ "$MAILBOX_CHECK" = manual ]; then
+    put TEST_MAILBOX_CHECK manual "operator: TEST_MAILBOX_CHECK=manual, the operator reads TEST_MAILBOX by hand"
+    printf '%-30s not written: TEST_MAILBOX_CHECK=manual, the operator reads TEST_MAILBOX by hand\n' 'TEST_MAILBOX_IMAP_*'
+  else
+    oput TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
+    oput TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
+    oput TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
+  fi
   oput TEST_USER "$(op TEST_USER)" "operator: migrated $TARGET_ENV mailbox the operator owns"
   oput TEST_SENDER "$(op TEST_USER)" "same as TEST_USER"
   oput INBOUND_FROM "$(op INBOUND_FROM)" "operator: sender of the W7 inbound test, in a domain whose SPF passes for the W7 host and not the domain of the zone, TEST_MAILBOX or TEST_USER; no default"

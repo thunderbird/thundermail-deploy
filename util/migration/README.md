@@ -171,6 +171,12 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   Appends the `p3-smtp` timing row. `TEST_MAILBOX` must be `TEST_USER`'s Keycloak `email`
   (Accounts sets it to the backup address); Keycloak sends the reset there, so a mismatch
   shows up as exit 4, not as an SMTP fault.
+- `TEST_MAILBOX_CHECK=manual` in the operator file means the operator reads `TEST_MAILBOX` by
+  hand in its web UI. The builder then writes `TEST_MAILBOX_CHECK` to the env file, still needs
+  `TEST_MAILBOX` and `TEST_USER`, and neither needs nor writes the three `TEST_MAILBOX_IMAP_*`
+  values. `check-prereqs.sh` prints a SKIP row for `test-mailbox-external` instead of an IMAP
+  login, and `post/p3-verify.sh` stops at once. Any other value stops the builder,
+  `check-prereqs.sh` (exit 64) and `p3-verify.sh`.
 - `snapshot-smtp.sh` prints `host`, `from`, `envelopeFrom` and `user` of the realm `smtpServer`.
 - `post/p2-redirects.sh [ZONE_ID]` (default `CF_ZONE_ID_TBPRO`, must be tb.pro) puts the
   two 301 rules (`accounts-stage.tb.pro/*` and `auth-stage.tb.pro/*` to the same path on the

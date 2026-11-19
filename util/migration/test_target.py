@@ -792,6 +792,56 @@ class Prereqs(Sandbox):
                 self.assertNotEqual(rc, 64, out)
                 self.assertTrue(out.rstrip().endswith('(--for %s)' % gid), out[-300:])
 
+    def test_a_manual_mailbox_check_skips_the_imap_login(self):
+        shm = self.t / 'shm'
+        shm.mkdir(exist_ok=True, mode=0o700)
+        base = (
+            "TARGET_ENV='tb-stage'\nTEST_MAILBOX='box@example.test'\nTEST_MAILBOX_IMAP_HOST='imap.example.test'\n"
+            "TEST_MAILBOX_IMAP_USER='box@example.test'\nTEST_MAILBOX_IMAP_PASSWORD='imap-pw-1'\n"
+        )
+        f = shm / 'cutover.env'
+        for extra, row in (('', r'(?m)^(HAVE|NEED)  test-mailbox-external '), ("TEST_MAILBOX_CHECK='manual'\n", None)):
+            with self.subTest(manual=bool(extra)):
+                f.write_text(base + extra)
+                f.chmod(0o600)
+                (self.t / 'fake.log').write_text('')
+                rc, out = self.prereqs('--for', 'go-open')
+                if row:
+                    self.assertRegex(out, row)
+                    self.assertIn('openssl', self.log())
+                else:
+                    self.assertRegex(
+                        out,
+                        r'(?m)^SKIP  test-mailbox-external +TEST_MAILBOX_CHECK=manual: the operator reads '
+                        r'TEST_MAILBOX by hand; no IMAP login$',
+                    )
+                    self.assertNotIn('openssl', self.log())
+        f.write_text(base + "TEST_MAILBOX_CHECK='web'\n")
+        rc, out = self.prereqs('--for', 'go-open')
+        self.assertEqual(rc, 64, out)
+        self.assertIn("TEST_MAILBOX_CHECK=web in %s: the only value is manual" % f, out)
+
+    def test_p3_verify_stops_at_once_in_manual_mode(self):
+        shm = self.t / 'shm'
+        shm.mkdir(exist_ok=True, mode=0o700)
+        f = shm / 'cutover.env'
+        base = "TARGET_ENV='tb-stage'\nTEST_USER='u@example.test'\nTEST_MAILBOX='box@example.test'\n"
+        for extra, want in (
+            ("TEST_MAILBOX_CHECK='manual'\n", 'TEST_MAILBOX_CHECK=manual: p3-verify.sh reads TEST_MAILBOX over IMAP and needs '
+             'TEST_MAILBOX_IMAP_HOST, TEST_MAILBOX_IMAP_USER and TEST_MAILBOX_IMAP_PASSWORD; check the reset mail in '
+             'TEST_MAILBOX by hand instead'),
+            ("TEST_MAILBOX_CHECK='web'\n", 'TEST_MAILBOX_CHECK=web: the only value is manual'),
+            ('', 'missing TEST_MAILBOX_IMAP_HOST'),
+        ):
+            with self.subTest(extra=extra):
+                f.write_text(base + extra)
+                f.chmod(0o600)
+                (self.t / 'fake.log').write_text('')
+                rc, out = self.run_sh([str(HERE / 'post' / 'p3-verify.sh'), '--apply'], TARGET_ENV='tb-stage')
+                self.assertEqual(rc, 1, out)
+                self.assertIn(want, out)
+                self.assertEqual(self.log(), '')
+
     def test_old_keys_are_a_usage_error(self):
         for key in ('T0', 'W1', 'T7', 'P1', 'V1'):
             with self.subTest(key=key):

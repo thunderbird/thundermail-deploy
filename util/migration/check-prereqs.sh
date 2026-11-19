@@ -334,7 +334,11 @@ rows() {
   row "checks go-open" flip-pr c_env_pr thundermail-deploy FLIP_PR
   if [ -n "$(ev NOTICE_RECIPIENTS_CSV)" ]; then row "checks" notice-recipients-csv c_recipients; else skip "checks" notice-recipients-csv "optional: NOTICE_RECIPIENTS_CSV unset, window notices skipped"; fi
   row "start go-T7 go-T8 go-W1 go-W8 go-rollback" git-transport c_git_transport platform-infrastructure accounts-deploy keycloak-customer-deploy thundermail-deploy
-  row "start go-open verify" test-mailbox-external c_test_mailbox
+  case "$(ev TEST_MAILBOX_CHECK)" in
+    '') row "start go-open verify" test-mailbox-external c_test_mailbox ;;
+    manual) skip "start go-open verify" test-mailbox-external "TEST_MAILBOX_CHECK=manual: the operator reads TEST_MAILBOX by hand; no IMAP login" ;;
+    *) echo "TEST_MAILBOX_CHECK=$(ev TEST_MAILBOX_CHECK) in $ENV_FILE: the only value is manual" >&2; exit 64 ;;
+  esac
   row "backups go-open verify" "test-user-$TARGET_ENV" c_test_user
   row "checks" operator-env-file c_operator_env
   row "ALL" github-gh c_github
