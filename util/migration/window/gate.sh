@@ -22,7 +22,7 @@ wait_() { printf 'WAIT  %s: %s\n' "$GATE" "$1"; exit 2; }
 
 case "$GATE" in
   stop-legacy)
-    read=$(last w4-read-done) q=$(last queue-drain) s=$(last w4-export-start)
+    read=$(last w4-read-done) q=$(last queue-drain) s=$(last w4-read-start)
     [ -n "$read" ] || wait_ "no w4-read-done row after the last cut-ecs row: the read phase has not ended"
     [ -n "$q" ] && [ "$(line "$q")" -lt "$(line "$read")" ] || wait_ "no queue-drain row before the w4-read-done row"
     [ "$(value "$q")" = 0 ] || wait_ "the last queue-drain row has value $(value "$q"), not 0"

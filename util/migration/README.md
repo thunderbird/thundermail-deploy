@@ -328,14 +328,15 @@ the keying for the real hosts.
   A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
   verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)
   or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` 0 row before a
-  `w4-read-done` row and no later `stop-W4`; `merge-recovery` wants `recovery-wait` as the last of
+  `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
+  failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
   `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
   `verify-compare` wants both rows at 0 and no later `stop-W6`.
 - `window/keep.sh save` encrypts the files of `$SECRET_DIR` that a reboot would lose
   (`export.json`, `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
   `duplicates.txt`, `source-branch.env`) with gpg for `KEEP_GPG_RECIPIENT` (operator file) into
-  `$EVIDENCE_DIR/keep/` with a sha256 manifest; W4 runs it after the read phase and after the
-  source branch. After a reboot: `build-cutover-env.sh --rebuild` (it names each kept file that is
+  `$EVIDENCE_DIR/keep/` with a sha256 manifest; W4 runs it in every read phase, a rerun that
+  reuses the export too, and after the source branch. After a reboot: `build-cutover-env.sh --rebuild` (it names each kept file that is
   missing), `window/keep.sh restore --apply` (gpg asks for the key), `--rebuild` again, which takes
   `STALWART_SOURCE_PG_*` from the restored `source-branch.env`.
 - `verify/02_directory.py` reads `DROPPED_DOMAINS` (`$SECRET_DIR/domains-dropped.json`, written by

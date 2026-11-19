@@ -223,7 +223,7 @@ class ReadPhase(Prod):
     BODY = (
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
-        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }; keep_copy() { echo KEEP; }\n'
+        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }; keep_copy() { echo KEEP; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
     )
 
@@ -239,7 +239,24 @@ class ReadPhase(Prod):
         self.assertIn('w4-read-done', names)
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
         self.assertIn('reusing the export of this cut', out)
-        self.assertEqual([x for x in out.split() if x in ('DUMP', 'QUEUE')], ['QUEUE'])
+        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['KEEP', 'QUEUE'])
+        self.assertEqual([r[0] for r in self.timing()].count('w4-read-start'), 2)
+        out = self.w4(self.BODY + 'queue_drain() { echo QUEUE; return 1; }\nread_phase')
+        gate = subprocess.run(
+            ['bash', str(HERE / 'window' / 'gate.sh'), 'stop-legacy'],
+            capture_output=True,
+            text=True,
+            env={
+                'PATH': '/usr/bin:/bin',
+                'HOME': str(self.t),
+                'TARGET_ENV': 'tb-stage',
+                'CUTOVER_ENV': str(self.t / 'none.env'),
+                'TIMING_TSV': str(self.t / 'ev' / 'timing.tsv'),
+            },
+            timeout=60,
+        )
+        self.assertEqual(gate.returncode, 2, gate.stdout)
+        self.assertIn('a read phase started at', gate.stdout)
         out = self.w4(self.BODY + 'GO=again\nconvert() { echo CONVERT; return 1; }\nread_phase')
         self.assertIn('DUMP', out.split())
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')

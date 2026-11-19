@@ -56,7 +56,7 @@ class Gate(unittest.TestCase):
         self.assertEqual(rc, 2)
         rc, out = self.gate('stop-legacy', [CUT, q0, done, ('stop-W4', 'x', 'reason', 'y')])
         self.assertEqual(rc, 0, out)
-        rerun = ('w4-export-start', 'z', 'file', 'x')
+        rerun = ('w4-read-start', 'z', 'export', 'x')
         rc, out = self.gate('stop-legacy', [CUT, q0, done, rerun, ('stop-W4', 'y', 'reason', 'y')])
         self.assertEqual(rc, 2)
         self.assertIn('a read phase started at z after the last w4-read-done row', out)
