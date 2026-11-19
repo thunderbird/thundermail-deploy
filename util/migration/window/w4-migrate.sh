@@ -364,9 +364,11 @@ read_done() {
 }
 
 export_ok() {
-  local e s
+  local e s want
   e=$(cut_line w4-export) s=$(cut_line w4-export-start)
-  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ]
+  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ] || return 1
+  want=$(cut_row w4-export | awk -F'\t' '$5 == "sha256" {print $6}')
+  [ -z "$want" ] || [ "$(sha256sum "$S/export.json" | cut -d' ' -f1)" = "$want" ]
 }
 
 read_phase() {
@@ -384,7 +386,7 @@ read_phase() {
     fi
     step domains changes domain_fix_step
     step retarget "" retarget
-    [ "$APPLY" = 0 ] || mark w4-export file "$S/export.json"
+    [ "$APPLY" = 0 ] || mark w4-export sha256 "$(sha256sum "$S/export.json" | cut -d' ' -f1)"
   fi
   step keep files keep_copy
   step queue-drain queued queue_drain
