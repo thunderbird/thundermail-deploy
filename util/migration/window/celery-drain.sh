@@ -120,10 +120,11 @@ ecs_snapshot() {
 }
 
 revisions() {
-  local t
-  [ -s "$REVISIONS" ] || { echo "no $REVISIONS from the ECS loop of 1.5: task definitions are not compared here, only service names (2.2 compares both)"; return 1; }
+  local t loop
+  loop="for t in \$LEGACY_ECS_TARGETS; do aws ecs describe-services --profile mzla-legacy --region $AWS_REGION --cluster \"\${t%%/*}\" --services \"\${t##*/}\" --query 'services[0].[serviceName,taskDefinition,desiredCount,runningCount]' --output text; done | tee \"\$EVIDENCE_DIR/ecs-revisions-before.txt\""
+  [ -s "$REVISIONS" ] || { echo "no $REVISIONS: write it at 1.5, before the cut, with: $loop"; return 1; }
   for t in $LEGACY_ECS_TARGETS; do
-    awk -F'\t' -v s="${t##*/}" '$1 == s {f = 1} END {exit !f}' "$REVISIONS" || { echo "$REVISIONS names no service ${t##*/}: task definitions are not compared here, only service names (2.2 compares both)"; return 1; }
+    awk -F'\t' -v s="${t##*/}" '$1 == s {f = 1} END {exit !f}' "$REVISIONS" || { echo "$REVISIONS names no service ${t##*/}: write it again at 1.5 with: $loop"; return 1; }
   done
   echo "ECS revisions of 1.5: $REVISIONS"
 }
@@ -131,19 +132,16 @@ revisions() {
 same_services() {
   local t want wantd have name td d moved="" bad=0
   for t in $LEGACY_ECS_TARGETS; do
-    want=-
-    [ -z "$REVISIONS" ] || want=$(awk -F'\t' -v s="${t##*/}" '$1 == s {print $2; exit}' "$REVISIONS")
+    want=$(awk -F'\t' -v s="${t##*/}" '$1 == s {print $2; exit}' "$REVISIONS")
     wantd=$(jq -r --arg c "${t%%/*}" --arg s "${t##*/}" '[.services[] | select(.cluster == $c and .serviceName == $s) | .desiredCount][0] // "none"' "$ECS_BEFORE")
     have=$("${RO[@]}" ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[0].[serviceName,taskDefinition,desiredCount]' --output text) || { echo "ecs describe-services $t failed"; return 1; }
     IFS=$'\t' read -r name td d <<<"$have"
     printf '  %s task=%s saved=%s desired=%s saved=%s\n' "$t" "${td##*/}" "${want##*/}" "$d" "$wantd"
-    [ "$name" = "${t##*/}" ] && [ "$wantd" != none ] || bad=1
-    [ -z "$REVISIONS" ] || [ "$td" = "$want" ] || bad=1
+    [ "$name" = "${t##*/}" ] && [ "$td" = "$want" ] || bad=1
     [ "$d" = "$wantd" ] || moved="$moved ${t##*/}"
   done
-  [ "$bad" = 0 ] || { echo "a service name or task definition differs from 1.5 ${REVISIONS:-$ECS_BEFORE}"; return 1; }
-  if [ -n "$REVISIONS" ]; then echo "service names and task definitions equal 1.5"
-  else echo "service names equal the 1.5 snapshot; task definitions not compared"; fi
+  [ "$bad" = 0 ] || { echo "a service name or task definition differs from 1.5 $REVISIONS"; return 1; }
+  echo "service names and task definitions equal 1.5"
   if [ -n "$moved" ]; then echo "desired count differs from the 1.5 snapshot for$moved: autoscaling moves it; the timed read goes on"
   else echo "desired counts equal the 1.5 snapshot"; fi
 }
@@ -193,7 +191,8 @@ if [ "$CMD" != read ]; then
 fi
 if [ "$CMD" = timed ]; then
   if rev=$(revisions); then printf '%s\n' "$rev"
-  else printf 'NOTE  %s\n' "$rev"; REVISIONS=""; fi
+  elif [ "$APPLY" = 1 ]; then stop "$rev"
+  else printf 'NEED  %s\n' "$rev"; NEEDS=$((NEEDS + 1)); fi
 fi
 [ "$APPLY" = 1 ] || { finish; exit 0; }
 

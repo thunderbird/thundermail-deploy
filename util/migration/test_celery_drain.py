@@ -91,6 +91,12 @@ STREAM = 'accounts/prod/celery-prod//celery/'
 TASK = 'thunderbird_accounts.mail.tasks.create_stalwart_account'
 ID1 = '11111111-1111-4111-8111-111111111111'
 ID2 = '22222222-2222-4222-8222-222222222222'
+W15 = (
+    'for t in $LEGACY_ECS_TARGETS; do aws ecs describe-services --profile mzla-legacy '
+    '--region eu-central-1 --cluster "${t%%/*}" --services "${t##*/}" --query '
+    "'services[0].[serviceName,taskDefinition,desiredCount,runningCount]' --output text; done "
+    '| tee "$EVIDENCE_DIR/ecs-revisions-before.txt"'
+)
 
 
 def line(t, name, tid, word):
@@ -769,25 +775,20 @@ class CeleryDrain(Base):
         rev.write_text(''.join(ln + '\n' for ln in rev.read_text().splitlines() if SV not in ln))
         self.state()
         rc, out = self.run_tool('timed', '--apply', TS='r2')
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)
         self.assertIn(
-            'NOTE  %s names no service %s: task definitions are not compared here, '
-            'only service names (2.2 compares both)' % (rev, SV),
+            'STOP CELERY (apply): %s names no service %s: write it again at 1.5 with: ' % (rev, SV),
             out,
         )
-        self.assertIn('service names equal the 1.5 snapshot; task definitions not compared', out)
         rev.unlink()
         rc, out = self.run_tool('timed', TS='r3')
-        self.assertEqual(rc, 0, out)
-        self.assertIn(
-            'NOTE  no %s from the ECS loop of 1.5: task definitions are not compared' % rev, out
-        )
-        self.state(taskdefs={CL + '/' + SV: new})
+        self.assertEqual(rc, 2, out)
+        self.assertIn('NEED  no %s: write it at 1.5, before the cut, with: %s\n' % (rev, W15), out)
         rc, out = self.run_tool('timed', '--apply', TS='r4')
-        self.assertEqual(rc, 0, out)
-        self.assertIn('accounts-prod/%s task=%s:2 saved=- desired=2 saved=2' % (SV, SV), out)
-        self.assertIn('celery timed read: held=0 ', out)
-        self.assertEqual(self.rows()[-1], 'celery-read')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STOP CELERY (apply): no %s: write it at 1.5' % rev, out)
+        self.assertNotIn('get-log-events', self.log())
+        self.assertNotIn('celery-read', self.rows())
 
     def test_timed_dry_run_prints_the_plan_and_calls_nothing(self):
         rc, out = self.run_tool('timed')
