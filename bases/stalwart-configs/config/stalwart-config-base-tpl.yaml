@@ -47,6 +47,22 @@ value:
       '@type': Enabled
     allowRelaying: false
 ---
+'@type': upsert
+object: MailingList
+matchOn:
+  - name
+value:
+  'list-postmaster-__DOMAIN_SLUG__':
+    name: postmaster
+    domainId: '#domain-__DOMAIN_SLUG__'
+    description: 'postmaster and abuse role addresses for __DOMAIN_FQDN__'
+    aliases:
+      '0':
+        name: abuse
+        domainId: '#domain-__DOMAIN_SLUG__'
+        enabled: true
+    recipients: __POSTMASTER_RECIPIENTS__
+---
 '@type': reconcile
 object: DnsServer
 matchOn:
