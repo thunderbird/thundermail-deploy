@@ -125,29 +125,35 @@ class DomainFix(unittest.TestCase):
             self.f.read_text().splitlines()[0], json.dumps(before[0], ensure_ascii=False)
         )
 
-    def test_a_catch_all_on_a_dropped_domain_stops(self):
+    def test_a_catch_all_on_a_dropped_domain_is_a_warning_and_an_address_stops(self):
         ok = [{'id': 1, 'type': 'individual', 'name': 'u', 'emails': ['u@a.example.com']}]
-        p = self.run_fix(export(alias_domain='#create-1'), ok)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        before = export(alias_domain='#create-1')
         catch = ok + [
             {'id': 7, 'type': 'individual', 'name': 'v', 'emails': ['v@a.example.com', '@' + BAD]}
         ]
-        p = self.run_fix(before, catch)
-        self.assertEqual(p.returncode, 1, p.stdout)
+        p = self.run_fix(export(alias_domain='#create-1'), catch)
+        self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn(
-            "error: Domain '%s' is refused by Stalwart 0.16 (no public suffix rule matches it) "
-            'and still used by an address of legacy principal 7' % BAD,
+            "warning: not restoring the catch-all of legacy principal 7: its domain '%s' is dropped"
+            % BAD,
+            p.stdout,
+        )
+        before = export(alias_domain='#create-1')
+        p = self.run_fix(before, ok + [{'id': 8, 'emails': ['w@' + PUNY.upper()]}])
+        self.assertEqual(p.returncode, 1)
+        self.assertIn(
+            "error: Domain '%s' is refused by Stalwart 0.16 (the same name as another Domain after "
+            'IDNA (Unicode and punycode)) and still used by an address of legacy principal 8' % PUNY,
             p.stderr,
         )
         self.assertEqual(
             self.f.read_text().splitlines()[0], json.dumps(before[0], ensure_ascii=False)
         )
-        p = self.run_fix(
-            export(alias_domain='#create-1'), ok + [{'id': 8, 'emails': ['w@' + PUNY.upper()]}]
-        )
-        self.assertEqual(p.returncode, 1)
-        self.assertIn('legacy principal 8', p.stderr)
+
+    def test_shapes_compares_a_unicode_name_as_0_16_stores_it(self):
+        sh = load('shapes')
+        self.assertEqual(sh.norm_domain(' B\u00fccher.Example.com '), PUNY)
+        self.assertEqual(sh.norm_domain('A.Example.COM'), 'a.example.com')
+        self.assertEqual(sh.norm_addr('x@B\u00fccher.example.com'), 'x@' + PUNY)
 
     def test_names_as_stalwart_0_16_reads_them(self):
         d = load('domains')

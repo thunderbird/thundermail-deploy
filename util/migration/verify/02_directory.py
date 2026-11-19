@@ -16,7 +16,7 @@ if os.environ.get("DROPPED_DOMAINS"):
     except (OSError, ValueError, KeyError, TypeError) as e:
         r.fail(f"dropped-domain list {os.environ['DROPPED_DOMAINS']} unreadable ({type(e).__name__}): run the domains step of w4-migrate.sh")
     else:
-        r.ok(f"domains dropped before the apply (domain_fix.py), left out of the source set: {len(dropped)}")
+        r.ok(f"domains dropped before the apply (domain_fix.py), left out of the source set: {len(listed['domains'])}")
 src, items = principals()
 doms = {d["id"]: d for d in x_all("Domain")}
 dname = {i: norm_domain(d["name"]) for i, d in doms.items()}

@@ -11,6 +11,7 @@ for a in "$@"; do
   esac
 done
 BUILDING_ENV=1
+SHELL_NAMES=" $(compgen -e | tr '\n' ' ')"
 if [ -z "${CUTOVER_ATTEMPT:-}" ] && [ "${TARGET_ENV:-}" = tb-prod ] && [ -f "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" ]; then
   CUTOVER_ATTEMPT=$(sed -n "s/^CUTOVER_ATTEMPT='\([1-9][0-9]*\)'$/\1/p" "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" | tail -1)
   [ -n "$CUTOVER_ATTEMPT" ] || unset CUTOVER_ATTEMPT
@@ -61,6 +62,7 @@ attempt_guard() {
   [ -n "$p" ] && [ "$p" != "$CUTOVER_ATTEMPT" ] || return 0
   [ "$p" -lt "$CUTOVER_ATTEMPT" ] || die "$ENV_FILE is attempt $p: CUTOVER_ATTEMPT=$CUTOVER_ATTEMPT would replace it with an earlier attempt"
   for v in $CARRY $WINDOW_CARRY; do
+    case "$SHELL_NAMES" in *" $v "*) ;; *) continue ;; esac
     [ -z "${!v:-}" ] || die "$v is set in this shell (a loaded env file of attempt $p?): a new attempt carries nothing; start a fresh shell and rerun"
   done
   for v in EVIDENCE_DIR SECRET_DIR TIMING_TSV; do

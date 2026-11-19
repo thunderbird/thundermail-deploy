@@ -268,7 +268,7 @@ the keying for the real hosts.
   reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
   (compared after NFKC and punycode, as 0.16 reads them). It prints one
   `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
-  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does any address in `principals.json` on a dropped Domain (a catch-all, which `convert` leaves out of the export and W5 puts back).
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does an address of `principals.json` on a dropped Domain. A catch-all there (`@<domain>`, which `convert` leaves out and W5 puts back) is a `warning:` line instead: `apply_unmigrated.py --dropped-domains` (W5 on tb-prod) skips it and prints the count. `domain_fix.py --dropped-list` writes the list that `verify/02_directory.py` reads (`DROPPED_DOMAINS`). Names are compared in the punycode form 0.16 stores (`shapes.norm_domain`).
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
   `class Domain:refused-by-0.16` lines, and the names convert drops itself as
   `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
@@ -364,8 +364,12 @@ the keying for the real hosts.
   only after a pass; a timeout stops with exit 1, no row and no copy. `compare` lists both buckets
   in parallel by key range (current versions; a delete marker or an absent key in tb-prod is
   missing), compares size and ETag, and with `--apply` copies each difference from legacy and
-  writes a `blob-compare left N` row. It deletes nothing. `STALWART_WEBADMIN`, `SPAM_TRAINER_KEY`
-  and `SPAM_CLASSIFIER_KEY` must match by checksum, or the run stops. Listings stay under
+  writes a `blob-compare left N` row. It deletes nothing. The blobs `STALWART_WEBADMIN`,
+  `STALWART_SPAM_TRAIN_DATA.lz4` and `STALWART_SPAM_CLASSIFIER_MODEL.lz4` must match by checksum,
+  or the run stops; Stalwart stores them under the base32 of the blob key in its own alphabet
+  (`knkectcxifjfix7xivbecrcnjfha` and so on), which is what the compare looks up and prints beside
+  the name. `--workers` defaults to 48 (one `aws` process per page, PR 204: a review measured 16
+  minutes for the dry run and 9 for the relist of `--apply` at 48). Listings stay under
   `$EVIDENCE_DIR/blob-compare`, copies in transit under `$SECRET_DIR`.
 - The listing does not start the aws CLI per page. Each shard keeps one HTTPS connection to
   `<bucket>.s3.eu-central-1.amazonaws.com` and signs `ListObjectVersions` (SigV4) with credentials

@@ -224,7 +224,7 @@ class ReadPhase(Prod):
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
         'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }; keep_copy() { echo KEEP; }\n'
-        'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
+        'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
     def test_order_marks_and_a_queue_rerun_reads_the_queue_only(self):
@@ -322,6 +322,11 @@ class ResetPhase(Prod):
         rows = {r[0]: r[4] for r in self.timing()}
         self.assertEqual(rows['reset'], '2026-11-19T05:00:00Z')
         self.assertEqual(rows['source-branch'], '2026-11-19T05:00:05Z')
+        kept = (self.t / 'ev' / 'window-values.tsv').read_text()
+        self.assertIn('STALWART_SOURCE_PG_HOST\tsrc.example.test\n', kept)
+        self.assertIn('STALWART_SOURCE_PG_USER\tstalwart_owner\n', kept)
+        self.assertIn('STALWART_SOURCE_PG_DB\tstalwart\n', kept)
+        self.assertNotIn('src-pw-123', kept)
         self.nb({'reset_at': '2026-11-19T05:00:00Z', 'reset_rc': 1})
         (self.t / 'ev' / 'timing.tsv').unlink()
         out = self.w4('APPLY_ARG=(--apply); STOP_AT=x\nneon_reset; echo "rc=$?"')
