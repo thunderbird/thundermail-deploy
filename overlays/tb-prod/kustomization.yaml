@@ -43,3 +43,10 @@ patches:
         value:
           name: STALWART_PUBLIC_URL
           value: "https://mail.thundermail.com"
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          tcpSocket:
+            port: 8080
+          periodSeconds: 10
+          failureThreshold: 180
