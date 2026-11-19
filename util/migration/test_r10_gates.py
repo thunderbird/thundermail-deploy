@@ -79,6 +79,12 @@ class Gate(unittest.TestCase):
         rc, out = self.gate('merge-recovery', resumed)
         self.assertEqual(rc, 0, out)
         self.assertIn('recovery-wait at 2026-11-19T06:05:00Z', out)
+        started = base + [('apply-start', '2026-11-19T05:20:00Z', 'pod', 'p')]
+        rc, out = self.gate('merge-recovery', started + [('stop-W4', 'x', 'reason', 'y')])
+        self.assertEqual(rc, 2)
+        self.assertIn('an apply started at 2026-11-19T05:20:00Z after this pre-delete', out)
+        rc, out = self.gate('merge-recovery', started + [('export-applied', 'z', 'errors', '0')])
+        self.assertEqual(rc, 0, out)
         rc, out = self.gate('merge-recovery', base[:3])
         self.assertEqual(rc, 2)
         self.assertIn('W4 is not waiting for the pod yet', out)

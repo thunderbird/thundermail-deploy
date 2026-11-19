@@ -68,7 +68,9 @@ class InClusterApply(w4.Prod):
         super().setUp()
         (self.t / 'bin' / 'kubectl').write_text(KUBE.format(py=sys.executable))
         (self.t / 'secret').mkdir(exist_ok=True, mode=0o700)
-        (self.t / 'secret' / 'export.json').write_text('{"@type":"create","object":"Domain"}\n' * 50)
+        (self.t / 'secret' / 'export.json').write_text(
+            '{"@type":"update","object":"X"}\n' * 4 + '{"@type":"create","object":"Domain"}\n' * 5
+        )
         self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
 
     def state(self, st):
@@ -113,7 +115,7 @@ class InClusterApply(w4.Prod):
         self.assertNotIn('"object"', log)
         self.assertIn('delete pod stalwart-apply-20261112t000000z', (self.t / 'deleted').read_text())
         self.assertIn(
-            'apply: pod/stalwart-apply-20261112t000000z exit=0 errors=0 requests=2 '
+            'apply: pod/stalwart-apply-20261112t000000z exit=0 attach=0 errors=0 requests=2 '
             'longest request 33.5s (the CLI gives up after 60s)',
             out,
         )
@@ -137,6 +139,25 @@ class InClusterApply(w4.Prod):
         self.assertIn('an apply started after this pre-delete and did not finish', out)
         self.assertIn("--phase reset --apply --go '<words>'", out)
         self.assertIn('rc=1', out)
+
+    def test_a_cut_stream_fails_and_a_pod_that_never_got_ready_allows_a_rerun(self):
+        short = LOG_OK.replace('4 update, 5 create', '4 update, 3 create')
+        self.state({'pods': [ready('10.0.0.5')], 'log': short})
+        out = self.apply()
+        self.assertIn(
+            'the CLI planned destroy=0 update=4 create=3 upsert=0 reconcile=0, export.json holds '
+            'destroy=0 update=4 create=5 upsert=0 reconcile=0: the export did not arrive whole',
+            out,
+        )
+        self.assertIn('rc=1', out)
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK, 'ready_rc': 1})
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.apply()
+        self.assertIn('not Ready within 300s', out)
+        self.assertNotIn('apply-start', [r[0] for r in self.timing()])
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
+        out = self.apply([list(r) for r in self.timing()])
+        self.assertIn('rc=0 VALUE=0', out)
 
     def test_not_exactly_one_ready_pod_creates_nothing(self):
         self.state({'pods': [ready('10.0.0.5'), ready('10.0.0.6', 'b')], 'log': LOG_OK})

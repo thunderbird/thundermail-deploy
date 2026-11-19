@@ -578,7 +578,6 @@ incluster_apply() {
   ip=$(recovery_ip) || true
   [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not exactly one Ready stalwart pod with an IPv4 pod IP: no apply pod"; return 1; }
   url=http://$ip:8080
-  mark apply-start pod "$name"
   APPLY_POD=$name
   incluster_apply_run "$name" "$url" || rc=$?
   "${KS[@]}" "${NS[@]}" delete pod "$name" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || echo "pod/$name was not deleted: delete it by hand"
@@ -587,19 +586,23 @@ incluster_apply() {
 }
 
 incluster_apply_run() {
-  local name=$1 url=$2 code req longest
+  local name=$1 url=$2 code req longest arc=0 plan want
   sed -e "s|__NAME__|$name|" -e "s|__STALWART_URL__|$url|" "$MIG_DIR/apply-pod.yaml" | "${KS[@]}" "${NS[@]}" create -f - >/dev/null || { echo "could not create pod/$name"; return 1; }
   "${KS[@]}" "${NS[@]}" wait --for=condition=Ready "pod/$name" --timeout=300s >/dev/null || { echo "pod/$name not Ready within 300s (image pull, scheduling or the security group of the pod)"; return 1; }
   echo "pod/$name Ready; sending $(wc -c < "$S/export.json") bytes of export over stdin to $url"
-  "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || true
+  mark apply-start pod "$name"
+  "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?
   until_ok "$APPLY_POD_WAIT" apply_pod_ended "$name" || { echo "pod/$name still $(apply_pod_phase "$name") after ${APPLY_POD_WAIT}s"; return 1; }
   ( umask 077; "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$name" > "$S/apply.log" ) || { echo "could not read the log of pod/$name"; return 1; }
   sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log"
   code=$("${KS[@]}" "${NS[@]}" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')
   read -r req longest <<<"$(longest_request "$S/apply.log")"
   VALUE=$(grep -c '✗' "$S/apply.log" || true)
-  grep -E '^[^ ]+ (Plan:|Done:|error:)' "$S/apply.log" | cut -d' ' -f2- || true
-  echo "apply: pod/$name exit=${code:-none} errors=$VALUE requests=${req:-0} longest request ${longest:-0}s (the CLI gives up after 60s); $S/apply.log, addresses masked in $EVIDENCE_DIR/apply-$TS.log"
+  grep -E '^[^ ]+ (Plan:|Done:|error:)' "$EVIDENCE_DIR/apply-$TS.log" | cut -d' ' -f2- || true
+  plan=$(sed -n 's/^[^ ]* Plan: \([0-9]*\) destroy, \([0-9]*\) update, \([0-9]*\) create, \([0-9]*\) upsert, \([0-9]*\) reconcile .*/destroy=\1 update=\2 create=\3 upsert=\4 reconcile=\5/p' "$S/apply.log" | head -1)
+  want=$(jq -r '.["@type"]' "$S/export.json" | awk '{n[$1]++} END {printf "destroy=%d update=%d create=%d upsert=%d reconcile=%d", n["destroy"], n["update"], n["create"], n["upsert"], n["reconcile"]}')
+  echo "apply: pod/$name exit=${code:-none} attach=$arc errors=$VALUE requests=${req:-0} longest request ${longest:-0}s (the CLI gives up after 60s); $S/apply.log, addresses masked in $EVIDENCE_DIR/apply-$TS.log"
+  [ "$plan" = "$want" ] || { echo "the CLI planned ${plan:-nothing}, export.json holds $want: the export did not arrive whole over stdin"; return 1; }
   [ "$code" = 0 ] && [ "$VALUE" = 0 ]
 }
 

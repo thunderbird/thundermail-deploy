@@ -29,9 +29,10 @@ case "$GATE" in
     [ -z "$s" ] || [ "$(line "$s")" -lt "$(line "$read")" ] || wait_ "a read phase started at $(at "$s") after the last w4-read-done row and has not ended: finish --phase read"
     go "queue-drain 0 at $(at "$q"), w4-read-done at $(at "$read"); legacy Stalwart may be stopped" ;;
   merge-recovery)
-    r=$(last reset) p=$(last pre-delete) l=$(last_of 'reset|pre-delete|recovery-wait|stop-W4')
+    r=$(last reset) p=$(last pre-delete) l=$(last_of 'reset|pre-delete|recovery-wait|stop-W4') a=$(last apply-start) e=$(last export-applied)
     [ -n "$r" ] || wait_ "no reset row after the last cut-ecs row"
     [ -n "$p" ] && [ "$(line "$p")" -gt "$(line "$r")" ] || wait_ "no pre-delete row after the reset at $(at "$r")"
+    [ -z "$a" ] || [ "$(line "$a")" -lt "$(line "$p")" ] || { [ -n "$e" ] && [ "$(line "$e")" -gt "$(line "$a")" ]; } || wait_ "an apply started at $(at "$a") after this pre-delete and did not finish: the retry is a revert of the recovery-mode PR and a new reset (--phase reset --apply --go)"
     case "$(cut -f2 <<<"$l")" in
       recovery-wait) go "recovery-wait at $(at "$l") after the pre-delete at $(at "$p"); merge the recovery-mode PR" ;;
       stop-W4) wait_ "stop-W4 at $(at "$l") is the last row: resume with --phase boot --apply, then read this gate again" ;;

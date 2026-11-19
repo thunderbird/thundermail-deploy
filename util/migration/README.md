@@ -309,7 +309,10 @@ the keying for the real hosts.
   and that group admits TCP 8080 from itself (rule `stalwart_mgmt` in platform-infrastructure
   `pulumi/modules/thundermail_deploy.py`). The repo holds no NetworkPolicy. A failed batch stops
   that object type and leaves the earlier batches committed, so a second apply would collide:
-  an `apply-start` row after the pre-delete with no `export-applied` row makes a rerun refuse, and
+  the `apply-start` row is written once the pod is Ready, just before the export is sent, and an
+  `apply-start` row after the pre-delete with no `export-applied` row makes a rerun refuse (and
+  `window/gate.sh merge-recovery` wait). The run also fails when the CLI's `Plan:` counts per
+  operation type differ from the lines of `export.json` (a cut stdin stream), and
   the retry is the revert of the recovery-mode PR and `--phase reset --apply --go` (about 20 to 25
   minutes).
 - `window/legacy-stalwart.sh read --apply` (W 4.3, after the stop) refuses unless
