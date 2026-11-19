@@ -31,6 +31,7 @@ spec:
                 --output-format=json \
                 --indent=0 \
                 'load("/etc/stalwart-values/values.yaml") as $values
+                | select(.object != "DataRetention" or $values.dataRetention != null)
                 | select(
                   .object != "DnsServer"
                   or (.["@type"] == "upsert")
@@ -100,6 +101,10 @@ spec:
                 (
                   .. | select(. == "__DNS_PUBLISH_SPF__")
                 ) = $values.dnsPublishSpf
+                |
+                (
+                  .. | select(. == "__DATA_RETENTION__")
+                ) = $values.dataRetention
                 |
                 with(
                   select(($values.dnsManagement // "Manual") == "Automatic");
