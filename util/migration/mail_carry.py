@@ -179,9 +179,14 @@ class Jmap:
                     name,
                     {**args, 'position': len(ids), 'limit': QUERY_PAGE, 'calculateTotal': True},
                 )
+                if not isinstance(r.get('queryState'), str) or not r['queryState']:
+                    raise Stop(
+                        '%s: the server sent no queryState, so a change between pages '
+                        'cannot be seen' % name
+                    )
                 if not ids:
-                    state = r.get('queryState')
-                elif r.get('queryState') != state:
+                    state = r['queryState']
+                elif r['queryState'] != state:
                     break
                 batch, total = r['ids'], r.get('total', total)
                 ids += batch
