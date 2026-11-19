@@ -20,6 +20,7 @@ CLOSED_KEYS='tcp|0|24|0.0.0.0/0 tcp|26|65535|0.0.0.0/0 udp|0|65535|0.0.0.0/0 icm
 RULES='[]'
 ACCOUNT=""
 Q='{}'
+DRAIN_AT=0
 
 target_ok() {
   local vpc sgvpc sgp mode eni
@@ -146,7 +147,7 @@ read_queue() {
     def due: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
     map({id, created: ((.createdAt // "1970-01-01T00:00:00Z") | due), pend: [(.recipients // {}) | (if type == "array" then .[] else to_entries[] | .value + {address: .key} end) | select(.status["@type"] == "Scheduled" or .status["@type"] == "TemporaryFailure")]})
     | map(. + {remote: any(.pend[]; .queueName != "local"), held: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) >= $min)), later: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) > $now)), wrote: (if (.pend | length) > 0 then ([.pend[].retryDue | due] | min) - $hold else 0 end), domains: ([.pend[] | select(.queueName != "local") | (.address // "") | ascii_downcase | split("@") | last] | unique | length)})
-    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created < $cut) | .id], later: [.[] | select(.remote and .later) | .id], msgs: [.[] | select(.remote) | {id, created, held, wrote, bound: ((if .domains > 1 then .domains else 1 end) * $dom)}]}' <<<"$list") || return 1
+    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created <= $cut) | .id], later: [.[] | select(.remote and .later) | .id], msgs: [.[] | select(.remote) | {id, created, held, wrote, bound: ((if .domains > 1 then .domains else 1 end) * $dom)}]}' <<<"$list") || return 1
 }
 
 show_queue() { jq -r '"queue: total=\(.total) remote=\(.remote | length) held=\(.held | length) not_held=\(.not_held | length)" + (if (.not_held | length) != (.hold | length) then " queued_after_release=\((.not_held | length) - (.hold | length))" else "" end)' <<<"$Q"; }
@@ -205,6 +206,7 @@ drain() {
       return 0
     fi
     if [ "$w" = 0 ]; then
+      DRAIN_AT=$now
       echo "drain: done after $((now - start)) s: no delivery attempt that started before its hold is still running for mail queued before the drain"
       echo "drain: unproven=$(jq .late <<<"$st") (queued during the drain and held, but an attempt that started before its hold can still deliver once port 25 opens)"
       return 0
@@ -267,6 +269,7 @@ case "$MODE" in
     open_25 || stop "opening port 25 on $SG failed"
     OPEN_AT=$(date -u +%s)
     with_queue hold_queue "$OPEN_AT"
+    [ "$APPLY" = 0 ] || echo "release: $(jq --argjson d "$DRAIN_AT" '[.msgs[] | select(.created >= $d)] | length' <<<"$Q") message(s) queued between the end of the drain and the port opening, held now, but sent at once if an attempt was already running"
     [ "$APPLY" = 0 ] || mark hold25-release-port25 held "$VALUE" ;;
   release-queue)
     gate_row hold25-release-port25 "port 25 is released first (7.5)"

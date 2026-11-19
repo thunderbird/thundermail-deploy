@@ -35,7 +35,7 @@ PW = 'target-admin-pw-7f3a'
 LEGACY_PW = 'legacy-admin-pw-91c2'
 
 AWS = r"""#!{py}
-import json, os, sys
+import json, os, sys, time
 args = sys.argv[1:]
 open(os.environ['FAKE_LOG'], 'a').write('aws ' + ' '.join(args) + '\n')
 p = os.environ['STATE']
@@ -64,6 +64,10 @@ elif 'ec2 authorize-security-group-egress' in a:
     g = arg('--group-id')
     for perm in json.loads(arg('--ip-permissions')):
         if perm['IpProtocol'] == '-1':
+            at = time.time() + float(open(os.environ['FAKE_CLOCK']).read() or 0)
+            for m in st.get('on_open', {{}}).values():
+                if m['createdAt'] == 'now':
+                    m['createdAt'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(at))
             st['queue'].update(st.pop('on_open', {{}}))
             for i in st.pop('attempts', {{}}):
                 st.setdefault('delivered', []).append(i)
@@ -685,7 +689,7 @@ class Hold25(Base):
             'drain: held again, overwritten by a delivery attempt that ended: ids=11', p.stdout
         )
         self.assertIn('drain: unproven=0', p.stdout)
-        self.assertGreaterEqual(sum(st['sleeps']), 200 + 1360)
+        self.assertGreaterEqual(sum(st['sleeps']), 200 + 1359)
         self.assertIn('read back: port25: open on %s' % SG, p.stdout)
         self.assertIn('read back: queue: total=4 remote=2 held=2 not_held=0', p.stdout)
         for i in ('11', '12'):
@@ -704,7 +708,7 @@ class Hold25(Base):
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertEqual(self.state().get('delivered', []), [])
-        self.assertIn('longest 2719 s', p.stdout)
+        self.assertRegex(p.stdout, r'longest 27(19|20) s')
         self.assertIn('ids=12', p.stdout)
         self.assertGreater(self.due('12'), self.fake_now() + 23 * 3600)
 
@@ -732,6 +736,20 @@ class Hold25(Base):
         self.assertIn('ids=16', p.stdout)
         self.assertIn('drain: unproven=1', p.stdout)
         self.assertGreater(self.due('16'), self.fake_now() + 23 * 3600)
+
+    def test_release_port25_counts_mail_queued_between_the_drain_and_the_swap(self):
+        self.held_for_release()
+        gap = msg(time.time() - 60)
+        gap['createdAt'] = 'now'
+        self.edit(on_open={'17': gap})
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('drain: unproven=0', p.stdout)
+        self.assertIn(
+            'release: 1 message(s) queued between the end of the drain and the port opening',
+            p.stdout,
+        )
+        self.assertGreater(self.due('17'), self.fake_now() + 23 * 3600)
 
     def test_release_port25_keeps_port_25_closed_when_the_drain_runs_out(self):
         self.held_for_release()
