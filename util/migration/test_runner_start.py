@@ -79,6 +79,9 @@ elif verb == 'exec':
     cmd = args[args.index('--') + 1:]
     if cmd[0] == 'pg_isready':
         out = cmd[2] + ':5432 - ' + st.get('isready', 'accepting connections')
+    elif cmd[0] == 'sh' and 'target-before.dump' in cmd[2]:
+        out = st.get('dump', 'absent')
+        rc = 1 if out == 'error' else 0
     elif cmd[0] == 'sh':
         out = st.get('pgpass', '0\nnokey')
     elif cmd[0] == 'psql':
@@ -429,6 +432,70 @@ class RunnerStart(unittest.TestCase):
         self.assertEqual(self.rows()[-1], 'runner-removed')
         self.assertFalse(self.kube().get('pod') or self.kube().get('secret'))
         self.assertEqual([x.name for x in self.secret_dir.iterdir()], ['other.yaml'])
+
+    def test_the_restore_line_comes_only_from_start_apply(self):
+        restore = 'bash %s remove --apply' % (self.mig / 'window' / 'runner-start.sh')
+        self.state(sgps=SGPS, pod=True, automount=False, isready='no response')
+        for args in (('check',), ('check', '--apply')):
+            with self.subTest(args):
+                rc, out = self.run_tool(*args)
+                self.assertEqual(rc, 1, out)
+                self.assertIn('FAIL  legacy Stalwart database', out)
+                self.assertNotIn('pre-staged restore', out)
+                self.assertNotIn(restore, out)
+        self.state(sgps=SGPS, isready='no response')
+        rc, out = self.run_tool('--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('pre-staged restore options', out)
+        self.assertIn(restore, out)
+        self.state(sgps=SGPS, pod=True, automount=False, isready='no response')
+        rc, out = self.run_tool('check', '--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(restore, out)
+        rc, out = self.run_tool('remove')
+        self.assertNotIn(restore, out)
+
+    def test_remove_names_the_w4_dump_and_needs_go(self):
+        dump = '/work/target-before.dump in the runner (8123 bytes, modified 2026-11-19T18:02:11Z)'
+        self.state(sgps=SGPS, pod=True, secret=True, dump='8123 bytes, modified 2026-11-19T18:02:11Z')
+        rc, out = self.run_tool('remove')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('WARN  ' + dump, out)
+        self.assertIn('restore-target-db.sh', out)
+        self.assertIn('--apply --go', out)
+        self.assertEqual(self.writes(), [])
+        rc, out = self.run_tool('remove', '--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('WARN  ' + dump, out)
+        self.assertIn('STOP RUNNER (apply): no operator go', out)
+        self.assertEqual(self.writes(), [])
+        self.assertNotIn('runner-removed', self.rows())
+        self.assertTrue(self.kube().get('pod'))
+        rc, out = self.run_tool('remove', '--apply', '--go', 'drop the W4 dump, W4 is done')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('PASS  runner pod and Secret legacy-pg gone', out)
+        self.assertEqual(self.rows()[-2:], ['go-RUNNER', 'runner-removed'])
+        self.assertFalse(self.kube().get('pod'))
+
+    def test_remove_needs_go_when_the_dump_cannot_be_read(self):
+        self.state(sgps=SGPS, pod=True, secret=True, dump='error')
+        rc, out = self.run_tool('remove', '--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r'WARN  /work/target-before.dump in the runner \(unreadable: ')
+        self.assertIn('no operator go', out)
+        self.assertEqual(self.writes(), [])
+
+    def test_remove_without_a_pod_or_dump_needs_no_go(self):
+        for st in (dict(secret=True), dict(pod=True, secret=True)):
+            with self.subTest(st):
+                self.state(sgps=SGPS, **st)
+                (self.ev / 'timing.tsv').unlink(missing_ok=True)
+                rc, out = self.run_tool('remove', '--apply')
+                self.assertEqual(rc, 0, out)
+                self.assertNotIn('WARN', out)
+                self.assertRegex(out, r'(?m)^HAVE  no ')
+                self.assertEqual(self.rows(), ['runner-removed'])
+                self.assertFalse(self.secret_dir.exists())
 
     def test_usage(self):
         rc, out = self.run_tool('stop')

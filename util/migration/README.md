@@ -96,9 +96,13 @@ naming `STALWART_TARGET_PG_HOST`, and no runner pod or Secret yet. `--apply` has
 interrupt), creates the pod with `automountServiceAccountToken: false` and waits for Ready. It
 then checks the node role, the pod network interface, the service account and token, and logs
 in to the cutover branch, Keycloak and Accounts. `pg_isready` reaches legacy Stalwart, which gets
-no password line. On success it writes row `runner-start`. `check` runs the checks again;
+no password line. On success it writes row `runner-start`. Only `start --apply` stages
+`remove --apply` as the restore that a STOP prints. `check` runs the checks again;
 `remove --apply` deletes the pod, the Secret and any Secret file left in `$SECRET_DIR`, and
-writes row `runner-removed`.
+writes row `runner-removed`. The pod's `/work` goes with it, and so does
+`/work/target-before.dump`, the W4 restore point of `restore-target-db.sh`. When that file is
+there (or cannot be read), `remove` prints a `WARN` line with its size and time and needs
+`--apply --go '<operator words>'`, recorded as row `go-RUNNER`.
 
 ## Script notes
 

@@ -23,7 +23,7 @@ if [ "$APPLY" = 1 ] || [ "$MODE" = check ]; then LIVE=1; fi
 FAILS=0
 POD_OK=0
 exec 3>&1
-printf 'bash %s remove --apply\n' "$0" > "$RESTORE"
+: > "$RESTORE"
 
 have() { printf 'HAVE  %s\n' "$*"; }
 lack() { printf 'NEED  %s\n' "$*"; NEEDS=$((NEEDS + 1)); }
@@ -137,10 +137,20 @@ zero_exception() {
   else printf 'INFO  zero: thundermail has pod/runner and %s\n' "${o% }"; fi
 }
 
+dump_gate() {
+  local p d LIVE=1
+  p=$("${K[@]}" get pod runner --ignore-not-found -o name) || p=ERR
+  [ -n "$p" ] || { have "no runner pod, so no /work/target-before.dump"; return 0; }
+  d=$(rd "${PX[@]}" sh -c 'if [ -e /work/target-before.dump ]; then echo "$(stat -c %s /work/target-before.dump) bytes, modified $(date -u -r /work/target-before.dump +%FT%TZ)"; else echo absent; fi' 2>&1) || d="unreadable: $(tail -1 <<<"$d")"
+  [ "$d" = absent ] && { have "no /work/target-before.dump in the runner"; return 0; }
+  printf 'WARN  /work/target-before.dump in the runner (%s) is the W4 restore point of restore-target-db.sh: removing the pod deletes it\n' "$d"
+  go_gate
+}
+
 remove() {
   run "${K[@]}" delete pod runner --ignore-not-found --wait=true --timeout=120s || return 1
   run "${K[@]}" delete secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found || return 1
-  run find "$SECRET_DIR" -maxdepth 1 -name "$LEGACY_PG_SECRET_NAME-*.yaml" -delete || return 1
+  [ ! -d "$SECRET_DIR" ] || run find "$SECRET_DIR" -maxdepth 1 -name "$LEGACY_PG_SECRET_NAME-*.yaml" -delete || return 1
   [ "$APPLY" = 1 ] || return 0
   [ -z "$(rd "${K[@]}" get pod runner --ignore-not-found -o name)" ] && [ -z "$(rd "${K[@]}" get secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found -o name)" ] || { fail "runner pod or Secret $LEGACY_PG_SECRET_NAME still there"; return 0; }
   pass "runner pod and Secret $LEGACY_PG_SECRET_NAME gone"
@@ -163,11 +173,12 @@ case "$MODE" in
     gate_absent
     render
     [ "$APPLY" = 0 ] || [ "$NEEDS" = 0 ] || stop "$NEEDS gate(s) NEED above"
+    [ "$APPLY" = 0 ] || printf 'bash %s remove --apply\n' "$0" > "$RESTORE"
     echo "== start"
     start || stop "runner start failed; the restore is $RESTORE"
     checks ;;
   check) checks ;;
-  remove) echo "== remove"; remove || stop "remove failed" ;;
+  remove) echo "== remove"; dump_gate; remove || stop "remove failed" ;;
 esac
 [ "$FAILS" = 0 ] || stop "$FAILS check(s) FAIL above"
 if [ "$APPLY" = 1 ]; then
