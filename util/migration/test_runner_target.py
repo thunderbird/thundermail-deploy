@@ -26,8 +26,7 @@ class RunnerTarget(unittest.TestCase):
         self.mig = self.t / 'mig'
         shutil.copytree(HERE, self.mig, ignore=shutil.ignore_patterns('__pycache__'))
         p = self.mig / 'targets' / 'tb-prod.sh'
-        text = p.read_text().replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
-        p.write_text(text.replace('REPLACE_ME_RUNNER_WORK_SIZE', '20Gi'))
+        p.write_text(p.read_text().replace('REPLACE_ME_RUNNER_WORK_SIZE', '20Gi'))
 
     def tearDown(self):
         shutil.rmtree(self.t, ignore_errors=True)
