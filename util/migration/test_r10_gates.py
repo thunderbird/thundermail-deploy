@@ -61,6 +61,16 @@ class Gate(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn('a read phase started at z after the last w4-read-done row', out)
 
+    def test_no_gate_passes_without_a_cut_ecs_row(self):
+        q0 = ('queue-drain', '2026-11-19T04:40:00Z', 'queued', '0')
+        done = ('w4-read-done', '2026-11-19T04:41:00Z', 'export', 'x')
+        rc, out = self.gate('stop-legacy', [q0, done])
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(
+            out,
+            r'^WAIT  stop-legacy: no cut-ecs row in \S+timing.tsv: W2 has not cut legacy in this attempt\n$',
+        )
+
     def test_merge_recovery_passes_again_after_a_timeout_and_a_resume(self):
         base = [
             CUT,
