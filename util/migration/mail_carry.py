@@ -184,6 +184,13 @@ class Jmap:
             raise Stop('%s: got %d ids, the server reports %d' % (name, len(ids), total))
         return ids
 
+    def admin_account(self):
+        session = json.loads(self.raw('/jmap/session'))
+        admin = (session.get('primaryAccounts') or {}).get('urn:stalwart:jmap')
+        if not admin:
+            raise Stop('/jmap/session names no urn:stalwart:jmap account for this login')
+        return safe_id(admin, 'admin account id')
+
     def get(self, name, account, ids, props):
         out = []
         for i in range(0, len(ids), GET_PAGE):
@@ -279,12 +286,13 @@ def cmd_export(a):
     start = datetime.datetime.now(UTC)
     out = pathlib.Path(a.out)
     j = Jmap('STALWART', CORE + ['urn:stalwart:jmap'])
+    admin = j.admin_account()
     accounts = [
         x
         for x in j.get(
             'x:Account/get',
-            None,
-            j.query_all('x:Account/query', {}),
+            admin,
+            j.query_all('x:Account/query', {'accountId': admin}),
             ['name', 'emailAddress', '@type'],
         )
         if x.get('@type', 'User') in MAIL_TYPES

@@ -39,6 +39,7 @@ class Server:
         )
         self.accounts, self.principals, self.blobs, self.calls = {}, [], {}, []
         self.indexed, self.expunge_at_download = set(), set()
+        self.admin = 'adm0' if kind == 16 else None
         self.fail_download = self.truncate = self.short_total = self.mailbox_fail = False
         self.readback_delta = self.commit_then_500 = 0
         srv = self
@@ -71,6 +72,12 @@ class Server:
                         return self.send(404, {'detail': 'blob'})
                     data = srv.blobs[blob][:-1] if srv.truncate else srv.blobs[blob]
                     return self.send(200, data, 'message/rfc822')
+                if u.path == '/jmap/session' and srv.kind == 16:
+                    prim = {'urn:ietf:params:jmap:mail': 'zz'}
+                    if srv.admin:
+                        prim['urn:stalwart:jmap'] = srv.admin
+                    accs = dict.fromkeys(['zz'] + ([srv.admin] if srv.admin else []), {})
+                    return self.send(200, {'primaryAccounts': prim, 'accounts': accs})
                 if u.path == '/api/principal' and srv.kind == 15:
                     q = urllib.parse.parse_qs(u.query)
                     page, limit = int(q['page'][0]), int(q['limit'][0])
@@ -141,6 +148,8 @@ class Server:
 
     def method(self, name, args, cid):
         acc = self.accounts.get(args.get('accountId'))
+        if name.startswith('x:Account/') and args.get('accountId') != self.admin:
+            return ['error', {'type': 'accountNotFound'}, cid]
         if name == 'x:Account/query' and self.kind == 16:
             return [name, {'ids': sorted(self.accounts), 'total': len(self.accounts)}, cid]
         if name == 'x:Account/get' and self.kind == 16:
@@ -353,6 +362,16 @@ class Tool(unittest.TestCase):
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
         self.assertEqual(rc, 0, out)
         self.assertIn('in_legacy=3', out)
+
+    def test_accounts_are_listed_through_the_session_admin_account(self):
+        rc, out = self.export()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(('GET', '/jmap/session'), self.v16.calls)
+        self.v16.admin = None
+        rc, out = self.export()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STOP  /jmap/session names no urn:stalwart:jmap account', out)
+        self.assertEqual(self.rows(), [])
 
     def test_urls_must_be_loopback_and_the_import_never_targets_tb_prod(self):
         rc, out = self.export(STALWART_URL='http://192.0.2.1:18081')
