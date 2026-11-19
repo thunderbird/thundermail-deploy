@@ -21,5 +21,14 @@ else
   stalwart-cli snapshot $KINDS --output "$settings"
   printf 'settings objects=%s\n%s\n' "$(grep -c . "$settings")" "$settings"
 fi
-khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o jsonpath='{.status.freightHistory[0].items.*.name}' > "$freight"
+if ! khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o jsonpath='{.status.freightHistory[0].items.*.name}' > "$freight" 2> "$freight.err" || [ ! -s "$freight" ]; then
+  history=$(khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o json | jq -r '.status.freightHistory // [] | length') || { cat "$freight.err" >&2; rm -f "$freight.err"; echo "kubectl get stage $KARGO_STAGE_CONFIGS failed: Freight before W5 not read"; exit 1; }
+  rm -f "$freight.err"
+  [ "$history" = 0 ] || { echo "stage $KARGO_STAGE_CONFIGS has $history Freight history entries but no Freight name was read"; exit 1; }
+  printf 'none\n' > "$freight"
+  printf 'freight=none: stage %s has no Freight history, so there is no Freight to restore\n%s\n' "$KARGO_STAGE_CONFIGS" "$freight"
+  exit 0
+fi
+cat "$freight.err" >&2
+rm -f "$freight.err"
 printf 'freight=%s\n%s\n' "$(cat "$freight")" "$freight"

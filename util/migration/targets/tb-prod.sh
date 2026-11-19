@@ -27,7 +27,6 @@ CALDAV_HOST=thundermail.com
 LEGACY_AUTH_HOST=auth.tb.pro
 LEGACY_ACCOUNTS_HOST=accounts.tb.pro
 TARGET_SECRET_PREFIX=mzla/tb-prod
-CF_EXTERNAL_DNS_SECRET=REPLACE_ME_CF_EXTERNAL_DNS_SECRET
 STALWART_RECOVERY_SECRET=mzla/tb-prod/stalwart-recovery-admin
 KC_ADMIN_TARGET_SECRET=mzla/tb-prod/keycloak-customer-admin-client
 LEGACY_STALWART_SECRET_PREFIX=mailstrom/prod

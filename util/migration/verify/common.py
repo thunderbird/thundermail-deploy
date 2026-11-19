@@ -56,19 +56,78 @@ def dec(s):
 
 
 # ---------- source: principals dump ----------
+def account_range():
+    """VERIFY_ACCOUNT_RANGE=lo-hi (inclusive): one batch of a piece of the full compare."""
+    v = os.environ.get("VERIFY_ACCOUNT_RANGE", "")
+    if not v:
+        return None
+    lo, _, hi = v.partition("-")
+    if not (lo.isdigit() and hi.isdigit()) or int(lo) > int(hi):
+        sys.exit(f"VERIFY_ACCOUNT_RANGE must be lo-hi account ids, got {v!r}")
+    return int(lo), int(hi)
+
+
+def body_sample(default):
+    """VERIFY_BODY_SAMPLE as a count; unset, empty or 0 gives `default`."""
+    v = os.environ.get("VERIFY_BODY_SAMPLE", "").strip()
+    if not v:
+        return default
+    if not v.isdigit():
+        sys.exit(f"VERIFY_BODY_SAMPLE must be a whole number, got {v!r}")
+    return int(v) or default
+
+
 def principals():
     """principals.json from `migrate_v016.py dump`. Returns {id: principal} for individual accounts."""
     p = json.load(open(need("PRINCIPALS")))
     items = p if isinstance(p, list) else p.get("items", p)
-    return {unwrap_int(x.get("id")): x for x in items if unwrap_str(x.get("type")) == "individual"}, items
+    acc = {unwrap_int(x.get("id")): x for x in items if unwrap_str(x.get("type")) == "individual"}
+    rng = account_range()
+    if rng:
+        acc = {k: v for k, v in acc.items() if rng[0] <= k <= rng[1]}
+    return acc, items
 
 
 # ---------- source: Postgres (read-only) ----------
 _pg = None
 
 
+SOURCE_VARS = ("STALWART_SOURCE_PG_HOST", "STALWART_SOURCE_PG_DB", "STALWART_SOURCE_PG_USER",
+               "STALWART_SOURCE_PG_PASSWORD")
+SOURCE_BRANCH = "tb-prod-cutover-source"
+
+
+def prod_source():
+    """tb-prod: the source is branch tb-prod-cutover-source, read only through STALWART_SOURCE_PG_*,
+    which the reset phase of window/w4-migrate.sh writes. Refuses any other source setting and
+    the production endpoint or credential."""
+    other = [v for v in ("SOURCE_PG_SECRET_ID", "SOURCE_PG_HOST", "SOURCE_PG_DB", "SOURCE_PG_USER",
+                         "SOURCE_PG_PASSWORD") if os.environ.get(v)]
+    if other:
+        sys.exit(f"refusing: on tb-prod the source is branch {SOURCE_BRANCH}, read only through "
+                 f"STALWART_SOURCE_PG_*; unset {' '.join(other)}")
+    miss = [v for v in SOURCE_VARS if not os.environ.get(v)]
+    if miss:
+        sys.exit(f"refusing: empty {' '.join(miss)}: on tb-prod the source is branch "
+                 f"{SOURCE_BRANCH}; the reset phase of window/w4-migrate.sh writes these names to "
+                 "the cutover env file")
+    host, db, user, password = (need(v) for v in SOURCE_VARS)
+    c = {"host": host.replace("-pooler", ""), "dbname": db, "user": user, "password": password}
+    legacy = os.environ.get("STALWART_LEGACY_PG_HOST", "").replace("-pooler", "")
+    if legacy and c["host"].split(".")[0] == legacy.split(".")[0]:
+        sys.exit(f"refusing: STALWART_SOURCE_PG_HOST is the production endpoint "
+                 f"(STALWART_LEGACY_PG_HOST), not branch {SOURCE_BRANCH}")
+    legacy_pw = os.environ.get("STALWART_LEGACY_PG_PASSWORD")
+    if legacy_pw and c["password"] == legacy_pw:
+        sys.exit("refusing: STALWART_SOURCE_PG_PASSWORD is the production credential "
+                 f"(STALWART_LEGACY_PG_PASSWORD), not the credential of branch {SOURCE_BRANCH}")
+    return c
+
+
 def _pg_conn():
     global _pg
+    if _pg is None and os.environ.get("TARGET_ENV") == "tb-prod":
+        _pg = prod_source()
     if _pg is None:
         if os.environ.get("SOURCE_PG_SECRET_ID"):
             out = subprocess.run(["aws", "secretsmanager", "get-secret-value", "--secret-id", need("SOURCE_PG_SECRET_ID"),

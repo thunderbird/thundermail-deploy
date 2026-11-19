@@ -251,7 +251,7 @@ class Builder(Sandbox):
         self.assertIn("WINDOW_SHA='%s'" % head, text)
         self.assertNotIn('REHEARSAL', text)
         self.assertIn("INBOUND_TTL_WAIT='60'", text)
-        self.assertIn("NEON_BRANCH_KC='main'", text)
+        self.assertIn("NEON_BRANCH_KC=''", text)
         self.assertEqual(oct((self.t / 'shm' / 'cutover.env').stat().st_mode & 0o777), '0o600')
 
     def test_prod_refuses_an_open_window_without_rebuild(self):
@@ -292,8 +292,6 @@ class Builder(Sandbox):
             'legacy-url-loopback',
             'stalwart-legacy-healthz',
             'stalwart-target-healthz',
-            'target-nlb',
-            'restore-target-db-dry-run',
         ):
             self.assertRegex(out, r'(?m)^WAIT  %s +\S' % re.escape(name))
             self.assertNotRegex(out, r'(?m)^(PASS|FAIL)  %s ' % re.escape(name))
@@ -306,6 +304,7 @@ class Builder(Sandbox):
             'restore-replicas-dry-run',
             'pg_isready-STALWART_LEGACY',
             'psql-select1-STALWART_LEGACY',
+            'restore-target-db-dry-run',
         ):
             self.assertNotRegex(out, r'(?m)^\S+  %s ' % re.escape(name))
         self.assertRegex(out, r'(?m)^FAIL  operator-values +empty: TEST_MAILBOX ')
@@ -1104,7 +1103,24 @@ class Placeholders(Sandbox):
         self.assertNotIn('pr list', self.log())
         text = (self.t / 'shm' / 'cutover.env').read_text()
         for name in ('FREEZE_PR', 'T7_PR', 'T7_REVERT_PR', 'T8_PR', 'T8_REVERT_PR'):
-            self.assertIn("%s=''" % name, text)
+            self.assertNotRegex(text, r'(?m)^%s=' % name)
+
+    def test_no_placeholder_is_left_on_tb_prod(self):
+        for rel in ('targets/tb-prod.sh', 'verify/tb-prod.env'):
+            self.assertNotIn('replace_me', (HERE / rel).read_text().lower(), rel)
+        rc, out = self.run_sh(
+            ['-c', 'set -- --apply\n. %s/lib.sh\necho reached\n' % HERE], TARGET_ENV='tb-prod'
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('refusing', out)
+        self.assertIn('reached', out)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(
+            out,
+            r'(?m)^HAVE  placeholders +no REPLACE_ME value in targets/tb-prod.sh or verify/tb-prod.env$',
+        )
 
     def test_every_apply_refuses_while_one_remains(self):
         script = 'set -- --apply\n. %s/lib.sh\necho reached\n'
@@ -1226,7 +1242,7 @@ class CrossEnvironment(Sandbox):
         self.prod_build()
         text = (self.t / 'shm' / 'cutover.env').read_text()
         self.assertNotIn("'11'", text)
-        self.assertIn("ADMIN_MERGE=''", text)
+        self.assertNotRegex(text, r'(?m)^ADMIN_MERGE=')
 
     def test_a_prod_operator_file_needs_its_target_line(self):
         f = self.operator_file('cutover-operator-tb-prod.env', "ADMIN_MERGE='1'\n")

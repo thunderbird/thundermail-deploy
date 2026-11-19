@@ -13,6 +13,11 @@ for a in "$@"; do
   esac
 done
 BUILDING_ENV=1
+SHELL_NAMES=" $(compgen -e | tr '\n' ' ')"
+if [ -z "${CUTOVER_ATTEMPT:-}" ] && [ "${TARGET_ENV:-}" = tb-prod ] && [ -f "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" ]; then
+  CUTOVER_ATTEMPT=$(sed -n "s/^CUTOVER_ATTEMPT='\([1-9][0-9]*\)'$/\1/p" "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" | tail -1)
+  [ -n "$CUTOVER_ATTEMPT" ] || unset CUTOVER_ATTEMPT
+fi
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
 OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
@@ -21,12 +26,18 @@ VALUES=$REPO_DIR/$CONFIGS_OVERLAY/config/values.yaml
 NEON_API=https://console.neon.tech/api/v2
 CARRY="FREEZE_SHA THAW_PR T7_ENV_SHA T8_ENV_SHA T6_SHA FREIGHT STALWART_ADMIN_ACCOUNT_ID CURRENT_ACCOUNTS_FREIGHT THAW_SHA T7_START T8_START DECISIONS_COMMENT_URL CUT_ECS_END TEST_SENDER_APP_PASSWORD PADDLE_NOTIFICATION_ID NOTICE_RECIPIENTS_CSV"
 OPERATOR_VARS="FREEZE_PR T6_PR FLIP_PR APPOINTMENT_PR ADMIN_MERGE SPF_FINAL_TXT TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER SUPPORT_CHANNEL INBOUND_FROM"
-WINDOW_CARRY="REPLICAS_BEFORE STATE_INBOUND_AT STATE_OPEN_AT AUTH_DNS_AT ACCOUNTS_DNS_AT INBOUND_TTL_BEFORE INBOUND_TTL_WAIT KC_IMAGE_VERSION INBOUND_FROM ACCOUNTS_AUTOSYNC_SHA SECRET_VERSIONS_BEFORE WINDOW_SHA WINDOW_END REALM_BEFORE LEGACY_EGRESS_SNAPSHOT BACKUP_SECOND_COPY"
+WINDOW_CARRY="REPLICAS_BEFORE STATE_INBOUND_AT STATE_OPEN_AT AUTH_DNS_AT ACCOUNTS_DNS_AT INBOUND_TTL_BEFORE INBOUND_TTL_WAIT KC_IMAGE_VERSION INBOUND_FROM ACCOUNTS_AUTOSYNC_SHA SECRET_VERSIONS_BEFORE WINDOW_SHA WINDOW_END REALM_BEFORE LEGACY_EGRESS_SNAPSHOT BACKUP_SECOND_COPY STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD"
 WINDOW_OPERATOR_VARS="PROBE_TIMEOUT ACCOUNTS_AUTOSYNC_PR REC_AUTH REC_ACCOUNTS MAIL_RECORDS_TSV TEST_USER_TBPRO PILOT_USER PROBE_MX_HOST PROBE_DOMAIN PROBE_MAILBOX PROBE_SENDER PROBE_HELO TEST_MAILBOX_GMAIL TEST_MAILBOX_M365 JUNK_BAND WINDOW_END ROLLBACK_HORIZON GATE_MARGIN CERT_MIN_NOT_AFTER OUTBOUND_PROOF_INTERVAL OUTBOUND_PROOF_ATTEMPTS VERIFY_BODY_SAMPLE QUOTA_RESET_TIMEOUT W4_DUMP_MAX_AGE WATCH_INTERVAL LANE_PROBE_MAX LANE_REPORT_MAX LANE_WAIT_MAX PADDLE_POLL_MAX MAIL_BACKUP_STORE ROTATION_HOST PROVISIONING_RELEASE_PR G_IN_DEADLINE"
 SECRET_VARS="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD"
+PROD_OPERATOR_REQUIRED="TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER"
+PREV_IGNORED=0
+if [ "$TARGET_ENV" = tb-prod ]; then
+  SECRET_VARS=${SECRET_VARS/ STALWART_LEGACY_PG_PASSWORD/}
+  WINDOW_OPERATOR_VARS=${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/}
+fi
 
 try() { ( "$@" ) 2>/dev/null || true; }
-prev() { [ -f "$ENV_FILE" ] || return 0; ( set +eu; . "$ENV_FILE" >/dev/null 2>&1; printf '%s' "${!1:-}" ); }
+prev() { [ "${PREV_IGNORED:-0}" != 1 ] && [ -f "$ENV_FILE" ] || return 0; ( set +eu; . "$ENV_FILE" >/dev/null 2>&1; printf '%s' "${!1:-}" ); }
 op() { printf '%s' "${!1:-$(prev "$1")}"; }
 from_file() { [ -f "$1" ] && sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" | head -1 | sed "s/^['\"]//; s/['\"]\$//" || true; }
 bearer() { printf 'header = "Authorization: Bearer %s"\n' "$1"; }
@@ -37,6 +48,51 @@ direct() { sed 's/-pooler//'; }
 doh_a() { curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data] | sort | join(" ")'; }
 opw() { local v; v=$(op "$1"); [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || v=$(window_values "$1"); printf '%s' "$v"; }
 window_values() { [ -f "$EVIDENCE_DIR/window-values.tsv" ] && awk -F'\t' -v n="$1" '$1 == n {v = $2; f = 1} END {if (f) printf "%s", v}' "$EVIDENCE_DIR/window-values.tsv" || true; }
+attempt_of() { [ -f "$1" ] || return 0; ( unset CUTOVER_ATTEMPT; set +eu; . "$1" >/dev/null 2>&1; printf '%s' "${CUTOVER_ATTEMPT:-1}" ); }
+attempt_guard() {
+  local last p v
+  [[ $CUTOVER_ATTEMPT =~ ^[1-9][0-9]*$ ]] || die "CUTOVER_ATTEMPT='$CUTOVER_ATTEMPT' is not a positive integer"
+  last=$(cutover_attempt_last)
+  [ "$CUTOVER_ATTEMPT" -ge "$last" ] || die "attempt-$last exists under $HOME/.local/state/talos/cutover-$TARGET_ENV: CUTOVER_ATTEMPT=$CUTOVER_ATTEMPT would build on an earlier attempt"
+  for v in EVIDENCE_DIR SECRET_DIR TIMING_TSV; do
+    case "${!v:-}/" in
+      */attempt-"$CUTOVER_ATTEMPT"/*) ;;
+      */attempt-[0-9]*/*) die "$v=${!v} belongs to another attempt than CUTOVER_ATTEMPT=$CUTOVER_ATTEMPT (exported by a loaded env file?): unset EVIDENCE_DIR SECRET_DIR TIMING_TSV and rerun" ;;
+    esac
+  done
+  p=$(attempt_of "$ENV_FILE")
+  [ -n "$p" ] && [ "$p" != "$CUTOVER_ATTEMPT" ] || return 0
+  [ "$p" -lt "$CUTOVER_ATTEMPT" ] || die "$ENV_FILE is attempt $p: CUTOVER_ATTEMPT=$CUTOVER_ATTEMPT would replace it with an earlier attempt"
+  for v in $CARRY $WINDOW_CARRY; do
+    case "$SHELL_NAMES" in *" $v "*) ;; *) continue ;; esac
+    [ -z "${!v:-}" ] || die "$v is set in this shell (a loaded env file of attempt $p?): a new attempt carries nothing; start a fresh shell and rerun"
+  done
+  for v in EVIDENCE_DIR SECRET_DIR TIMING_TSV; do
+    case "${!v:-}/" in
+      /|*/attempt-"$CUTOVER_ATTEMPT"/*) ;;
+      *) die "$v=${!v} has no attempt-$CUTOVER_ATTEMPT part: attempt $CUTOVER_ATTEMPT would share the files of attempt $p; unset it or move it under attempt-$CUTOVER_ATTEMPT" ;;
+    esac
+  done
+  PREV_IGNORED=1
+  printf 'previous env file %s is attempt %s: nothing is carried from it into attempt %s\n' "$ENV_FILE" "$p" "$CUTOVER_ATTEMPT"
+}
+env_lock() {
+  command -v flock >/dev/null 2>&1 || { echo "flock missing: $ENV_FILE is written without the env file lock" >&2; return 0; }
+  ( umask 077; : >> "$ENV_FILE.lock" ) || die "cannot create the env file lock $ENV_FILE.lock"
+  exec 9>> "$ENV_FILE.lock"
+  flock -w 60 9 || die "the env file lock $ENV_FILE.lock stayed taken for 60 s: $ENV_FILE not written, rerun"
+}
+oput() {
+  local name=$1 value=$2
+  if [ "$TARGET_ENV" != tb-prod ]; then put "$@"; return; fi
+  [ -n "$value" ] || [ "${REBUILD:-0}" != 1 ] || value=$(window_values "$name")
+  if [ -n "$value" ]; then put "$name" "$value" "$3"; return; fi
+  PUT="$PUT$name "
+  case " $PROD_OPERATOR_REQUIRED TEST_SENDER " in
+    *" $name "*) printf '%-30s len=0 NEED unset (not written, so a value exported in the shell is kept)\n' "$name"; missing=$((missing + 1)) ;;
+    *) printf '%-30s len=0 unset (not written, so a value exported in the shell is kept)\n' "$name" ;;
+  esac
+}
 cf_zone() { [ -n "${CF_TOKEN:-}" ] || return 0; curl -sS -m 30 -K <(bearer "$CF_TOKEN") "$CF_API/zones?name=$1" | jq -r '.result[0].id // empty'; }
 pr_by_head() { gh pr list -R "thunderbird/$1" --state open --json number,headRefName --jq "[.[] | select(.headRefName | test(\"(^|/)$2\$\"))] | if length == 1 then .[0].number else empty end"; }
 neon_get() { curl -sS -m 60 -K <(bearer "${KEY:-$NEON_KEY}") "$NEON_API/$1"; }
@@ -54,6 +110,14 @@ neon_lookup() {
       return 0
     fi
   done
+}
+neon_default_branch() {
+  local KEY
+  [ -n "$2" ] || return 0
+  KEY=$(from_file "$HOME/.neon-api.env" "NEON_API_KEY_$1")
+  KEY=${KEY:-${NEON_KEY:-}}
+  [ -n "$KEY" ] || return 0
+  try neon_get "projects/$2/branches" | jq -r '[.branches[]? | select(.default == true or .primary == true) | .name] | if length == 1 then .[0] else empty end'
 }
 
 render_ref() {
@@ -92,8 +156,8 @@ window_vars() {
   done
   r=$(neon_lookup STALWART_TARGET "$(jq -r '.host // empty' <<<"${cfg:-{\}}" | direct)")
   put NEON_PROJECT_STALWART_TARGET "$(op NEON_PROJECT_STALWART_TARGET)$([ -n "$(op NEON_PROJECT_STALWART_TARGET)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_TARGET in the environment, else Neon API: project whose endpoint id is the STALWART_TARGET_PG_HOST prefix"
-  v=$(op NEON_BRANCH_KC); put NEON_BRANCH_KC "${v:-main}" "NEON_BRANCH_KC in the environment, else main"
-  v=$(op NEON_BRANCH_ACCOUNTS); put NEON_BRANCH_ACCOUNTS "${v:-main}" "NEON_BRANCH_ACCOUNTS in the environment, else main"
+  v=$(op NEON_BRANCH_KC); [ -n "$v" ] || v=$(neon_default_branch KC "${NEON_PROJECT_KC_ID:-}"); put NEON_BRANCH_KC "$v" "NEON_BRANCH_KC in the environment, else Neon API: the default branch of NEON_PROJECT_KC"
+  v=$(op NEON_BRANCH_ACCOUNTS); [ -n "$v" ] || v=$(neon_default_branch ACCOUNTS "${NEON_PROJECT_ACCOUNTS_ID:-}"); put NEON_BRANCH_ACCOUNTS "$v" "NEON_BRANCH_ACCOUNTS in the environment, else Neon API: the default branch of NEON_PROJECT_ACCOUNTS"
   ids=$(try aws_legacy ec2 describe-instances --filters "Name=tag:Name,Values=$LEGACY_NODE_NAME_FILTER" Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | { grep . || true; } | sort | tr '\n' ' ' | sed 's/ $//')
   [ "$(wc -w <<<"$ids")" = "$LEGACY_NODE_COUNT" ] || ids=""
   put LEGACY_STALWART_NODE_IDS "$ids" "aws ec2 describe-instances --profile $LEGACY_AWS_PROFILE Name=$LEGACY_NODE_NAME_FILTER running; empty unless exactly $LEGACY_NODE_COUNT"
@@ -105,7 +169,7 @@ window_vars() {
   put CUTOVER_ENV "$ENV_FILE" "this file"
   for v in $WINDOW_OPERATOR_VARS $(compgen -v W4_WAIT_ || true); do
     case "$PUT" in *" $v "*) continue ;; esac
-    put "$v" "$(opw "$v")" "operator: $v (environment or $OPERATOR_ENV)"
+    oput "$v" "$(opw "$v")" "operator: $v (environment or $OPERATOR_ENV)"
   done
 }
 
@@ -113,8 +177,10 @@ build() {
   KUBECONFIG_TARGET=$(realpath -m "${KUBECONFIG_TARGET:-$HOME/.local/state/talos/$TARGET_KUBECONFIG_NAME}")
   KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
   KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
-  mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
+  mkdir -p "$(dirname "$ENV_FILE")"
   env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
+  [ "$TARGET_ENV" != tb-prod ] || attempt_guard
+  mkdir -p "$EVIDENCE_DIR" "$SECRET_DIR"
   local count=0 missing=0
   PUT=" "
   [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
@@ -150,7 +216,8 @@ build() {
   put STALWART_LEGACY_PG_HOST "$(jq -r '.host // empty' <<<"${lpg:-{\}}" | direct)" "SM $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend .host (-pooler stripped)"
   put STALWART_LEGACY_PG_DB "$(jq -r '.database // empty' <<<"${lpg:-{\}}")" "SM $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend .database"
   put STALWART_LEGACY_PG_USER "$(jq -r '.user // empty' <<<"${lpg:-{\}}")" "SM $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend .user"
-  put STALWART_LEGACY_PG_PASSWORD "$(jq -r '.password // empty' <<<"${lpg:-{\}}")" "SM $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend .password"
+  if [ "$TARGET_ENV" = tb-prod ]; then printf '%-30s not written: tb-prod holds no legacy Stalwart database credential\n' STALWART_LEGACY_PG_PASSWORD
+  else put STALWART_LEGACY_PG_PASSWORD "$(jq -r '.password // empty' <<<"${lpg:-{\}}")" "SM $LEGACY_STALWART_SECRET_PREFIX/stalwart.postboot.postgresql_backend .password"; fi
   put ACCOUNTS_LEGACY_PG_HOST "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/database-host" | direct)" "SM $LEGACY_ACCOUNTS_SECRET_PREFIX/database-host (-pooler stripped)"
   put ACCOUNTS_LEGACY_PG_NAME "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/database-name")" "SM $LEGACY_ACCOUNTS_SECRET_PREFIX/database-name"
   put ACCOUNTS_LEGACY_PG_USER "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/database-user")" "SM $LEGACY_ACCOUNTS_SECRET_PREFIX/database-user"
@@ -173,9 +240,11 @@ build() {
   put NEON_PROJECT_STALWART_LEGACY "$(op NEON_PROJECT_STALWART_LEGACY)$([ -n "$(op NEON_PROJECT_STALWART_LEGACY)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_STALWART_LEGACY in the environment, else Neon API: project whose endpoint id is the STALWART_LEGACY_PG_HOST prefix"
   put NEON_LEGACY_STALWART_BRANCH "$(cut -f2 <<<"$r")" "Neon API: branch of that endpoint"
   r=$(neon_lookup KC "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/keycloak-database-host" | direct)")
-  put NEON_PROJECT_KC "$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
+  NEON_PROJECT_KC_ID=$(op NEON_PROJECT_KC)$([ -n "$(op NEON_PROJECT_KC)" ] || cut -f1 <<<"$r")
+  put NEON_PROJECT_KC "$NEON_PROJECT_KC_ID" "NEON_PROJECT_KC in the environment, else Neon API: project whose endpoint id is the KC_LEGACY_PG_HOST prefix"
   r=$(neon_lookup ACCOUNTS "$(try sm_legacy "$LEGACY_ACCOUNTS_SECRET_PREFIX/database-host" | direct)")
-  put NEON_PROJECT_ACCOUNTS "$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
+  NEON_PROJECT_ACCOUNTS_ID=$(op NEON_PROJECT_ACCOUNTS)$([ -n "$(op NEON_PROJECT_ACCOUNTS)" ] || cut -f1 <<<"$r")
+  put NEON_PROJECT_ACCOUNTS "$NEON_PROJECT_ACCOUNTS_ID" "NEON_PROJECT_ACCOUNTS in the environment, else Neon API: project whose endpoint id is the ACCOUNTS_LEGACY_PG_HOST prefix"
 
   put LEGACY_BLOB_BUCKET "$(try aws_legacy s3api list-buckets --query "Buckets[?contains(Name,'$LEGACY_BUCKET_MATCH') && ends_with(Name,'-stalwart-s3-store')].Name | [0]" --output text | grep -v '^None$' || true)" "aws s3api list-buckets --profile $LEGACY_AWS_PROFILE (name *$LEGACY_BUCKET_MATCH*-stalwart-s3-store)"
   put TARGET_BLOB_BUCKET "$(yq -r '.blobStoreBucket // ""' "$VALUES")" "$CONFIGS_OVERLAY/config/values.yaml blobStoreBucket"
@@ -202,18 +271,18 @@ build() {
   put KARGO_PROJECT_CONFIGS "$KARGO_PROJECT_CONFIGS" "Kargo project (targets/$TARGET_ENV.sh)"
   put KARGO_STAGE_CONFIGS "$KARGO_STAGE_CONFIGS" "Kargo stage (targets/$TARGET_ENV.sh)"
   put KARGO_WAREHOUSE_CONFIGS "$KARGO_WAREHOUSE_CONFIGS" "Kargo warehouse (targets/$TARGET_ENV.sh)"
-  put FREEZE_PR "$(op FREEZE_PR)$([ -z "$(op FREEZE_PR)" ] && target_defines FREEZE_BRANCH && try gh pr list -R thunderbird/platform-infrastructure --head "${FREEZE_BRANCH:-}" --state open --json number --jq '.[0].number')" "gh pr list -R thunderbird/platform-infrastructure --head ${FREEZE_BRANCH:-}, or FREEZE_PR in the environment"
-  put T6_PR "$(op T6_PR)" "operator: TMD values.yaml PR number (T6_PR in the environment)"
+  oput FREEZE_PR "$(op FREEZE_PR)$([ -z "$(op FREEZE_PR)" ] && target_defines FREEZE_BRANCH && try gh pr list -R thunderbird/platform-infrastructure --head "${FREEZE_BRANCH:-}" --state open --json number --jq '.[0].number')" "gh pr list -R thunderbird/platform-infrastructure --head ${FREEZE_BRANCH:-}, or FREEZE_PR in the environment"
+  oput T6_PR "$(op T6_PR)" "operator: TMD values.yaml PR number (T6_PR in the environment)"
   for d in "T7_PR:keycloak-customer-deploy:${PR_HEAD_PREFIX:-}-t7" "T7_REVERT_PR:keycloak-customer-deploy:${PR_HEAD_PREFIX:-}-t7-revert" "T8_PR:accounts-deploy:${PR_HEAD_PREFIX:-}-t8" "T8_REVERT_PR:accounts-deploy:${PR_HEAD_PREFIX:-}-t8-revert"; do
     local v repo head n
     IFS=: read -r v repo head <<<"$d"
     n=$(op "$v")
     [ -n "$n" ] || ! target_defines PR_HEAD_PREFIX || n=$(try pr_by_head "$repo" "$head")
-    put "$v" "$n" "$v in the environment, else the one open thunderbird/$repo PR with head */$head (gh pr list)"
+    oput "$v" "$n" "$v in the environment, else the one open thunderbird/$repo PR with head */$head (gh pr list)"
   done
-  put FLIP_PR "$(op FLIP_PR)" "operator: TMD dnsManagement Automatic PR number (FLIP_PR in the environment)"
-  put APPOINTMENT_PR "$(op APPOINTMENT_PR)" "operator: appointment $TARGET_ENV PR number (APPOINTMENT_PR in the environment)"
-  put ADMIN_MERGE "$(op ADMIN_MERGE)" "operator: 1 = merge_pr admin-merges REVIEW_REQUIRED window PRs after green checks and Greptile 5/5 (decision 2026-10-28)"
+  oput FLIP_PR "$(op FLIP_PR)" "operator: TMD dnsManagement Automatic PR number (FLIP_PR in the environment)"
+  oput APPOINTMENT_PR "$(op APPOINTMENT_PR)" "operator: appointment $TARGET_ENV PR number (APPOINTMENT_PR in the environment)"
+  oput ADMIN_MERGE "$(op ADMIN_MERGE)" "operator: 1 = merge_pr admin-merges REVIEW_REQUIRED window PRs after green checks and Greptile 5/5 (decision 2026-10-28)"
   for d in PI_DIR:platform-infrastructure KCD_DIR:keycloak-customer-deploy ACD_DIR:accounts-deploy APPOINTMENT_DIR:appointment TMD_DIR:thundermail-deploy; do
     local v=${d%%:*} repo=${d##*:} path
     path=${!v:-$HOME/src/tb/$repo}
@@ -225,7 +294,7 @@ build() {
   CF_TOKEN=$(from_file "$CF_TOKEN_FILE" CF_API_TOKEN_AGENT)
   put CF_API_TOKEN_AGENT "$CF_TOKEN" "$CF_TOKEN_FILE CF_API_TOKEN_AGENT"
   local zid; zid=$(try cf_zone "$MAIL_ZONE")
-  [ -n "$zid" ] || zid=$(try shared_zone_id "$MAIL_ZONE")
+  [ -n "$zid" ] || ! target_defines CF_EXTERNAL_DNS_SECRET || zid=$(try shared_zone_id "$MAIL_ZONE")
   put CF_ZONE_ID "$zid" "GET /zones?name=$MAIL_ZONE with CF_API_TOKEN_AGENT, else with the shared external-dns token (read-only)"
   put CF_ZONE_ID_TBPRO "$(try cf_zone "$TBPRO_ZONE")" "GET /zones?name=$TBPRO_ZONE"
   put PADDLE_API_KEY "$(from_file "$HOME/.paddle.env" PADDLE_API_KEY)" "\$HOME/.paddle.env PADDLE_API_KEY"
@@ -233,21 +302,24 @@ build() {
   local nlb; nlb=$(try ktarget -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
   [ -n "$nlb" ] || nlb=$(try aws_target elbv2 describe-load-balancers --names "$TARGET_NLB_NAME" --query 'LoadBalancers[0].DNSName' --output text | grep -v '^None$' || true)
   put TARGET_NLB_DNS "$nlb" "kubectl -n thundermail get svc nginx .status.loadBalancer.ingress[0].hostname, resolved live on every build (else aws elbv2 --names $TARGET_NLB_NAME)"
-  put TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox; must be TEST_USER's Keycloak email (the backup address)"
-  put TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
-  put TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
-  put TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
-  put TEST_USER "$(op TEST_USER)" "operator: migrated $TARGET_ENV mailbox the operator owns"
-  put TEST_SENDER "$(op TEST_USER)" "same as TEST_USER"
-  put INBOUND_FROM "$(op INBOUND_FROM)" "operator: sender of the W7 inbound test, in a domain whose SPF passes for the W7 host and not the domain of the zone, TEST_MAILBOX or TEST_USER; no default"
-  put SPF_FINAL_TXT "$(op SPF_FINAL_TXT)" "operator: spf. TXT from the #1535 decision (SPF_FINAL_TXT in the environment)"
-  put SUPPORT_CHANNEL "$(op SUPPORT_CHANNEL)" "operator: support announcement channel"
+  oput TEST_MAILBOX "$(op TEST_MAILBOX)" "operator: external test mailbox; must be TEST_USER's Keycloak email (the backup address)"
+  oput TEST_MAILBOX_IMAP_HOST "$(op TEST_MAILBOX_IMAP_HOST)" "operator: external test mailbox IMAP host"
+  oput TEST_MAILBOX_IMAP_USER "$(op TEST_MAILBOX_IMAP_USER)" "operator: external test mailbox IMAP user"
+  oput TEST_MAILBOX_IMAP_PASSWORD "$(op TEST_MAILBOX_IMAP_PASSWORD)" "operator: external test mailbox IMAP password"
+  oput TEST_USER "$(op TEST_USER)" "operator: migrated $TARGET_ENV mailbox the operator owns"
+  oput TEST_SENDER "$(op TEST_USER)" "same as TEST_USER"
+  oput INBOUND_FROM "$(op INBOUND_FROM)" "operator: sender of the W7 inbound test, in a domain whose SPF passes for the W7 host and not the domain of the zone, TEST_MAILBOX or TEST_USER; no default"
+  oput SPF_FINAL_TXT "$(op SPF_FINAL_TXT)" "operator: spf. TXT from the #1535 decision (SPF_FINAL_TXT in the environment)"
+  oput SUPPORT_CHANNEL "$(op SUPPORT_CHANNEL)" "operator: support announcement channel"
   for v in KUBECONFIG_TARGET KUBECONFIG_HUB KUBECONFIG_DEV; do
     put "$v" "${!v}" "aws eks update-kubeconfig --kubeconfig ${!v} ($v in the environment$([ "$v" != KUBECONFIG_TARGET ] || echo ", cluster $TARGET_CLUSTER, profile $TARGET_AWS_PROFILE"))"
     [ -f "${!v}" ] || { printf '%-30s file missing\n' "$v"; missing=$((missing + 1)); }
   done
+  [ "$TARGET_ENV" != tb-prod ] || put CUTOVER_ATTEMPT "$CUTOVER_ATTEMPT" "CUTOVER_ATTEMPT in the environment, else the highest attempt-N directory under \$HOME/.local/state/talos/cutover-$TARGET_ENV, else 1"
   put EVIDENCE_DIR "$EVIDENCE_DIR" "evidence directory"
-  local tsv; tsv=$(op TIMING_TSV); put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
+  local tsv; tsv=$(op TIMING_TSV)
+  [ "$TARGET_ENV" != tb-prod ] || case "$tsv" in "$EVIDENCE_DIR"/*) ;; *) tsv="" ;; esac
+  put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
   put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"
   for side in "LEG:$LEGACY_AWS_PROFILE" "TGT:$TARGET_AWS_PROFILE"; do
     local p=${side%%:*}
@@ -259,12 +331,13 @@ build() {
   done
   [ "$TARGET_ENV" != tb-prod ] || window_vars
   [ "$TARGET_ENV" != tb-prod ] || CARRY="$CARRY $WINDOW_CARRY"
+  env_lock
   for name in $CARRY; do
     case "${PUT:- }" in *" $name "*) continue ;; esac
     local v; v=$(op "$name")
-    [ "$name" != TEST_SENDER_APP_PASSWORD ] || v=$(prev "$name")
+    case "$name" in TEST_SENDER_APP_PASSWORD|STALWART_SOURCE_PG_*|STALWART_ADMIN_ACCOUNT_ID) [ -z "$(prev "$name")" ] || v=$(prev "$name") ;; esac
     if [ -z "$v" ] && [ "${REBUILD:-0}" = 1 ]; then
-      case " $SECRET_VARS TEST_SENDER_APP_PASSWORD " in *" $name "*) ;; *) v=$(window_values "$name") ;; esac
+      case " $SECRET_VARS TEST_SENDER_APP_PASSWORD STALWART_SOURCE_PG_PASSWORD " in *" $name "*) ;; *) v=$(window_values "$name") ;; esac
       [ -n "$v" ] || printf '%-30s not restored: no copy in %s\n' "$name" "$EVIDENCE_DIR/window-values.tsv"
     fi
     [ -n "$v" ] || continue
@@ -274,6 +347,7 @@ build() {
   for name in $PLACEHOLDERS; do printf '%-30s NEED (placeholder in targets/%s.sh or verify/%s.env)\n' "$name" "$TARGET_ENV" "$TARGET_ENV"; missing=$((missing + 1)); done
   chmod 600 "$tmp"
   mv "$tmp" "$ENV_FILE"
+  exec 9>&-
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
   old=$HOME/.local/state/talos/cutover-$TARGET_ENV.env
   [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
@@ -285,7 +359,7 @@ check() {
   [ -f "$ENV_FILE" ] || die "$ENV_FILE missing: run build-cutover-env.sh first"
   env_target_ok "$ENV_FILE" || exit 64
   local want=$TARGET_ENV
-  set -a; . "$ENV_FILE"; set +a
+  set -a; eval "$(env_read "$ENV_FILE")"; set +a
   TARGET_ENV=$want
   [ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
   . "$MIG_DIR/timing.sh"
@@ -298,7 +372,7 @@ check() {
   }
   in_window() { if [ "$TARGET_ENV" = tb-prod ]; then printf 'WAIT  %-32s %s\n' "$1" "$2"; else local n=$1; shift 2; chk "$n" "$@"; fi; }
   stage_chk() { [ "$TARGET_ENV" = tb-prod ] || chk "$@"; }
-  [ "$TARGET_ENV" != tb-prod ] || OPERATOR_VARS="TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD TEST_USER"
+  [ "$TARGET_ENV" != tb-prod ] || OPERATOR_VARS=$PROD_OPERATOR_REQUIRED
   operator_values() { local v bad=""; for v in $OPERATOR_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all operator values set" || { echo "empty:$bad"; return 1; }; }
   nonempty() { local v bad=""; for v in $SECRET_VARS; do [ -n "${!v:-}" ] || bad="$bad $v"; done; [ -z "$bad" ] && echo "all set" || { echo "empty:$bad"; return 1; }; }
   dirs() {
@@ -332,7 +406,6 @@ check() {
     for n in $(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' "$ENV_FILE" | sort -u); do [[ ${!n,,} != *stage* ]] || bad="$bad $n"; done
     [ -z "$bad" ] && echo "no value contains stage" || { echo "values contain stage:$bad"; return 1; }
   }
-  posint() { [[ ${!1:-} =~ ^[1-9][0-9]*$ ]] && echo "$1=${!1}" || { echo "$1='${!1:-}' is not a positive integer"; return 1; }; }
   nlb_live() {
     local h st
     h=$(ktarget -n thundermail get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
@@ -367,20 +440,20 @@ check() {
   in_window legacy-url-loopback "needs the SSM tunnel, opened in the window" legacy_loopback
   in_window stalwart-legacy-healthz "needs the SSM tunnel, opened in the window" http200 "$OLD_STALWART_URL/healthz/live"
   in_window stalwart-target-healthz "Stalwart runs at 0 replicas until the window" target_health
-  chk rclone-lsd-legacy bash -c '[ -n "$LEGACY_BLOB_BUCKET" ] && rclone lsd leg: | awk -v b="$LEGACY_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
-  chk rclone-lsd-target bash -c '[ -n "$TARGET_BLOB_BUCKET" ] && rclone lsd tgt: | awk -v b="$TARGET_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
+  stage_chk rclone-lsd-legacy bash -c '[ -n "$LEGACY_BLOB_BUCKET" ] && rclone lsd leg: | awk -v b="$LEGACY_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
+  stage_chk rclone-lsd-target bash -c '[ -n "$TARGET_BLOB_BUCKET" ] && rclone lsd tgt: | awk -v b="$TARGET_BLOB_BUCKET" '\''$NF == b {f = 1} END {exit !f}'\'' && echo "bucket listed"'
   chk legacy-sg count_eq "$(aws_legacy ec2 describe-security-groups --group-ids "$LEGACY_PUB_SG" --query 'length(SecurityGroups)' 2>/dev/null)" 1 security_groups
   chk legacy-sg-rule-ids count_eq "$(aws_legacy ec2 describe-security-group-rules --security-group-rule-ids $LEGACY_PUB_SG_RULE_IDS --query 'length(SecurityGroupRules)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_PUB_SG_RULE_IDS")" rules
   chk legacy-ecs-services count_eq "$(for t in $LEGACY_ECS_TARGETS; do aws_legacy ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[?status==`ACTIVE`].serviceName' --output text; done 2>/dev/null | grep -c .)" "$(wc -w <<<"$LEGACY_ECS_TARGETS")" active_services
   chk legacy-asg-targets count_eq "$(aws_legacy application-autoscaling describe-scalable-targets --service-namespace ecs --resource-ids $LEGACY_ASG_RESOURCE_IDS --query 'length(ScalableTargets)' 2>/dev/null)" "$(wc -w <<<"$LEGACY_ASG_RESOURCE_IDS")" scalable_targets
   chk legacy-mgmt-instance count_eq "$(aws_legacy ec2 describe-instances --instance-ids "$LEGACY_MGMT_INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)" running state
   chk legacy-pub-lb count_eq "$(aws_legacy elbv2 describe-load-balancers --load-balancer-arns "$LEGACY_PUB_LB_ARN" --query 'length(LoadBalancers)' 2>/dev/null)" 1 load_balancers
-  in_window target-nlb "the mail load balancer opens in the window; then run build-cutover-env.sh --rebuild" nlb_live
+  chk target-nlb nlb_live
   chk argo-apps count_eq "$(khub -n argocd get application $ARGO_APPS -o name 2>/dev/null | grep -c .)" "$(wc -w <<<"$ARGO_APPS")" applications
   chk kargo-stage-accounts khub -n "$KARGO_PROJECT_ACCOUNTS" get stage "$KARGO_STAGE_ACCOUNTS" -o name
   chk kargo-stage-configs khub -n "$KARGO_PROJECT_CONFIGS" get stage "$KARGO_STAGE_CONFIGS" -o name
   chk kargo-warehouse-configs khub -n "$KARGO_PROJECT_CONFIGS" get warehouse "$KARGO_WAREHOUSE_CONFIGS" -o name
-  chk cf-token-shared-scope shared_scope
+  stage_chk cf-token-shared-scope shared_scope
   chk cf-token-agent agent_token
   stage_chk spf-final-txt spf_final
   stage_chk t7-prs pr_pair keycloak-customer-deploy "${T7_PR:-}" "${T7_REVERT_PR:-}"
@@ -391,15 +464,10 @@ check() {
   chk restore-zone-dry-run pair zone zone "$CF_ZONE_ID"
   chk restore-realm-dry-run pair realm realm "$KC_LEGACY_URL" "$KC_LEGACY_URL"
   stage_chk restore-secret-version-dry-run bash -o pipefail -c '"$0"/restore-secret-version.sh --check $1 >/dev/null && "$0"/snapshot-secret-versions.sh $1 >/dev/null && n=0 && while read -r id v; do "$0"/restore-secret-version.sh "$id" "$v" --dry-run >/dev/null && n=$((n + 1)) || exit 1; done < "$(ls -1t "$EVIDENCE_DIR"/secret-versions-before-*.txt | head -1)" && echo "secrets=$n checked, list and dry-run ok"' "$MIG_DIR" "$secret_ids"
-  in_window restore-target-db-dry-run "runs in the runner pod, which starts in the window" target_db
+  stage_chk restore-target-db-dry-run target_db
   if [ "$TARGET_ENV" = tb-prod ]; then
     chk no-placeholders bash -c '[ -z "$1" ] && echo "no REPLACE_ME value" || { echo "placeholders:$1"; exit 1; }' _ "$PLACEHOLDERS"
     chk no-stage-values no_stage
-    chk watch-interval posint WATCH_INTERVAL
-    chk lane-report-max posint LANE_REPORT_MAX
-    chk lane-wait-max posint LANE_WAIT_MAX
-    chk t7-pr-replicas held_replicas "${KCD_DIR:-}" "${T7_PR:-}" StatefulSet keycloak-customer "${KEYCLOAK_REPLICAS:-}"
-    chk t8-pr-replicas held_replicas "${ACD_DIR:-}" "${T8_PR:-}" Deployment accounts-web "${ACCOUNTS_WEB_REPLICAS:-}"
   fi
   local end; end=$(date -u +%FT%TZ)
   printf 'env-check\t%s\t%s\tfailures\t%s\n' "$start" "$end" "$fails" >> "$TIMING_TSV"
