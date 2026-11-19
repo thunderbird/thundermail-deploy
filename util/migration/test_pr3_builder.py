@@ -464,11 +464,11 @@ class Attempts(Base):
         self.assertEqual(v['CUTOVER_ATTEMPT'], '1')
         self.assertEqual(v['EVIDENCE_DIR'], str(a1))
         self.assertEqual(v['TIMING_TSV'], str(a1 / 'timing-tb-prod.tsv'))
-        self.assertEqual(
-            v['SECRET_DIR'],
-            str(self.t / 'shm' / 'cutover-tb-prod' / 'attempt-1' / 'secret-artifacts'),
-        )
+        sec = self.state.parent / 'cutover-tb-prod-secret' / 'attempt-1'
+        self.assertEqual(v['SECRET_DIR'], str(sec))
         self.assertTrue(a1.is_dir())
+        self.assertEqual(oct(sec.stat().st_mode & 0o777), '0o700')
+        self.assertNotIn('shm', v['SECRET_DIR'])
 
     def test_a_second_attempt_starts_fresh(self):
         self.build_ns()
@@ -483,7 +483,7 @@ class Attempts(Base):
         self.assertEqual(v['CUTOVER_ATTEMPT'], '2')
         self.assertEqual(v['EVIDENCE_DIR'], str(a2))
         self.assertEqual(v['TIMING_TSV'], str(a2 / 'timing-tb-prod.tsv'))
-        self.assertIn('/attempt-2/secret-artifacts', v['SECRET_DIR'])
+        self.assertEqual(v['SECRET_DIR'], str(self.state.parent / 'cutover-tb-prod-secret' / 'attempt-2'))
         for name in ('FREIGHT', 'CUT_ECS_END', 'STALWART_SOURCE_PG_HOST'):
             self.assertNotIn(name, v)
         self.assertIn(
@@ -601,6 +601,23 @@ class Attempts(Base):
         self.assertEqual(v['STALWART_SOURCE_PG_HOST'], 'src.example.test')
         self.assertNotIn('STALWART_SOURCE_PG_PASSWORD', v)
         self.assertNotIn('leaked', self.text())
+
+    def test_rebuild_after_a_reboot_takes_the_source_branch_from_the_disk(self):
+        self.build_ns(SECRET_DIR=None)
+        sec = pathlib.Path(self.values()['SECRET_DIR'])
+        (sec / 'source-branch.env').write_text(
+            'STALWART_SOURCE_PG_HOST=src.example.test\nSTALWART_SOURCE_PG_DB=stalwart\n'
+            'STALWART_SOURCE_PG_USER=reader\nSTALWART_SOURCE_PG_PASSWORD=pw-kept\n'
+        )
+        (sec / 'source-branch.env').chmod(0o600)
+        self.envfile.unlink()
+        rc, out = self.build_ns('--rebuild', SECRET_DIR=None)
+        v = self.values()
+        self.assertEqual(v['STALWART_SOURCE_PG_PASSWORD'], 'pw-kept')
+        self.assertEqual(v['STALWART_SOURCE_PG_HOST'], 'src.example.test')
+        self.assertNotIn('pw-kept', out)
+        self.assertIn('STALWART_SOURCE_PG_PASSWORD    from %s/source-branch.env' % sec, out)
+        self.assertNotIn('keep.sh', out)
 
     def test_the_timing_file_default_is_the_attempt_directory(self):
         rc, out = self.run_ns(
