@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need KC_LEGACY_PG_USER KC_LEGACY_PG_PASSWORD KCD_DIR KUBECONFIG_STAGE KUBECONFIG_HUB SECRET_DIR
+need KC_LEGACY_PG_USER KC_LEGACY_PG_PASSWORD KEYCLOAK_REPLICAS KCD_DIR KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
 pending T7_PR T7_REVERT_PR
 REPO=thunderbird/keycloak-customer-deploy
-SECRET_ID=mzla/tb-stage/keycloak-customer-db
+SECRET_ID=$TARGET_SECRET_PREFIX/keycloak-customer-db
 NS=keycloak-customer
-APP=tb-stage-keycloak-customer
-ISSUER_HOST=auth.stage-thundermail.com
+APP=$ARGO_APP_KEYCLOAK
+ISSUER_HOST=$AUTH_HOST
 JSON=$SECRET_DIR/keycloak-customer-db.json
 mkdir -p "$SECRET_DIR"
 
@@ -25,7 +25,7 @@ snap() {
   VALUE=$(grep -c . "$(tail -1 <<<"$out")")
   if restore_staged; then echo "restore already staged for this cut: $RESTORE"; return 0; fi
   printf '%s\n' \
-    "gh pr ready $T7_REVERT_PR -R $REPO, an approving review, gh pr merge $T7_REVERT_PR -R $REPO --merge, then main -> env/tb-stage in $KCD_DIR (merge commit) and wait on the $APP sync revision" \
+    "gh pr ready $T7_REVERT_PR -R $REPO, an approving review, gh pr merge $T7_REVERT_PR -R $REPO --merge, then main -> $IDENTITY_ENV_BRANCH in $KCD_DIR (merge commit) and wait on the $APP sync revision" \
     "$(if unchanged; then echo "secret unchanged by this step: $SECRET_ID stays on version $(cut -f2 "$(tail -1 <<<"$out")"); no secret rollback, the revert PR is the restore. If a put did happen: "; fi)bash $MIG_DIR/restore-secret-version.sh $SECRET_ID $(cut -f2 "$(tail -1 <<<"$out")") --dry-run, then --apply, then force-sync externalsecret $NS/keycloak-customer-db" \
     "before legacy Keycloak restarts on main: bash $MIG_DIR/restore-realm.sh with ${realm:-the realm-before snapshot}" > "$RESTORE" || return 1
   mark_restore
@@ -38,7 +38,7 @@ gate() {
 }
 
 legacy_sha() { jq -cnS --arg u "$KC_LEGACY_PG_USER" --arg p "$KC_LEGACY_PG_PASSWORD" '{username: $u, password: $p}' | sha256sum | cut -c1-16; }
-current_sha() { aws_stage secretsmanager get-secret-value --secret-id "$SECRET_ID" --output json | jq -r '.SecretString' | jq -cS . | sha256sum | cut -c1-16; }
+current_sha() { aws_target secretsmanager get-secret-value --secret-id "$SECRET_ID" --output json | jq -r '.SecretString' | jq -cS . | sha256sum | cut -c1-16; }
 unchanged() { [ "$(current_sha)" = "$(legacy_sha)" ]; }
 
 put() {
@@ -69,9 +69,9 @@ env_sync() {
   merge_pr "$REPO" "$T7_PR" || return 1
   run gh pr edit "$T7_REVERT_PR" -R "$REPO" --base main || return 1
   run git -C "$KCD_DIR" fetch origin || return 1
-  run git -C "$KCD_DIR" checkout -B env/tb-stage origin/env/tb-stage || return 1
-  run git -C "$KCD_DIR" merge --no-ff --no-edit origin/main || { echo "main -> env/tb-stage did not merge cleanly in $KCD_DIR"; return 1; }
-  run git -C "$KCD_DIR" push origin env/tb-stage || return 1
+  run git -C "$KCD_DIR" checkout -B "$IDENTITY_ENV_BRANCH" "origin/$IDENTITY_ENV_BRANCH" || return 1
+  run git -C "$KCD_DIR" merge --no-ff --no-edit origin/main || { echo "main -> $IDENTITY_ENV_BRANCH did not merge cleanly in $KCD_DIR"; return 1; }
+  run git -C "$KCD_DIR" push origin "$IDENTITY_ENV_BRANCH" || return 1
   printf '  + append T7_ENV_SHA, wait 400s for the %s sync revision\n' "$APP"
   [ "$APPLY" = 1 ] || return 0
   T7_ENV_SHA=$(git -C "$KCD_DIR" rev-parse HEAD)
@@ -79,7 +79,7 @@ env_sync() {
   until_ok 400 app_rev || { echo "$APP did not sync $T7_ENV_SHA"; return 1; }
 }
 
-two() { [ "$("${KS[@]}" -n "$NS" get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = 2 ]; }
+two() { [ "$("${KS[@]}" -n "$NS" get sts keycloak-customer -o jsonpath='{.spec.replicas}')" = "$KEYCLOAK_REPLICAS" ]; }
 
 issuer_ok() {
   local ip out
@@ -92,9 +92,9 @@ issuer_ok() {
 }
 
 repoint() {
-  printf '  + wait 120s for sts/keycloak-customer replicas 2, rollout status 600s, issuer check on %s retried for 180s\n' "$ISSUER_HOST"
+  printf '  + wait 120s for sts/keycloak-customer replicas %s, rollout status 600s, issuer check on %s retried for 180s\n' "$KEYCLOAK_REPLICAS" "$ISSUER_HOST"
   [ "$APPLY" = 1 ] || return 0
-  until_ok 120 two || { echo "sts/keycloak-customer is not at 2 replicas"; return 1; }
+  until_ok 120 two || { echo "sts/keycloak-customer is not at $KEYCLOAK_REPLICAS replicas"; return 1; }
   "${KS[@]}" -n "$NS" rollout status sts/keycloak-customer --timeout=600s || return 1
   until_ok 180 issuer_ok || { printf 'issuer: %s after 180s (last HTTP %s, body starts: %s)\n' "${ISSUER:-none}" "${ISSUER_CODE:-none}" "$(head -c 200 <<<"$ISSUER_BODY" | tr -c '[:print:]' ' ')"; return 1; }
   echo "issuer: $ISSUER"

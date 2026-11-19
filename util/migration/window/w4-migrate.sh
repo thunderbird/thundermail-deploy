@@ -3,7 +3,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD STALWART_URL STALWART_USER STALWART_PASSWORD \
   STALWART_LEGACY_PG_HOST STALWART_LEGACY_PG_USER STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST STALWART_TARGET_PG_USER STALWART_TARGET_PG_DB \
-  LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_STAGE SECRET_DIR TIMING_TSV
+  LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_TARGET SECRET_DIR TIMING_TSV
 mkdir -p "$SECRET_DIR"
 PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
 S=$SECRET_DIR
@@ -94,9 +94,9 @@ tasks_empty() { VALUE=$("${POD[@]}" psql -h "$STALWART_LEGACY_PG_HOST" -U "$STAL
 
 account_ids() {
   local out
-  printf '  + . %s; python3 %s > %s/account-ids.txt (PASS required on the account ids and group ids lines)\n' "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/02_directory.py" "$S"
+  printf '  + . %s; python3 %s > %s/account-ids.txt (PASS required on the account ids and group ids lines)\n' "$MIG_DIR/verify/$TARGET_ENV.env" "$MIG_DIR/verify/02_directory.py" "$S"
   [ "$APPLY" = 1 ] || return 0
-  bash -c 'set -a; . "$1"; set +a; cd "$(dirname "$2")" && python3 "$2"' _ "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/02_directory.py" > "$S/account-ids.txt" 2>&1 || true
+  bash -c 'set -a; . "$1"; set +a; cd "$(dirname "$2")" && python3 "$2"' _ "$MIG_DIR/verify/$TARGET_ENV.env" "$MIG_DIR/verify/02_directory.py" > "$S/account-ids.txt" 2>&1 || true
   out=$(grep -E '^  (PASS|FAIL)  (account|group) ids:' "$S/account-ids.txt" | sed -E 's/, missing .*//')
   printf '%s\n' "$out"
   VALUE=$(grep -c '^  FAIL' <<<"$out" || true)
@@ -248,7 +248,7 @@ leave_recovery() {
 }
 
 prereqs
-helpers migrate_v016.py dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/stage.env stalwart-cli rclone "$PY"
+helpers migrate_v016.py dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli rclone "$PY"
 if [ "$APPLY" = 1 ] && [ -n "$(after_cut drop-schema)" ]; then
   [ -n "$GO" ] || stop "DROP SCHEMA already started for this cut: a second DROP needs the operator's confirmation (--go)"
   go_gate

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need KUBECONFIG_STAGE TIMING_TSV
+need KUBECONFIG_TARGET TIMING_TSV
 printf 'n/a: read-only counts; the W7 restore file holds the rollback\n' > "$RESTORE"
 START=$(after_cut dns-cutover | cut -f2)
 FROM=dns-cutover

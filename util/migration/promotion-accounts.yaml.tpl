@@ -1,8 +1,8 @@
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Promotion
 metadata:
-  name: tb-stage-manual-__TS__
-  namespace: tb-accounts
+  name: __STAGE__-manual-__TS__
+  namespace: __PROJECT__
 spec:
-  stage: tb-stage
+  stage: __STAGE__
   freight: __FREIGHT__

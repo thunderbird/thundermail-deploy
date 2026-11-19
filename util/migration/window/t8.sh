@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need ACCOUNTS_LEGACY_PG_USER ACCOUNTS_LEGACY_PG_PASSWORD ACD_DIR KUBECONFIG_STAGE KUBECONFIG_HUB SECRET_DIR
+need ACCOUNTS_LEGACY_PG_USER ACCOUNTS_LEGACY_PG_PASSWORD ACCOUNTS_WEB_REPLICAS ACD_DIR KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
 pending T8_PR T8_REVERT_PR
 REPO=thunderbird/accounts-deploy
-SECRET_ID=mzla/tb-stage/accounts-db
+SECRET_ID=$TARGET_SECRET_PREFIX/accounts-db
 NS=accounts
-APP=tb-stage-accounts
+APP=$ARGO_APP_ACCOUNTS
 JSON=$SECRET_DIR/accounts-db.json
 mkdir -p "$SECRET_DIR"
 
@@ -22,7 +22,7 @@ snap() {
   VALUE=$(grep -c . "$(tail -1 <<<"$out")")
   if restore_staged; then echo "restore already staged for this cut: $RESTORE"; return 0; fi
   printf '%s\n' \
-    "gh pr ready $T8_REVERT_PR -R $REPO, an approving review, gh pr merge $T8_REVERT_PR -R $REPO --merge, then main -> env/tb-stage in $ACD_DIR (merge commit) and wait on the $APP sync revision" \
+    "gh pr ready $T8_REVERT_PR -R $REPO, an approving review, gh pr merge $T8_REVERT_PR -R $REPO --merge, then main -> $IDENTITY_ENV_BRANCH in $ACD_DIR (merge commit) and wait on the $APP sync revision" \
     "$(if unchanged; then echo "secret unchanged by this step: $SECRET_ID stays on version $(cut -f2 "$(tail -1 <<<"$out")"); no secret rollback, the revert PR is the restore. If a put did happen: "; fi)bash $MIG_DIR/restore-secret-version.sh $SECRET_ID $(cut -f2 "$(tail -1 <<<"$out")") --dry-run, then --apply, then force-sync externalsecret $NS/accounts-db" > "$RESTORE" || return 1
   mark_restore
 }
@@ -34,7 +34,7 @@ gate() {
 }
 
 legacy_sha() { jq -cnS --arg u "$ACCOUNTS_LEGACY_PG_USER" --arg p "$ACCOUNTS_LEGACY_PG_PASSWORD" '{username: $u, password: $p}' | sha256sum | cut -c1-16; }
-current_sha() { aws_stage secretsmanager get-secret-value --secret-id "$SECRET_ID" --output json | jq -r '.SecretString' | jq -cS . | sha256sum | cut -c1-16; }
+current_sha() { aws_target secretsmanager get-secret-value --secret-id "$SECRET_ID" --output json | jq -r '.SecretString' | jq -cS . | sha256sum | cut -c1-16; }
 unchanged() { [ "$(current_sha)" = "$(legacy_sha)" ]; }
 
 put() {
@@ -65,9 +65,9 @@ env_sync() {
   merge_pr "$REPO" "$T8_PR" || return 1
   run gh pr edit "$T8_REVERT_PR" -R "$REPO" --base main || return 1
   run git -C "$ACD_DIR" fetch origin || return 1
-  run git -C "$ACD_DIR" checkout -B env/tb-stage origin/env/tb-stage || return 1
-  run git -C "$ACD_DIR" merge --no-ff --no-edit origin/main || { echo "main -> env/tb-stage did not merge cleanly in $ACD_DIR"; return 1; }
-  run git -C "$ACD_DIR" push origin env/tb-stage || return 1
+  run git -C "$ACD_DIR" checkout -B "$IDENTITY_ENV_BRANCH" "origin/$IDENTITY_ENV_BRANCH" || return 1
+  run git -C "$ACD_DIR" merge --no-ff --no-edit origin/main || { echo "main -> $IDENTITY_ENV_BRANCH did not merge cleanly in $ACD_DIR"; return 1; }
+  run git -C "$ACD_DIR" push origin "$IDENTITY_ENV_BRANCH" || return 1
   printf '  + append T8_ENV_SHA, wait 400s for the %s sync revision\n' "$APP"
   [ "$APPLY" = 1 ] || return 0
   T8_ENV_SHA=$(git -C "$ACD_DIR" rev-parse HEAD)
@@ -75,17 +75,17 @@ env_sync() {
   until_ok 400 app_rev || { echo "$APP did not sync $T8_ENV_SHA"; return 1; }
 }
 
-one() { [ "$("${KS[@]}" -n "$NS" get deploy accounts-web -o jsonpath='{.spec.replicas}')" = 1 ]; }
+one() { [ "$("${KS[@]}" -n "$NS" get deploy accounts-web -o jsonpath='{.spec.replicas}')" = "$ACCOUNTS_WEB_REPLICAS" ]; }
 
 repoint() {
   local pending plan
-  printf '  + wait 120s for deploy/accounts-web replicas 1, rollout status 600s for web, celery, flower, then showmigrations --plan unapplied = 0\n'
+  printf '  + wait 120s for deploy/accounts-web replicas %s, rollout status 600s for web, celery, flower, then showmigrations --plan unapplied = 0\n' "$ACCOUNTS_WEB_REPLICAS"
   [ "$APPLY" = 1 ] || return 0
-  until_ok 120 one || { echo "deploy/accounts-web is not at 1 replica"; return 1; }
+  until_ok 120 one || { echo "deploy/accounts-web is not at $ACCOUNTS_WEB_REPLICAS replica$([ "$ACCOUNTS_WEB_REPLICAS" = 1 ] || echo s)"; return 1; }
   "${KS[@]}" -n "$NS" rollout status deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --timeout=600s || return 1
   plan=$("${KS[@]}" -n "$NS" exec deploy/accounts-web -- ./manage.py showmigrations --plan) || { echo "showmigrations failed"; return 1; }
   pending=$(grep -c '\[ \]' <<<"$plan" || true)
-  echo "unapplied migrations: $pending; sign in at https://accounts.stage-thundermail.com and record the first-signin row"
+  echo "unapplied migrations: $pending; sign in at https://$ACCOUNTS_HOST and record the first-signin row"
   [ "$pending" = 0 ]
 }
 

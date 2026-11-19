@@ -2,7 +2,7 @@
 
 Read-only checks that compare a migrated Stalwart 0.16 server against its 0.15 source. Run them after the migration and before cutover. Each check prints `PASS`, `WARN` or `FAIL` lines and exits non-zero on any `FAIL`.
 
-For tb-stage, `window/w6-verify.sh` sources `stage.env` (variable names from the cutover env file, no values) and runs `run_all.sh`.
+`window/w6-verify.sh` sources `<TARGET_ENV>.env` (`tb-stage.env` or `tb-prod.env`; variable names from the cutover env file, no values) and runs `run_all.sh`.
 
 | Check | Compares |
 |---|---|

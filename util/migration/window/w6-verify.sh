@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need STALWART_URL STALWART_USER STALWART_PASSWORD TARGET_NLB_DNS LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET KUBECONFIG_STAGE SECRET_DIR
-pending TEST_USER TEST_SENDER_APP_PASSWORD
-MAIL_HOST=mail.stage-thundermail.com
+need STALWART_URL STALWART_USER STALWART_PASSWORD LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET KUBECONFIG_TARGET SECRET_DIR
+pending TARGET_NLB_DNS TEST_USER TEST_SENDER_APP_PASSWORD
 VERIFY_OUT=$EVIDENCE_DIR/verify-$TS
 EXPECTED_WARN=$MIG_DIR/verify/expected-warn.txt
 UNEXPECTED_WARN=0
@@ -12,9 +11,9 @@ printf 'n/a: read-only step; %s stays as evidence\n' "$VERIFY_OUT" > "$RESTORE"
 
 suite() {
   local out f
-  printf '  + . %s; bash %s > %s/run_all.txt 2>&1\n' "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/run_all.sh" "$VERIFY_OUT"
+  printf '  + . %s; bash %s > %s/run_all.txt 2>&1\n' "$MIG_DIR/verify/$TARGET_ENV.env" "$MIG_DIR/verify/run_all.sh" "$VERIFY_OUT"
   mkdir -p "$VERIFY_OUT"
-  out=$(VERIFY_OUT=$VERIFY_OUT bash -c 'set -a; . "$1"; set +a; mkdir -p "$VERIFY_OUT"; bash "$2" > "$VERIFY_OUT/run_all.txt" 2>&1; echo "exit=$? out=$VERIFY_OUT"' _ "$MIG_DIR/verify/stage.env" "$MIG_DIR/verify/run_all.sh") || return 1
+  out=$(VERIFY_OUT=$VERIFY_OUT bash -c 'set -a; . "$1"; set +a; mkdir -p "$VERIFY_OUT"; bash "$2" > "$VERIFY_OUT/run_all.txt" 2>&1; echo "exit=$? out=$VERIFY_OUT"' _ "$MIG_DIR/verify/$TARGET_ENV.env" "$MIG_DIR/verify/run_all.sh") || return 1
   VERIFY_OUT=${out##* out=}
   f=$VERIFY_OUT/run_all.txt
   VALUE=$(( $(grep -c '^  FAIL  ' "$f" || true) + $(grep -c '^Traceback ' "$f" || true) ))
@@ -54,9 +53,9 @@ folders() {
 }
 
 prereqs
-helpers verify/run_all.sh verify/stage.env verify/expected-warn.txt
+helpers verify/run_all.sh verify/$TARGET_ENV.env verify/expected-warn.txt
 if [ "$APPLY" = 1 ]; then port_forward || stop "no port-forward to Stalwart"; else port_forward || echo "no port-forward to Stalwart: target checks will fail"; fi
-if live verify/stage.env verify/run_all.sh verify/expected-warn.txt; then
+if live verify/$TARGET_ENV.env verify/run_all.sh verify/expected-warn.txt; then
   step verify fails suite
   again "$(sn verify)" unexpected_warns "$UNEXPECTED_WARN" || stop "could not write the verify unexpected_warns row"
 fi

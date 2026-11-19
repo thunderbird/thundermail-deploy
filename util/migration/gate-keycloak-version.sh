@@ -8,7 +8,7 @@ query='select version from migration_model order by update_time desc limit 1'
 image_version() {
   [ -z "${KC_IMAGE_VERSION:-}" ] || { printf '%s\n' "$KC_IMAGE_VERSION"; return 0; }
   local image
-  image=$(kstage -n keycloak-customer get sts keycloak-customer -o jsonpath='{.spec.template.spec.containers[?(@.name=="keycloak")].image}')
+  image=$(ktarget -n keycloak-customer get sts keycloak-customer -o jsonpath='{.spec.template.spec.containers[?(@.name=="keycloak")].image}')
   [ -n "$image" ] || die "no keycloak container image on sts/keycloak-customer"
   podman run --rm --entrypoint /opt/keycloak/bin/kc.sh "$image" --version 2>/dev/null | awk '$1 == "Keycloak" {print $2; exit}'
 }

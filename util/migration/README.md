@@ -1,24 +1,52 @@
 # Cutover tooling
 
-Scripts for the tb-stage cutover (platform-infrastructure milestone 1536). Every command
-in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it) first,
-then `util/migration/timing.sh`:
+Scripts for the tb-stage cutover (platform-infrastructure milestone 1536) and the tb-prod
+cutover (milestone 1719). Every shell script needs `TARGET_ENV` set to `tb-stage` or `tb-prod` and
+exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environment (cluster,
+profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
+and secrets are looked up at build time. A `REPLACE_ME_*` value (any case) is one a later change
+fills in; while one is left in `targets/$TARGET_ENV.sh` or `verify/$TARGET_ENV.env`, every `--apply` exits 64.
+Every script loads the env file itself at start (`$CUTOVER_ENV`, default
+`/dev/shm/talos/cutover-$TARGET_ENV.env`; tmpfs, gone on reboot: rebuild it), and its values win over
+the shell's; the builder is the exception. A shell command that reads a variable sources the file again first:
 
 ```bash
-set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
+export TARGET_ENV=tb-prod
+set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
 
-- `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
-  NEED count (`--for T0` prints every row). It never prints a value.
-- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator.env`
-  (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
+- `check-prereqs.sh [--for ID[,ID...]]` prints HAVE/NEED per tool and credential and exits with
+  the NEED count; without `--for` it prints every row. ID is a gate id (`go-W1` ... `go-rollback`,
+  `start`, `checks`, `presync`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
+  block per id. `start` holds only the rows that can pass before the first window step. It reads
+  values from the env file first, then the environment, and never prints a value.
+- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a call
+  other than `kubectl kustomize` has no `--kubeconfig`, when the value is empty, names a missing file or names the other environment's cluster,
+  or when a flag picks another cluster or credential (`--context`, `--cluster`, `--server`, `--user`,
+  `--token`, `--as`, the client certificate and TLS flags), so no script falls back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
+  cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
+  name is still read.
+- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`
+  (mode 600, or both scripts stop; tb-stage falls back to `cutover-operator.env`; a tb-prod file needs a `TARGET_ENV=tb-prod` line); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
   appends (`FREEZE_SHA`, `FREIGHT`, ...) are carried over too. `--check` runs the read-only
-  connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV.
+  connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV; it
+  moves its own snapshots into `env-check/` so rollback never picks them. On tb-prod it prints
+  `WAIT` (not a failure) for rows whose object only exists in the window (runner pod, SSM tunnel,
+  Stalwart, the mail load balancer) and skips the tb-stage-only rows.
+- The tb-prod build writes `TMD_CHECKOUT` (the checkout it runs from), `WINDOW_SHA` (its `HEAD`;
+  `--rebuild` keeps the recorded value) and `STALWART_URL=http://localhost:18081`, as tb-stage
+  does; `LANE_PF_PORT` replaces the port. After a tooling fix is checked out in the window,
+  `build-cutover-env.sh --rebuild --move-window-sha` sets `WINDOW_SHA` to the new `HEAD`. Before the
+  mail load balancer exists `TARGET_NLB_DNS` is empty; `build-cutover-env.sh --rebuild` fills it
+  once it does. `TBPROD_AUTH_ALB` and `TBPROD_ACCOUNTS_ALB` come from the Ingress with a rule
+  for `AUTH_HOST` or `ACCOUNTS_HOST`.
+- The Cloudflare token is `CF_API_TOKEN_AGENT` from `CF_TOKEN_FILE` (`~/.prod-cloudflare.env` for
+  tb-prod, `~/.cloudflare.env` for tb-stage).
 - Restore scripts are dry-run by default and print what they would change; `--apply`
   performs the writes. `--dry-run` is accepted and is the default. Snapshot scripts always
   write their file under `$EVIDENCE_DIR` (or `$SECRET_DIR` when the content is sensitive)
@@ -29,7 +57,9 @@ set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.s
 
 ## Runner pod
 
-`runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
+`runner-pod.sh` prints `runner-pod.yaml` for `TARGET_ENV` (label, `/work` size and the legacy
+Secret name from `targets/$TARGET_ENV.sh`); `runner-pod.sh --secret` writes that Secret under
+`$SECRET_DIR` and prints its path. `runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
 security group through the existing `stalwart-config-applier` SecurityGroupPolicy label
 (not `app=stalwart`, so no Service selects it). It runs on `role: mail` nodes like Stalwart,
 as uid 70 with no capabilities. The `postgres` container writes `/secrets/.pgpass` (a
@@ -53,7 +83,10 @@ the keying for the real hosts.
 ## Script notes
 
 - `snapshot-zone.sh ZONE` keeps `data` for SRV/TLSA/CAA and also records a DoH answer per
-  record as `zone-doh-before-<zone>-<ts>.txt`.
+  record as `zone-doh-before-<zone>-<ts>.txt`; when a lookup fails it prints
+  `doh capture partial: N of M names unread`.
+- `body-update.py --tick <gate> --evidence <file>` and `--close <PR URL>` edit issue bodies;
+  `--dry-run` prints the diff and the body size and writes nothing (`--help` has the formats).
 - `restore-zone.sh SNAPSHOT` creates missing records, updates changed ones and deletes
   records added since the snapshot; it never touches `_externaldns.*`, `*.dkim.*` or `*._domainkey.*`.
 - `restore-ecs.sh` restores desiredCount first, then min/max, then clears the suspension.
@@ -119,7 +152,7 @@ the keying for the real hosts.
   `$EVIDENCE_DIR/tbpro-rules-before-*.json` and, with `--apply`, the records to
   `tbpro-p2-records-before-*.json`; it prints every call. Writes need `--apply`. It runs with the
   P2 token: `CF_API_TOKEN_AGENT` swapped for a tb.pro-only token with `expires_on`
-  (`check-prereqs.sh --for P2` checks both), revoked after `post/p2-verify.sh` passes.
+  (the `cf-token-agent-redirects` row of `check-prereqs.sh` checks both), revoked after `post/p2-verify.sh` passes.
   Rollback is `post/p2-redirects.sh --rollback [--apply]`: it unproxies the saved records first
   (restoring their TTL), then deletes every entrypoint rule whose ref starts with `p2_`. After a
   successful rollback it moves that cycle's records files to `tbpro-p2-rolled-back-<ts>/`.
@@ -130,10 +163,11 @@ the keying for the real hosts.
 
 `window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
 `w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
-`/dev/shm/talos/cutover-tb-stage.env`, else `~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
+`/dev/shm/talos/cutover-$TARGET_ENV.env`, else `~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
-- `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,
+- `--dry-run` (default) runs `check-prereqs.sh --for <gate id>` (`GATE_ID`, else the script's
+  go row), the snapshots and read-only checks,
   and prints every write as the exact command; it never runs `kubectl exec`. Timing rows get a
   `dryrun-` prefix. `--apply` runs the writes.
 - W2 writes only with `--apply --go '<operator words>'`; W5 phase 1 (`--apply`) stops after
@@ -141,7 +175,8 @@ the keying for the real hosts.
   refuses a changed plan; W4 needs `--go` once a `drop-schema` row exists for the current cut.
   The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
 - Legacy credentials are sent only to a loopback `OLD_STALWART_URL` served by the operator's own
-  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator.
+  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator
+  (on tb-prod, one started with `--kubeconfig $KUBECONFIG_TARGET`).
 - Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check or signal prints
   `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands and exits 1. Nothing
   rolls back automatically. Exit 2 means a NEED item is listed.
@@ -221,7 +256,7 @@ the keying for the real hosts.
   `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
   start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
   created in the Accounts UI from `TEST_SENDER_APP_PASSWORD` (or `TEST_USER_APP_PASSWORD`) in `$OPERATOR_ENV` (default
-  `~/.local/state/talos/cutover-operator.env`, mode 600), else from stdin, never from an argument.
+  `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`, mode 600), else from stdin, never from an argument.
   It stores the value (appends `TEST_SENDER_APP_PASSWORD`) only after a JMAP session on 443, an
   IMAP LOGIN on 993 and an SMTP AUTH on 587 all succeed, and names the ports that failed. `build-cutover-env.sh` carries
   `TEST_SENDER_APP_PASSWORD` only from the previous cutover env file, never from the operator file,

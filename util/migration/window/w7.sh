@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-[ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id stage-thundermail.com || true)
-need CF_ZONE_ID TARGET_NLB_DNS KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KARGO_WAREHOUSE_CONFIGS KUBECONFIG_STAGE KUBECONFIG_HUB
+stage_only
+[ -n "${CF_ZONE_ID:-}" ] || CF_ZONE_ID=$(shared_zone_id "$MAIL_ZONE" || true)
+need CF_ZONE_ID TARGET_NLB_DNS KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KARGO_WAREHOUSE_CONFIGS KUBECONFIG_TARGET KUBECONFIG_HUB
 pending FLIP_PR SPF_FINAL_TXT
 TMD=thunderbird/thundermail-deploy
 PR_B=148
-ZONE_NAME=stage-thundermail.com
+ZONE_NAME=$MAIL_ZONE
 MANUAL_PROMOTION=$EVIDENCE_DIR/promotion-configs-manual$SUF-$TS.yaml
 PROMOTION=$EVIDENCE_DIR/promotion-configs-flip-$TS.yaml
 WK_PATHS="caldav carddav jmap autoconfig"
@@ -36,7 +37,7 @@ snap_zone() {
   [ -n "$FREIGHT_MANUAL" ] || { echo "no Freight on $KARGO_STAGE_CONFIGS to roll back to"; return 1; }
   setenv FREIGHT_MANUAL "$FREIGHT_MANUAL" || return 1
   if [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
-    sed "s/__TS__/$(date -u +%s)m/; s/__FREIGHT__/$FREIGHT_MANUAL/" "$MIG_DIR/promotion.yaml.tpl" > "$MANUAL_PROMOTION" || return 1
+    sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)m/; s/__FREIGHT__/$FREIGHT_MANUAL/" "$MIG_DIR/promotion.yaml.tpl" > "$MANUAL_PROMOTION" || return 1
   else
     printf 'promotion.yaml.tpl missing: render it with __FREIGHT__=%s\n' "$FREIGHT_MANUAL" > "$MANUAL_PROMOTION"
   fi
@@ -45,12 +46,12 @@ snap_zone() {
     "0 since-flip counts before the rollback go and again right before step 4: bash $MIG_DIR/window/w7-since-flip.sh" \
     "1 legacy SG: the restore-legacy-sg.sh lines in $EVIDENCE_DIR/cut-legacy-restore.txt" \
     "2 promote the Manual Freight $FREIGHT_MANUAL while Stalwart is up: $(shq "${KH[@]}" create -f "$MANUAL_PROMOTION"); if the Job cannot run, apply the Manual render of that Freight's preview commit with stalwart-cli apply over the port-forward (stalwart-cli delete DnsServer fails while a Domain links it)" \
-    "3 while tb-stage Keycloak is up: bash $MIG_DIR/restore-realm.sh ${realm:-<realm-before snapshot>} https://auth.stage-thundermail.com --dry-run, then --apply" \
+    "3 while $TARGET_ENV Keycloak is up: bash $MIG_DIR/restore-realm.sh ${realm:-<realm-before snapshot>} https://$AUTH_HOST --dry-run, then --apply" \
     "4 $(shq "${KS[@]}" -n keycloak-customer scale sts/keycloak-customer --replicas=0); $(shq "${KS[@]}" -n accounts scale deploy/accounts-web deploy/accounts-celery deploy/accounts-flower --replicas=0); $(shq "${KS[@]}" -n thundermail scale deploy/stalwart --replicas=0)" \
     "5 legacy ECS: the restore-ecs.sh lines in $EVIDENCE_DIR/cut-legacy-restore.txt (Keycloak first, then Accounts)" \
     "6 bash $MIG_DIR/restore-zone.sh $snap --dry-run, then --apply; after step 4 also line R (restore-redirect.sh)" \
     "7 revert the FLIP_PR and PR $PR_B merge commits on TMD main (git revert -m 1 on a branch from main, merge commit); stay frozen (thaw PR unmerged) until Argo CD has synced the revert" \
-    "8 revert the #1542 and #1543 repoints (pre-opened revert PRs, main -> env/tb-stage), restore-secret-version.sh, force-sync" > "$RESTORE" || return 1
+    "8 revert the #1542 and #1543 repoints (pre-opened revert PRs, main -> $IDENTITY_ENV_BRANCH), restore-secret-version.sh, force-sync" > "$RESTORE" || return 1
   mark_restore
 }
 
@@ -81,7 +82,7 @@ flip() {
   until_ok 600 freight_for "$sha" || { echo "no Freight for the flip commit $sha after 600s: stop, FREIGHT not appended"; return 1; }
   FREIGHT=$FREIGHT_FOUND
   setenv FREIGHT "$FREIGHT" || return 1
-  sed "s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$FREIGHT/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION" || return 1
+  sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$FREIGHT/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION" || return 1
   PROMOTE_AT=$(date -u +%FT%TZ)
   "${KH[@]}" create -f "$PROMOTION" || return 1
   until_ok 120 job_started || { echo "stalwart-config-apply did not start after the promotion"; return 1; }

@@ -6,7 +6,7 @@ for a in "$@"; do [ "$a" = --dry-run ] && DRY=1; done
 EXPORT=${1:-}
 [ -s "$EXPORT" ] || die "usage: retarget-export.sh export.json [--dry-run]"
 need TARGET_BLOB_BUCKET REDIS_URL
-VALUES=$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml
+VALUES=$REPO_DIR/$CONFIGS_OVERLAY/config/values.yaml
 region=$(yq -r '.blobStoreRegion // ""' "$VALUES")
 [ -n "$region" ] || die "blobStoreRegion missing in $VALUES"
 for o in BlobStore InMemoryStore; do
