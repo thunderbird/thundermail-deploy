@@ -46,6 +46,9 @@ patches:
       kind: Deployment
       name: stalwart
     patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 4Gi
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
