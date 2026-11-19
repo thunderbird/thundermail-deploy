@@ -1,9 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
+PHASE=""
+A=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --phase) [ $# -ge 2 ] || { echo "--phase needs read, reset or boot" >&2; exit 64; }; PHASE=$2; shift 2 ;;
+    *) A+=("$1"); shift ;;
+  esac
+done
+set -- "${A[@]+"${A[@]}"}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD STALWART_URL STALWART_USER STALWART_PASSWORD \
-  STALWART_LEGACY_PG_HOST STALWART_LEGACY_PG_USER STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST STALWART_TARGET_PG_USER STALWART_TARGET_PG_DB \
-  LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_TARGET SECRET_DIR TIMING_TSV
+case "$PHASE" in
+  ''|read|reset|boot) ;;
+  *) die "--phase is read, reset or boot, not '$PHASE'" ;;
+esac
+[ -z "$PHASE" ] || [ "$TARGET_ENV" = tb-prod ] || die "W4 on $TARGET_ENV runs without --phase"
+NEED_READ=(OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD TARGET_BLOB_BUCKET REDIS_URL SECRET_DIR TIMING_TSV)
+NEED_RESET=(STALWART_URL STALWART_USER STALWART_PASSWORD STALWART_TARGET_PG_HOST STALWART_TARGET_PG_USER STALWART_TARGET_PG_DB TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_TARGET SECRET_DIR TIMING_TSV NEON_PROJECT_STALWART_LEGACY NEON_LEGACY_STALWART_BRANCH)
+if [ "$TARGET_ENV" != tb-prod ]; then
+  need OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD STALWART_URL STALWART_USER STALWART_PASSWORD \
+    STALWART_LEGACY_PG_HOST STALWART_LEGACY_PG_USER STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST STALWART_TARGET_PG_USER STALWART_TARGET_PG_DB \
+    LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET REDIS_URL KUBECONFIG_TARGET SECRET_DIR TIMING_TSV
+elif [ "$PHASE" = read ]; then
+  need "${NEED_READ[@]}"
+elif [ -n "$PHASE" ]; then
+  need "${NEED_RESET[@]}"
+else
+  need "${NEED_READ[@]}" "${NEED_RESET[@]}"
+fi
 mkdir -p "$SECRET_DIR"
 PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
 S=$SECRET_DIR
@@ -15,14 +39,25 @@ TENANT_SKIP="WARN skipping principal type 'tenant': .*'Enterprise feature'"
 DROP_RE='^warning: (dropping|renaming) (User|Group) '
 DROP_BASELINE=$SECRET_DIR/convert-dropped-baseline.txt
 RECOVERY_PR="thundermail-deploy PR ${TM_RECOVERY_PR:-<TM_RECOVERY_PR>}"
-RECOVERY_WAIT=${RECOVERY_WAIT:-1800}
+RECOVERY_WAIT=${RECOVERY_WAIT:-$([ "$TARGET_ENV" = tb-prod ] && echo 3600 || echo 1800)}
+CUTOVER_BRANCH=tb-prod-cutover
+SOURCE_BRANCH=tb-prod-cutover-source
+DUMP_CMD=("$PY" "$MIG_DIR/migrate_v016.py" dump --url "${OLD_STALWART_URL:-}" --username "${OLD_STALWART_USER:-}" --password "${OLD_STALWART_PASSWORD:-}" --settings "$S/settings.json" --principals "$S/principals.json")
+[ "$TARGET_ENV" != tb-prod ] || DUMP_CMD=("$PY" "$MIG_DIR/dump_legacy.py" --settings "$S/settings.json" --principals "$S/principals.json" --workers "${DUMP_WORKERS:-8}")
 REVERT="revert the recovery-mode PR ($RECOVERY_PR) with a revert PR, merge it, and wait until Argo CD has synced deploy/stalwart to 0 replicas and no stalwart pod is left"
 
-printf '%s\n' \
-  "$REVERT: $(shq "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}') prints 0 and $(shq "${KS[@]}" "${NS[@]}" get pods -l app=stalwart) lists no pod" \
-  "bash $MIG_DIR/restore-target-db.sh /work/target-before.dump --dry-run" \
-  "bash $MIG_DIR/restore-target-db.sh /work/target-before.dump --apply" \
-  "retry instead (DROP SCHEMA and copy again): $REVERT, then bash $0 --apply --go '<operator confirmation from Decisions and forks>', and merge a new recovery-mode PR when it waits for the recovery-mode pod" > "$RESTORE"
+if [ "$TARGET_ENV" = tb-prod ]; then
+  printf '%s\n' \
+    "$REVERT: $(shq "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}') prints 0 and $(shq "${KS[@]}" "${NS[@]}" get pods -l app=stalwart) lists no pod" \
+    "resume instead when only the wait for the recovery-mode pod ran out (no second reset): bash $0 --phase boot --apply" \
+    "retry the reset instead: $REVERT, then bash $0 --phase reset --apply --go '<operator confirmation from Decisions and forks>', and merge a new recovery-mode PR when it waits for the recovery-mode pod" > "$RESTORE"
+else
+  printf '%s\n' \
+    "$REVERT: $(shq "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}') prints 0 and $(shq "${KS[@]}" "${NS[@]}" get pods -l app=stalwart) lists no pod" \
+    "bash $MIG_DIR/restore-target-db.sh /work/target-before.dump --dry-run" \
+    "bash $MIG_DIR/restore-target-db.sh /work/target-before.dump --apply" \
+    "retry instead (DROP SCHEMA and copy again): $REVERT, then bash $0 --apply --go '<operator confirmation from Decisions and forks>', and merge a new recovery-mode PR when it waits for the recovery-mode pod" > "$RESTORE"
+fi
 
 replicas() { "${KS[@]}" "${NS[@]}" get deploy/stalwart -o jsonpath='{.spec.replicas}'; }
 runner_up() { [ "$("${KS[@]}" "${NS[@]}" get pod runner -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
@@ -155,7 +190,7 @@ dump() {
   local n
   [ "$APPLY" = 0 ] || legacy_tunnel || return 1
   printf '  + bash %s %s (per-type principal totals: server vs dump)\n' "$MIG_DIR/dump-check.sh" "$S/principals.json"
-  run_to "$S/dump.log" "$PY" "$MIG_DIR/migrate_v016.py" dump --url "$OLD_STALWART_URL" --username "$OLD_STALWART_USER" --password "$OLD_STALWART_PASSWORD" --settings "$S/settings.json" --principals "$S/principals.json" || { echo "dump failed; see $S/dump.log"; return 1; }
+  run_to "$S/dump.log" "${DUMP_CMD[@]}" || { echo "dump failed; see $S/dump.log"; return 1; }
   if [ "$APPLY" = 0 ]; then
     [ ! -s "$S/dump.log" ] || echo "existing $S/dump.log: $(skips "$S/dump.log") principal type(s) not fetched or skipped besides the community-edition tenant skip"
     return 0
@@ -266,10 +301,10 @@ apply_export() {
 admin_id() {
   local id host
   printf '  + curl -s -K <(user STALWART_USER:STALWART_PASSWORD) %s/jmap/session | jq -re %s\n' "$STALWART_URL" "'.primaryAccounts[\"urn:stalwart:jmap\"]'"
-  [ "$APPLY" = 1 ] || { run sed -i '/^STALWART_ADMIN_ACCOUNT_ID=/d' "$ENV_FILE"; setenv STALWART_ADMIN_ACCOUNT_ID '<from the session>'; return 0; }
+  [ "$APPLY" = 1 ] || { env_locked run sed -i '/^STALWART_ADMIN_ACCOUNT_ID=/d' "$ENV_FILE"; setenv STALWART_ADMIN_ACCOUNT_ID '<from the session>'; return 0; }
   id=$(curl -s -m 15 -K <(curl_user "$STALWART_USER" "$STALWART_PASSWORD") "$STALWART_URL/jmap/session" | jq -re '.primaryAccounts["urn:stalwart:jmap"]') || { echo "no urn:stalwart:jmap account in the session"; return 1; }
   [ -n "$id" ] && [ "$id" != null ] || return 1
-  run sed -i '/^STALWART_ADMIN_ACCOUNT_ID=/d' "$ENV_FILE" || { echo "could not drop the old STALWART_ADMIN_ACCOUNT_ID from $ENV_FILE"; return 1; }
+  env_locked run sed -i '/^STALWART_ADMIN_ACCOUNT_ID=/d' "$ENV_FILE" || { echo "could not drop the old STALWART_ADMIN_ACCOUNT_ID from $ENV_FILE"; return 1; }
   setenv STALWART_ADMIN_ACCOUNT_ID "$id" || { echo "could not append STALWART_ADMIN_ACCOUNT_ID to $ENV_FILE"; return 1; }
   host=$(sed -E 's|^[a-z]+://([^@/]*@)?([^:/]+).*|\2|' <<<"$REDIS_URL")
   grep -qF "$TARGET_BLOB_BUCKET" <<<"$(stalwart-cli get BlobStore)" || { echo "BlobStore read back is not $TARGET_BLOB_BUCKET"; return 1; }
@@ -290,6 +325,288 @@ recovery_hold() {
   echo "$STATE"
   echo "W4 ends in recovery mode; leaving it is a PR (W 5.1), merged only after the blob-recheck differences=0 row above"
 }
+
+RULE="length(k)=44 and length(v)=1 and (case when length(v)=1 then get_byte(v,0) end) in (0,2) and (case when length(k)=44 then ('x'||encode(substring(k from 37 for 8),'hex'))::bit(64)::bigint end) > extract(epoch from now())::bigint"
+TPSQL=(psql -h "${STALWART_TARGET_PG_HOST:-}" -U "${STALWART_TARGET_PG_USER:-}" -d "${STALWART_TARGET_PG_DB:-}" -v ON_ERROR_STOP=1 -At)
+NB=(python3 "$MIG_DIR/neon_branch.py" --project "${NEON_PROJECT_STALWART_LEGACY:-}" --parent "${NEON_LEGACY_STALWART_BRANCH:-}")
+WANT_SCHEMA=${STALWART_SCHEMA_VERSION:-00000006}
+cut_row() { awk -F'\t' -v s="$1" '$1 == "cut-ecs" {l = ""; n = 0} $1 == s {l = $0; n = NR} END {if (l != "") print n "\t" l}' "$TIMING_TSV" 2>/dev/null; }
+cut_time() { cut_row "$1" | cut -f4; }
+cut_line() { cut_row "$1" | cut -f1; }
+apply_flag() { [ "$APPLY" = 1 ] && echo --apply || echo --dry-run; }
+APPLY_ARG=()
+neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon read failed (dry run continues)\n' "$2"; NEEDS=$((NEEDS + 1)); }; }
+
+read_done() {
+  [ -s "$S/export.json" ] || { echo "no $S/export.json"; return 1; }
+  mark w4-read-done export "$S/export.json"
+  echo "legacy-read phase done: $S/export.json; legacy Stalwart may be stopped now (W 4.3)"
+}
+
+read_phase() {
+  if [ "$APPLY" = 1 ] && [ -z "$GO" ] && [ -n "$(cut_row w4-export)" ] && [ -s "$S/export.json" ]; then
+    echo "reusing the export of this cut (w4-export row, $S/export.json): only queue-drain runs; --go '<words>' dumps again"
+  else
+    step dump "" dump
+    step duplicates duplicates duplicates
+    step convert export_lines convert
+    if [ "$APPLY" = 1 ]; then
+      again convert dropped_accounts "$DROPPED" || stop "could not write the convert dropped_accounts row"
+      [ "$DROPPED" = 0 ] || stop "convert.stderr reports $DROPPED dropped or renamed User/Group line(s) outside the T10 baseline ($S/convert-dropped.txt)"
+    fi
+    step retarget "" retarget
+    [ "$APPLY" = 0 ] || mark w4-export file "$S/export.json"
+  fi
+  step queue-drain queued queue_drain
+  [ "$APPLY" = 0 ] || step read-done "" read_done
+}
+
+no_stalwart() {
+  local r n
+  r=$(replicas) || { echo "deploy/stalwart not readable"; return 1; }
+  n=$("${KS[@]}" "${NS[@]}" get pods -l app=stalwart -o json | jq '.items | length') || { echo "stalwart pods not readable"; return 1; }
+  echo "deploy/stalwart replicas=$r, app=stalwart pods=$n"
+  [ "$r" = 0 ] && [ "$n" = 0 ]
+}
+
+reset_preflight() {
+  local read stop bad=0
+  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart)
+  STOP_AT=$(cut_time stop-legacy-stalwart)
+  if ! awk -F'\t' '$1 == "cut-ecs" {f = 1} END {exit !f}' "$TIMING_TSV" 2>/dev/null; then echo "no cut-ecs row in $TIMING_TSV: W2 has not cut legacy in this attempt"; bad=1; fi
+  if [ -z "$read" ] || [ ! -s "$S/export.json" ]; then echo "no w4-read-done row after the last cut-ecs row (or no $S/export.json): run --phase read first"; bad=1; fi
+  if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
+  elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
+  else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
+  if runner_up; then echo "runner Running"; else echo "runner pod is not Running"; bad=1; fi
+  no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }
+  [ "$bad" = 0 ] && return 0
+  [ "$APPLY" = 1 ] && return 1
+  printf 'NEED  the reset phase runs after the read phase, the legacy stop row and with no Stalwart pod (dry run continues)\n'
+  NEEDS=$((NEEDS + 1))
+  STOP_AT=${STOP_AT:-1970-01-01T00:00:00Z}
+}
+
+neon_reset() {
+  local out rc=0
+  printf '  + %s reset --branch %s --after %s %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH" "$STOP_AT" "$(apply_flag)"
+  out=$("${NB[@]}" reset --branch "$CUTOVER_BRANCH" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
+  printf '%s\n' "$out"
+  neon_need "$rc" "neon_branch.py reset"
+  [ "$APPLY" = 1 ] || return 0
+  [ "$rc" = 0 ] || return 1
+  VALUE=$(sed -n 's/^after: .* last_reset_at=\([^ ]*\) .*/\1/p' <<<"$out")
+  mark reset last_reset_at "$VALUE"
+}
+
+branch_check() {
+  local out rc=0
+  printf '  + %s check --cutover %s --source %s --after %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH" "$SOURCE_BRANCH" "$STOP_AT"
+  out=$("${NB[@]}" check --cutover "$CUTOVER_BRANCH" --source "$SOURCE_BRANCH" --after "$STOP_AT") || rc=$?
+  printf '%s\n' "$out"
+  neon_need "$rc" "neon_branch.py check"
+  [ "$APPLY" = 1 ] || return 0
+  VALUE=$(sed -n 's/^branch check: .* parent_lsn \(.*\)$/\1/p' <<<"$out")
+  [ "$rc" = 0 ]
+}
+
+source_branch() {
+  local out rc=0 f=$S/source-branch.env n v
+  printf '  + %s source --name %s --role %s --db %s --out %s --after %s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "$(apply_flag)"
+  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
+  printf '%s\n' "$out"
+  neon_need "$rc" "neon_branch.py source"
+  if [ "$APPLY" = 0 ]; then
+    for n in STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD; do printf '  + replace %s in %s from %s\n' "$n" "$ENV_FILE" "$f"; done
+    return 0
+  fi
+  [ "$rc" = 0 ] && [ -s "$f" ] || return 1
+  for n in STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD; do
+    v=$(sed -n "s/^$n=//p" "$f" | tail -1)
+    [ -n "$v" ] || { echo "$f has no $n"; return 1; }
+    printf -v "$n" '%s' "$v"
+  done
+  env_locked source_env_write || { echo "could not replace STALWART_SOURCE_PG_* in $ENV_FILE"; return 1; }
+  printf '  + replaced STALWART_SOURCE_PG_HOST=%s STALWART_SOURCE_PG_DB=%s STALWART_SOURCE_PG_USER=%s STALWART_SOURCE_PG_PASSWORD (len=%s) in %s\n' "$STALWART_SOURCE_PG_HOST" "$STALWART_SOURCE_PG_DB" "$STALWART_SOURCE_PG_USER" "${#STALWART_SOURCE_PG_PASSWORD}" "$ENV_FILE"
+  export STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD
+  VALUE=$(sed -n 's/^created: .* created_at=\([^ ]*\) .*/\1/p' <<<"$out")
+  mark source-branch created_at "$VALUE"
+}
+
+source_env_write() {
+  local n q
+  sed -i '/^STALWART_SOURCE_PG_\(HOST\|DB\|USER\|PASSWORD\)=/d' "$ENV_FILE" || return 1
+  for n in STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD; do
+    q=$(printf '%s' "${!n}" | sed "s/'/'\\\\''/g")
+    env_append "$n" "$q" || return 1
+  done
+}
+
+schema_before() {
+  printf '  + bash %s (want 00000005 on the reset branch)\n' "$MIG_DIR/schema-version.sh"
+  [ "$APPLY" = 1 ] || return 0
+  VALUE=$(bash "$MIG_DIR/schema-version.sh" 2>/dev/null) || VALUE=unreadable
+  echo "schema on $CUTOVER_BRANCH: $VALUE"
+  [ "$VALUE" = 00000005 ] || { echo "schema $VALUE after the reset, want 00000005: not a fresh copy of legacy; nothing deleted"; return 1; }
+}
+
+auth_failed() { grep -q 'password authentication failed' <<<"$1" && grep -q '^rc=[1-9]' <<<"$1"; }
+
+guard() {
+  local hosts parent branch out pw
+  printf '  + %s hosts --branch %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH"
+  printf '  + runner: %s -c %s (cutover branch login through .pgpass)\n' "$(shq "${TPSQL[@]}")" "'select 1'"
+  printf '  + runner: the same credential against the production endpoint: pass only on password authentication failed\n'
+  printf '  + runner: the %s credential: login on its host, then password authentication failed on production\n' "$SOURCE_BRANCH"
+  [ "$APPLY" = 1 ] || return 0
+  hosts=$("${NB[@]}" hosts --branch "$CUTOVER_BRANCH") || { printf '%s\n' "$hosts"; return 1; }
+  parent=$(sed -n 's/^parent_host=//p' <<<"$hosts") branch=$(sed -n 's/^branch_host=//p' <<<"$hosts")
+  [ -n "$parent" ] && [ "$parent" != "$STALWART_TARGET_PG_HOST" ] || { echo "STALWART_TARGET_PG_HOST is the production endpoint or the production host is unknown"; return 1; }
+  [ "$branch" = "$STALWART_TARGET_PG_HOST" ] || { echo "STALWART_TARGET_PG_HOST is not the endpoint of $CUTOVER_BRANCH"; return 1; }
+  out=$("${POD[@]}" "${TPSQL[@]}" -c 'select 1' 2>&1) || true
+  [ "$out" = 1 ] || { echo "cutover branch login failed: $(tail -1 <<<"$out")"; return 1; }
+  echo "cutover branch login: ok"
+  out=$("${POD[@]}" sh -c 'umask 077; awk -F: -v h="$1" -v p="$2" '\''BEGIN {OFS = ":"} $1 == h && $2 == "5432" {$1 = p; print; exit}'\'' /secrets/.pgpass > /secrets/.guard; [ -s /secrets/.guard ] || { echo "no .pgpass line for $1"; echo rc=99; exit 0; }; PGPASSFILE=/secrets/.guard psql -h "$2" -U "$3" -d "$4" -Atc "select 1" 2>&1; echo "rc=$?"; rm -f /secrets/.guard' sh "$STALWART_TARGET_PG_HOST" "$parent" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB")
+  auth_failed "$out" || { echo "GUARD FAILED: production did not reject the cutover credential with password authentication failed: $(grep -v '^rc=' <<<"$out" | tail -1) ($(grep '^rc=' <<<"$out"))"; return 1; }
+  echo "production rejects the cutover credential: password authentication failed"
+  pw=${STALWART_SOURCE_PG_PASSWORD:-}
+  [ -n "$pw" ] && [ -n "${STALWART_SOURCE_PG_HOST:-}" ] || { echo "no source branch credential in the environment"; return 1; }
+  for h in "$STALWART_SOURCE_PG_HOST" "$parent"; do
+    out=$(printf '%s\n' "$pw" | "${POD[@]}" sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; psql -h "$1" -U "$2" -d "$3" -Atc "select 1" 2>&1; echo "rc=$?"' sh "$h" "$STALWART_SOURCE_PG_USER" "$STALWART_SOURCE_PG_DB")
+    if [ "$h" = "$parent" ]; then
+      auth_failed "$out" || { echo "GUARD FAILED: production did not reject the $SOURCE_BRANCH credential with password authentication failed: $(grep -v '^rc=' <<<"$out" | tail -1) ($(grep '^rc=' <<<"$out"))"; return 1; }
+      echo "production rejects the $SOURCE_BRANCH credential: password authentication failed"
+    else
+      [ "$(head -1 <<<"$out")" = 1 ] && grep -qx 'rc=0' <<<"$out" || { echo "$SOURCE_BRANCH login failed: $(grep -v '^rc=' <<<"$out" | tail -1)"; return 1; }
+      echo "$SOURCE_BRANCH login: ok"
+    fi
+  done
+  mark guard result pass
+  echo "GUARD PASS"
+}
+
+predelete() {
+  local before out after n
+  printf '  + runner, one transaction: %s -1 -c %s -c %s -c %s\n' "$(shq "${TPSQL[@]}")" "$(shq "select count(*) from k where $RULE")" "$(shq "delete from k where $RULE")" "$(shq "select count(*) from k where $RULE")"
+  [ "$APPLY" = 1 ] || return 0
+  no_stalwart || { echo "a Stalwart pod exists or deploy/stalwart is not at 0: no pre-delete"; return 1; }
+  out=$("${POD[@]}" "${TPSQL[@]}" -1 -c "select count(*) from k where $RULE" -c "delete from k where $RULE" -c "select count(*) from k where $RULE") || return 1
+  before=$(sed -n 1p <<<"$out") after=$(sed -n 3p <<<"$out")
+  n=$(sed -n '2s/^DELETE \([0-9]*\)$/\1/p' <<<"$out")
+  echo "links to delete: $before"
+  sed -n 2p <<<"$out"
+  echo "$after"
+  VALUE=$n
+  [ -n "$n" ] && [ "$n" = "$before" ] && [ "$after" = 0 ] || { echo "the pre-delete removed ${n:-no} row(s) of $before, $after left"; return 1; }
+  mark pre-delete deleted "$n"
+}
+
+pod_after() {
+  local t
+  t=$("${KS[@]}" "${NS[@]}" get pods -l app=stalwart -o json | jq -r '[.items[].status.startTime // empty] | min // empty')
+  [ -n "$t" ] && [[ "$t" > "$PRE_AT" ]] || { STATE="$STATE; pod start ${t:-none} is not later than the pre-delete at $PRE_AT"; return 1; }
+}
+boot_ready() { recovery_state && pod_after; }
+prod_schema_ok() { [ "$(bash "$MIG_DIR/schema-version.sh" 2>/dev/null)" = "$WANT_SCHEMA" ]; }
+
+prod_recovery_boot() {
+  printf '  + merge the recovery-mode PR (%s) now; wait up to %ss for: %s, started after the pre-delete; then 900s for schema-version.sh = %s\n' "$RECOVERY_PR" "$RECOVERY_WAIT" "$RECOVERY_OK" "$WANT_SCHEMA"
+  if [ "$APPLY" = 0 ]; then
+    recovery_state || true
+    echo "  now: $STATE"
+    return 0
+  fi
+  PRE_AT=$(cut_time pre-delete)
+  mark recovery-wait seconds "$RECOVERY_WAIT"
+  until_ok "$RECOVERY_WAIT" boot_ready || { echo "after ${RECOVERY_WAIT}s not one Ready stalwart pod in recovery mode started after the pre-delete: $STATE; is $RECOVERY_PR merged and synced by Argo CD? resume with: bash $0 --phase boot --apply"; return 1; }
+  echo "$STATE"
+  until_ok 900 prod_schema_ok || { echo "schema version is $(bash "$MIG_DIR/schema-version.sh" 2>/dev/null || echo unreadable), not $WANT_SCHEMA, after 900s; resume with: bash $0 --phase boot --apply"; return 1; }
+  VALUE=$WANT_SCHEMA
+}
+
+prod_apply() {
+  local a p
+  a=$(cut_line export-applied) p=$(cut_line pre-delete)
+  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; return 0; fi
+  apply_export || return 1
+  [ "$APPLY" = 0 ] || mark export-applied errors 0
+}
+
+prod_recovery_hold() {
+  printf '  + check again: %s\n' "$RECOVERY_OK"
+  [ "$APPLY" = 1 ] || return 0
+  recovery_state || { echo "the recovery-mode state changed before the end of W4: $STATE"; return 1; }
+  echo "$STATE"
+  echo "W4 ends in recovery mode; leaving it is a PR (W 5.1)"
+}
+
+boot_resume() {
+  local r g p
+  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete)
+  [ -n "$r" ] && [ -n "$g" ] && [ -n "$p" ] && [ "$g" -gt "$r" ] && [ "$p" -gt "$g" ] || { echo "nothing to resume: want reset, guard and pre-delete rows, in that order, after the last cut-ecs row"; return 1; }
+  echo "resuming after the pre-delete of $(cut_time pre-delete); no second reset"
+}
+
+need_recovery_pr() {
+  [ -z "${TM_RECOVERY_PR:-}" ] || return 0
+  printf 'NEED  TM_RECOVERY_PR is empty: export the number of the recovery-mode PR before W4\n'
+  [ "$APPLY" = 1 ] && stop "TM_RECOVERY_PR is empty"
+  NEEDS=$((NEEDS + 1))
+}
+
+reset_phase() {
+  STOP_AT=""
+  [ "$APPLY" = 0 ] || APPLY_ARG=(--apply)
+  step reset-preflight "" reset_preflight
+  if [ "$APPLY" = 1 ] && [ -n "$(cut_row reset)" ]; then
+    [ -n "$GO" ] || stop "$CUTOVER_BRANCH was already reset in this cut: a second reset needs the operator's confirmation (--go); after an expired pod wait use --phase boot"
+    go_gate
+  fi
+  step neon-reset reset_at neon_reset
+  step source-branch-create created_at source_branch
+  step branch-check parent_lsn branch_check
+  step schema-before schema schema_before
+  step guard-check "" guard
+  step predelete deleted predelete
+}
+
+boot_phase() {
+  step recovery-boot schema prod_recovery_boot
+  step apply errors prod_apply
+  step admin-account-id "" admin_id
+  step account-ids fails account_ids
+  step recovery-hold "" prod_recovery_hold
+}
+
+prod_main() {
+  case "$PHASE" in
+    read)
+      GATE_ID=go-W4-read prereqs
+      helpers migrate_v016.py dump_legacy.py dup_check.py dump-check.sh retarget-export.sh "$PY"
+      read_phase ;;
+    reset|boot)
+      GATE_ID=go-W4-reset prereqs
+      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      need_recovery_pr
+      if [ "$PHASE" = reset ]; then reset_phase; else [ "$APPLY" = 0 ] || boot_resume || stop "--phase boot has nothing to resume"; fi
+      boot_phase ;;
+    *)
+      [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
+      GATE_ID=go-W4-read prereqs
+      GATE_ID=go-W4-reset prereqs
+      helpers migrate_v016.py dump_legacy.py dup_check.py dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      need_recovery_pr
+      read_phase
+      reset_phase
+      boot_phase ;;
+  esac
+}
+
+if [ "$TARGET_ENV" = tb-prod ]; then
+  prod_main
+  finish
+  exit 0
+fi
 
 prereqs
 helpers migrate_v016.py dup_check.py blob-delta.sh dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli rclone "$PY"
