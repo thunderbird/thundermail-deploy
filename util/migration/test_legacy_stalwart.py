@@ -136,6 +136,8 @@ class Sandbox(unittest.TestCase):
         src = (HERE / 'targets' / 'tb-prod.sh').read_text()
         if fill:
             src = re.sub(r'REPLACE_ME_[A-Z_]+', 'filled-for-test', src)
+        else:
+            src += 'LEGACY_TEST_VALUE=REPLACE_ME_LEGACY_TEST_VALUE\n'
         (self.mig / 'targets' / 'tb-prod.sh').write_text(src)
         v = self.mig / 'verify' / 'tb-prod.env'
         if v.exists() and fill:
