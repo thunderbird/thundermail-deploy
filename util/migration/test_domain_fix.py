@@ -137,6 +137,9 @@ class DomainFix(unittest.TestCase):
             % BAD,
             p.stdout,
         )
+        note = ok + [{'id': 9, 'emails': ['x@a.example.com'], 'description': 'was x@' + BAD}]
+        p = self.run_fix(export(alias_domain='#create-1'), note)
+        self.assertEqual(p.returncode, 0, p.stderr)
         before = export(alias_domain='#create-1')
         p = self.run_fix(before, ok + [{'id': 8, 'emails': ['w@' + PUNY.upper()]}])
         self.assertEqual(p.returncode, 1)
