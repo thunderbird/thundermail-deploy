@@ -55,8 +55,11 @@ class Gate(unittest.TestCase):
         rc, out = self.gate('stop-legacy', [q0, done, CUT])
         self.assertEqual(rc, 2)
         rc, out = self.gate('stop-legacy', [CUT, q0, done, ('stop-W4', 'x', 'reason', 'y')])
+        self.assertEqual(rc, 0, out)
+        rerun = ('w4-export-start', 'z', 'file', 'x')
+        rc, out = self.gate('stop-legacy', [CUT, q0, done, rerun, ('stop-W4', 'y', 'reason', 'y')])
         self.assertEqual(rc, 2)
-        self.assertIn('stop-W4 at x after the read phase', out)
+        self.assertIn('a read phase started at z after the last w4-read-done row', out)
 
     def test_merge_recovery_passes_again_after_a_timeout_and_a_resume(self):
         base = [
@@ -270,7 +273,7 @@ class KeycloakGate(unittest.TestCase):
     def test_a_failed_pull_says_why(self):
         rc, out = self.run_gate(PODMAN_FAIL='connection refused')
         self.assertEqual(rc, 1, out)
-        self.assertIn('pulling quay.io/keycloak/keycloak@sha256:abc (not in the local podman store)', out)
+        self.assertNotIn('pulling', out)
         self.assertIn(
             'GATE FAIL: podman run of quay.io/keycloak/keycloak@sha256:abc gave no Keycloak '
             'version (rc=125): Error: initializing source docker://x: connection refused',
@@ -360,6 +363,10 @@ class Keep(Prod):
         self.assertEqual(oct((self.s / 'export.json').stat().st_mode & 0o777), '0o600')
         out = self.keep('restore')
         self.assertIn('present export.json', out)
+        (self.s / 'source-branch.env').write_text('STALWART_SOURCE_PG_PASSWORD=newer\n')
+        out = self.keep('restore')
+        self.assertIn('kept source-branch.env differs from the file in', out)
+        self.assertEqual((self.s / 'source-branch.env').read_text(), 'STALWART_SOURCE_PG_PASSWORD=newer\n')
 
     def test_a_tampered_copy_is_not_restored(self):
         self.keep('save')

@@ -22,11 +22,11 @@ wait_() { printf 'WAIT  %s: %s\n' "$GATE" "$1"; exit 2; }
 
 case "$GATE" in
   stop-legacy)
-    read=$(last w4-read-done) q=$(last queue-drain) s=$(last stop-W4)
+    read=$(last w4-read-done) q=$(last queue-drain) s=$(last w4-export-start)
     [ -n "$read" ] || wait_ "no w4-read-done row after the last cut-ecs row: the read phase has not ended"
     [ -n "$q" ] && [ "$(line "$q")" -lt "$(line "$read")" ] || wait_ "no queue-drain row before the w4-read-done row"
     [ "$(value "$q")" = 0 ] || wait_ "the last queue-drain row has value $(value "$q"), not 0"
-    [ -z "$s" ] || [ "$(line "$s")" -lt "$(line "$read")" ] || wait_ "stop-W4 at $(at "$s") after the read phase: rerun --phase read"
+    [ -z "$s" ] || [ "$(line "$s")" -lt "$(line "$read")" ] || wait_ "a read phase started at $(at "$s") after the last w4-read-done row and has not ended: finish --phase read"
     go "queue-drain 0 at $(at "$q"), w4-read-done at $(at "$read"); legacy Stalwart may be stopped" ;;
   merge-recovery)
     r=$(last reset) p=$(last pre-delete) l=$(last_of 'reset|pre-delete|recovery-wait|stop-W4')

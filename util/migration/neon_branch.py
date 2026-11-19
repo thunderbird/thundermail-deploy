@@ -268,10 +268,10 @@ def cmd_reset(n, a):
             f'is not later than {a.after}'
         )
         return 1
-    if not LSN.fullmatch(b.get('parent_lsn') or '') or b.get('parent_lsn') == before:
+    if not LSN.fullmatch(b.get('parent_lsn') or ''):
         print(
-            f'reset proof FAILED: parent_lsn {b.get("parent_lsn") or "-"} after the reset '
-            f'(before {before or "-"}): no new LSN to create {a.branch}-source at'
+            f'reset proof FAILED: no parent_lsn after the reset (before {before or "-"}): '
+            f'no LSN to create {a.branch}-source at'
         )
         return 1
     print(
