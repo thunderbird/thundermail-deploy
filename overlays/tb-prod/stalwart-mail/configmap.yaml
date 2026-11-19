@@ -18,10 +18,10 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "ep-still-resonance-b9c8rnw6-pooler.c-7.eu-central-1.aws.neon.tech",
+      "host": "ep-lucky-feather-a2t3agda.eu-central-1.aws.neon.tech",
       "port": 5432,
-      "database": "neondb",
-      "authUsername": "neondb_owner",
+      "database": "stalwart",
+      "authUsername": "stalwart_owner",
       "authSecret": {
         "@type": "EnvironmentVariable",
         "variableName": "STALWART_POSTGRESQL_ADMIN_PASSWORD"
