@@ -29,7 +29,7 @@ kube_cluster_of() {
   CC=$cc yq -r '.contexts[] | select(.name == strenv(CC)) | .context.cluster' "$1" 2>/dev/null | head -1
 }
 kube_args_ok() {
-  local a prev=""
+  local a prev="" seen=0 sub=${1:-}
   for a in "$@"; do
     [ "$a" != -- ] || break
     case $a in
@@ -39,6 +39,7 @@ kube_args_ok() {
     case $prev:$a in
       --kubeconfig:*|*:--kubeconfig=*)
         a=${a#--kubeconfig=}
+        seen=1
         [ -n "$a" ] || { echo "refusing kubectl: --kubeconfig is empty, kubectl would use the current context" >&2; return 64; }
         [ -e "$a" ] || { echo "refusing kubectl: kubeconfig $a does not exist" >&2; return 64; }
         [ -r "$a" ] && [ ! -d "$a" ] || { echo "refusing kubectl: kubeconfig $a is a directory or not readable, so it cannot be checked" >&2; return 64; }
@@ -51,6 +52,7 @@ kube_args_ok() {
     prev=$a
   done
   [ "$prev" != --kubeconfig ] || { echo "refusing kubectl: --kubeconfig has no value" >&2; return 64; }
+  [ "$seen" = 1 ] || [ "$sub" = kustomize ] || { echo "refusing kubectl: no --kubeconfig, kubectl would use the current context" >&2; return 64; }
 }
 kubectl() { kube_args_ok "$@" || return 64; command kubectl "$@"; }
 env_path_ok() {

@@ -22,8 +22,8 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   `start`, `checks`, `presync`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
   block per id. `start` holds only the rows that can pass before the first window step. It reads
   values from the env file first, then the environment, and never prints a value.
-- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
-  `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
+- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a call
+  other than `kubectl kustomize` has no `--kubeconfig`, when the value is empty, names a missing file or names the other environment's cluster,
   or when a flag picks another cluster or credential (`--context`, `--cluster`, `--server`, `--user`,
   `--token`, `--as`, the client certificate and TLS flags), so no script falls back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
   cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
@@ -37,11 +37,14 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV; it
   moves its own snapshots into `env-check/` so rollback never picks them. On tb-prod it prints
   `WAIT` (not a failure) for rows whose object only exists in the window (runner pod, SSM tunnel,
-  Stalwart, the mail load balancer, the Kargo configs stage) and skips the tb-stage-only rows.
+  Stalwart, the mail load balancer) and skips the tb-stage-only rows.
 - The tb-prod build writes `TMD_CHECKOUT` (the checkout it runs from), `WINDOW_SHA` (its `HEAD`;
   `--rebuild` keeps the recorded value) and `STALWART_URL=http://localhost:18081`, as tb-stage
-  does; `LANE_PF_PORT` replaces the port. The env file is built before the mail load balancer
-  exists, so `TARGET_NLB_DNS` is empty until `build-cutover-env.sh --rebuild` runs after it does.
+  does; `LANE_PF_PORT` replaces the port. After a tooling fix is checked out in the window,
+  `build-cutover-env.sh --rebuild --move-window-sha` sets `WINDOW_SHA` to the new `HEAD`. Before the
+  mail load balancer exists `TARGET_NLB_DNS` is empty; `build-cutover-env.sh --rebuild` fills it
+  once it does. `TBPROD_AUTH_ALB` and `TBPROD_ACCOUNTS_ALB` come from the Ingress with a rule
+  for `AUTH_HOST` or `ACCOUNTS_HOST`.
 - The Cloudflare token is `CF_API_TOKEN_AGENT` from `CF_TOKEN_FILE` (`~/.prod-cloudflare.env` for
   tb-prod, `~/.cloudflare.env` for tb-stage).
 - Restore scripts are dry-run by default and print what they would change; `--apply`
@@ -296,10 +299,12 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   row, or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
   `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
-  `STALWART_SOURCE_PG_*` of the env file. It then checks that both branches are `ready`, later
+  `STALWART_SOURCE_PG_*` of the env file: Neon resets a role password only on a branch with a
+  read-write endpoint, so the branch is created with one, the password is reset, a read-only
+  endpoint is added and the read-write endpoint is deleted. It then checks that both branches are `ready`, later
   than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
-  credentials log in on their branch, and the production endpoint answers `password
-  authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
+  credentials log in on their branch, the source branch refuses a write as read-only, and the
+  production endpoint answers `password authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
   boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
   recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
