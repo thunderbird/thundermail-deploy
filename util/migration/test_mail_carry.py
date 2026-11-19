@@ -39,6 +39,7 @@ class Server:
         )
         self.accounts, self.principals, self.blobs, self.calls = {}, [], {}, []
         self.indexed, self.expunge_at_download = set(), set()
+        self.state, self.delete_after_first_page, self.churn = {}, None, set()
         self.admin = 'adm0' if kind == 16 else None
         self.fail_download = self.truncate = self.short_total = self.mailbox_fail = False
         self.readback_delta = self.commit_then_500 = 0
@@ -188,7 +189,19 @@ class Server:
                 ids = [i for i in ids if f['inMailbox'] in acc['emails'][i]['mailboxIds']]
             pos, lim = args.get('position', 0), args.get('limit', 5000)
             total = len(ids) + (1 if self.short_total else 0)
-            return [name, {'ids': ids[pos : pos + lim], 'total': total}, cid]
+            aid = args['accountId']
+            out = {
+                'ids': ids[pos : pos + lim],
+                'total': total,
+                'queryState': self.state.get(aid, 0),
+            }
+            gone = self.delete_after_first_page
+            if aid in self.churn or (pos == 0 and gone and gone[0] == aid):
+                if aid not in self.churn:
+                    del acc['emails'][gone[1]]
+                    self.delete_after_first_page = None
+                self.state[aid] = self.state.get(aid, 0) + 1
+            return [name, out, cid]
         if name == 'Email/get':
             lst = []
             for i in args['ids']:
@@ -371,6 +384,35 @@ class Tool(unittest.TestCase):
         rc, out = self.export()
         self.assertEqual(rc, 1, out)
         self.assertIn('STOP  /jmap/session names no urn:stalwart:jmap account', out)
+        self.assertEqual(self.rows(), [])
+
+    def many(self, aid, first, n):
+        for i in range(first, first + n):
+            self.v16.put(aid, raw('o%d' % i, 'bob', 'o'), '2026-11-01T10:00:00Z', eid='m%05d' % i)
+
+    def test_a_deletion_on_an_earlier_page_restarts_the_listing_and_skips_nothing(self):
+        page = mc.QUERY_PAGE
+        self.many(self.bob16, 0, page - 1)
+        self.v16.put(self.bob16, raw('late', 'bob', 'l'), '2026-11-19T18:09:00Z', eid='m%05d' % 999)
+        self.many(self.bob16, page, 1)
+        self.v16.delete_after_first_page = (self.bob16, 'm00000')
+        rc, out = self.export('--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Email/query: the list changed between pages, reading it again (1 of 5)', out)
+        self.assertIn('account=2 messages=2 bytes=', out)
+        self.assertIn('scanned=%d ' % (3 + page + 1), out)
+        man = (self.out / 'manifest.jsonl').read_text()
+        self.assertIn('"email": "m00999"', man)
+
+    def test_a_list_that_keeps_changing_stops_the_export(self):
+        self.many(self.bob16, 0, mc.QUERY_PAGE)
+        self.v16.churn.add(self.bob16)
+        rc, out = self.export('--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn(
+            'STOP  Email/query: the list changed between pages in 5 listings in a row', out
+        )
+        self.assertFalse((self.out / 'summary.json').exists())
         self.assertEqual(self.rows(), [])
 
     def test_urls_must_be_loopback_and_the_import_never_targets_tb_prod(self):
