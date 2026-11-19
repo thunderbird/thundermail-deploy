@@ -100,7 +100,7 @@ class DomainFix(unittest.TestCase):
                 "warning: dropping DkimSignature create-12: its domain '%s' is dropped" % BAD,
                 "warning: dropping DkimSignature create-13: its domain '%s' is dropped" % BAD,
                 "warning: dropping Domain '%s': Stalwart 0.16 refuses it "
-                '(its last label is no public suffix)' % BAD,
+                '(no public suffix rule matches it)' % BAD,
                 'domains checked=4 dropped=3 invalid=1 idna_pairs=1 dkim_dropped=5',
             ],
         )
@@ -127,11 +127,19 @@ class DomainFix(unittest.TestCase):
         self.assertEqual(d.to_ascii(' a .example.com'), 'a.example.com')
         self.assertIsNone(d.to_ascii('nodot'))
         self.assertIsNone(d.to_ascii('a..example.com'))
-        known = d.tlds()
-        self.assertGreater(len(known), 1000)
+        known = d.rules()
+        self.assertGreater(len(known), 10000)
         self.assertIsNone(d.refused('a.example.com', known))
         self.assertIsNone(d.refused('host.test', known))
-        self.assertEqual(d.refused(BAD, known), 'its last label is no public suffix')
+        self.assertEqual(d.refused(BAD, known), 'no public suffix rule matches it')
+        self.assertEqual(d.refused('mail.x.za', known), 'no public suffix rule matches it')
+        self.assertIsNone(d.refused('mail.x.co.za', known))
+        self.assertIsNone(d.refused('x.ck', known))
+        self.assertEqual(
+            d.to_ascii('\uff45\uff58\uff41\uff4d\uff50\uff4c\uff45.com'), 'example.com'
+        )
+        self.assertEqual(d.to_ascii('a\u3002example.com'), 'a.example.com')
+        self.assertIsNone(d.to_ascii('b\u00fccher.xn--zz.com'))
 
 
 class DupCheckDomains(unittest.TestCase):

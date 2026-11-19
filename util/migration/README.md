@@ -263,13 +263,15 @@ the keying for the real hosts.
   password stays in the environment, `DUMP_WORKERS` concurrent reads, default 8), then runs
   `duplicates`, `convert`, `domains`, `retarget` and `queue-drain` last. `domains` runs
   `domain_fix.py` on the export. It drops each Domain that Stalwart 0.16 refuses, with the DKIM
-  signatures that point at it: a name whose last label is no public suffix (`domain-tlds.txt`, the
-  last labels of the Public Suffix List 2026-06-24_06-18-09_UTC, plus the reserved names 0.16
-  accepts), and both entries of a name present in Unicode and in punycode. It prints one
+  signatures that point at it: a name no public suffix rule matches (`domain-suffixes.txt`, the
+  rules of the `psl` crate 2.1.241 that Stalwart 0.16.27 is built with, in ASCII form, plus the
+  reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
+  (compared after NFKC and punycode, as 0.16 reads them). It prints one
   `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
   stopping. A dropped Domain that an account, list or setting still uses stops it.
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
-  `class Domain:refused-by-0.16` lines without changing its exit code. It writes `$SECRET_DIR` and the
+  `class Domain:refused-by-0.16` lines, and the names convert drops itself as
+  `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
   `w4-export` and `w4-read-done` rows only. A rerun after a `queue-drain` stop reads the queue
   only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
   without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`

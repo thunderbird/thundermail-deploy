@@ -39,7 +39,7 @@ def main(argv=None):
     for cids in dups.values():
         for cid in cids:
             drop[cid] = 'the same name as another Domain after IDNA (Unicode and punycode)'
-    lines, gone = [], 0
+    lines, gone, used = [], 0, 0
     for cid in sorted(drop):
         users = sorted(
             {
@@ -49,12 +49,14 @@ def main(argv=None):
             }
         )
         if users:
+            used += 1
             print(
                 'error: Domain %r is refused by Stalwart 0.16 (%s) and still used by %s: '
                 'fix it on legacy, then dump again' % (names[cid], drop[cid], ', '.join(users)),
                 file=sys.stderr,
             )
-            return 1
+    if used:
+        return 1
     for cid in sorted(drop):
         for op in ops:
             if op.get('object') != 'DkimSignature':
