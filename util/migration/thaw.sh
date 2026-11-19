@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+need_target THAW_BRANCH THAW_MERGE_ISSUE THAW_PART_OF_ISSUE THAW_REFS_ISSUE
 need FREEZE_PR PI_DIR
 no_placeholders THAW_BRANCH THAW_MERGE_ISSUE THAW_PART_OF_ISSUE THAW_REFS_ISSUE KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS || exit 64
 ENV_FILE=${CUTOVER_ENV:-${ENV_FILE:-/dev/shm/talos/cutover-$TARGET_ENV.env}}

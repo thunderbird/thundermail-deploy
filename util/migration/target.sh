@@ -90,6 +90,11 @@ load_cutover_env() {
   [ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
   CUTOVER_ENV_LOADED=1
 }
+target_defines() { grep -q "^$1=" "$(dirname "${BASH_SOURCE[0]}")/targets/$TARGET_ENV.sh"; }
+need_target() {
+  local v
+  for v in "$@"; do target_defines "$v" || { echo "$(basename "$0"): $v is not defined in targets/$TARGET_ENV.sh, so this script does not run for TARGET_ENV=$TARGET_ENV" >&2; exit 64; }; done
+}
 stage_only() {
   [ "${STAGE_ONLY_OK:-0}" = 1 ] && return 0
   echo "usage: $(basename "$0") is a tb-stage step; TARGET_ENV=$TARGET_ENV has no form of it" >&2

@@ -199,13 +199,13 @@ build() {
   put KARGO_PROJECT_CONFIGS "$KARGO_PROJECT_CONFIGS" "Kargo project (targets/$TARGET_ENV.sh)"
   put KARGO_STAGE_CONFIGS "$KARGO_STAGE_CONFIGS" "Kargo stage (targets/$TARGET_ENV.sh)"
   put KARGO_WAREHOUSE_CONFIGS "$KARGO_WAREHOUSE_CONFIGS" "Kargo warehouse (targets/$TARGET_ENV.sh)"
-  put FREEZE_PR "$(op FREEZE_PR)$([ -z "$(op FREEZE_PR)" ] && try gh pr list -R thunderbird/platform-infrastructure --head "$FREEZE_BRANCH" --state open --json number --jq '.[0].number')" "gh pr list -R thunderbird/platform-infrastructure --head $FREEZE_BRANCH, or FREEZE_PR in the environment"
+  put FREEZE_PR "$(op FREEZE_PR)$([ -z "$(op FREEZE_PR)" ] && target_defines FREEZE_BRANCH && try gh pr list -R thunderbird/platform-infrastructure --head "${FREEZE_BRANCH:-}" --state open --json number --jq '.[0].number')" "gh pr list -R thunderbird/platform-infrastructure --head ${FREEZE_BRANCH:-}, or FREEZE_PR in the environment"
   put T6_PR "$(op T6_PR)" "operator: TMD values.yaml PR number (T6_PR in the environment)"
-  for d in "T7_PR:keycloak-customer-deploy:$PR_HEAD_PREFIX-t7" "T7_REVERT_PR:keycloak-customer-deploy:$PR_HEAD_PREFIX-t7-revert" "T8_PR:accounts-deploy:$PR_HEAD_PREFIX-t8" "T8_REVERT_PR:accounts-deploy:$PR_HEAD_PREFIX-t8-revert"; do
+  for d in "T7_PR:keycloak-customer-deploy:${PR_HEAD_PREFIX:-}-t7" "T7_REVERT_PR:keycloak-customer-deploy:${PR_HEAD_PREFIX:-}-t7-revert" "T8_PR:accounts-deploy:${PR_HEAD_PREFIX:-}-t8" "T8_REVERT_PR:accounts-deploy:${PR_HEAD_PREFIX:-}-t8-revert"; do
     local v repo head n
     IFS=: read -r v repo head <<<"$d"
     n=$(op "$v")
-    [ -n "$n" ] || n=$(try pr_by_head "$repo" "$head")
+    [ -n "$n" ] || ! target_defines PR_HEAD_PREFIX || n=$(try pr_by_head "$repo" "$head")
     put "$v" "$n" "$v in the environment, else the one open thunderbird/$repo PR with head */$head (gh pr list)"
   done
   put FLIP_PR "$(op FLIP_PR)" "operator: TMD dnsManagement Automatic PR number (FLIP_PR in the environment)"

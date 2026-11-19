@@ -984,18 +984,50 @@ def filled(src, dst, keep=None, value=None):
 
 
 class Placeholders(Sandbox):
-    def test_thaw_refuses_before_any_call(self):
-        for mode in ('--dry-run', '--apply'):
-            with self.subTest(mode=mode):
-                rc, out = self.run_sh(
-                    [str(HERE / 'thaw.sh'), mode],
-                    TARGET_ENV='tb-prod',
-                    FREEZE_PR='7',
-                    PI_DIR=str(self.t),
-                )
-                self.assertEqual(rc, 64, out)
-                self.assertIn('THAW_BRANCH', out)
+    def test_thaw_refuses_tb_prod_before_any_call(self):
+        mig = filled(HERE, self.t / 'mig')
+        for root in (HERE, mig):
+            for mode in ('--dry-run', '--apply'):
+                with self.subTest(root=root.name, mode=mode):
+                    rc, out = self.run_sh(
+                        [str(root / 'thaw.sh'), mode],
+                        TARGET_ENV='tb-prod',
+                        FREEZE_PR='7',
+                        PI_DIR=str(self.t),
+                        THAW_BRANCH='thaw-tb-stage',
+                    )
+                    self.assertEqual(rc, 64, out)
+                    if root == mig or mode == '--dry-run':
+                        self.assertEqual(
+                            out,
+                            'thaw.sh: THAW_BRANCH is not defined in targets/tb-prod.sh, so this'
+                            ' script does not run for TARGET_ENV=tb-prod\n',
+                        )
         self.assertEqual(self.log(), '')
+
+    def test_thaw_still_runs_on_tb_stage(self):
+        self.rules([{'tool': 'gh', 'match': 'pr view 7', 'out': 'OPEN\t\n'}])
+        rc, out = self.run_sh(
+            [str(HERE / 'thaw.sh'), '--dry-run'], TARGET_ENV='tb-stage', FREEZE_PR='7', PI_DIR=str(self.t)
+        )
+        self.assertNotIn('is not defined', out)
+        self.assertIn('gh pr view 7', self.log())
+
+    def test_prod_build_looks_up_no_freeze_or_repoint_pr(self):
+        self.rules(stage_rules(ecs='accounts-prod'))
+        self.run_sh(
+            [str(HERE / 'build-cutover-env.sh')],
+            TARGET_ENV='tb-prod',
+            KUBECONFIG_TARGET=str(self.t / 'kc-target'),
+            KUBECONFIG_HUB=str(self.t / 'kc-hub'),
+            KUBECONFIG_DEV=str(self.t / 'kc-dev'),
+            FREEZE_BRANCH='freeze-tb-stage',
+            PR_HEAD_PREFIX='tbstage',
+        )
+        self.assertNotIn('pr list', self.log())
+        text = (self.t / 'shm' / 'cutover.env').read_text()
+        for name in ('FREEZE_PR', 'T7_PR', 'T7_REVERT_PR', 'T8_PR', 'T8_REVERT_PR'):
+            self.assertIn("%s=''" % name, text)
 
     def test_every_apply_refuses_while_one_remains(self):
         script = 'set -- --apply\n. %s/lib.sh\necho reached\n'
@@ -1004,10 +1036,10 @@ class Placeholders(Sandbox):
         self.assertNotIn('reached', out)
         for value in ('REPLACE_ME_X', 'replace_me_x', 'REPLACE_ME', 'pre-Replace_Me-post'):
             with self.subTest(value=value):
-                mig = filled(HERE, self.t / ('mig-' + str(abs(hash(value)))), 'THAW_BRANCH', value)
+                mig = filled(HERE, self.t / ('mig-' + str(abs(hash(value)))), 'LEGACY_PG_SECRET_NAME', value)
                 rc, out = self.run_sh(['-c', script % mig], TARGET_ENV='tb-prod')
                 self.assertEqual(rc, 64, out)
-                self.assertIn('THAW_BRANCH', out)
+                self.assertIn('LEGACY_PG_SECRET_NAME', out)
         mig = filled(HERE, self.t / 'mig-full')
         rc, out = self.run_sh(['-c', script % mig], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 0, out)
@@ -1022,7 +1054,7 @@ class Placeholders(Sandbox):
         rc, out = self.run_sh(
             [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
         )
-        self.assertRegex(out, r'(?m)^NEED  placeholders +fill: .*\bTHAW_BRANCH\b')
+        self.assertRegex(out, r'(?m)^NEED  placeholders +fill: .*\bLEGACY_PG_SECRET_NAME\b')
         rc, out = self.run_sh(
             [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-stage'
         )
@@ -1036,7 +1068,7 @@ class Placeholders(Sandbox):
             KUBECONFIG_DEV=str(self.t / 'kc-dev'),
         )
         self.assertNotEqual(rc, 0)
-        for name in ('THAW_BRANCH', 'SPF_DECIDED_TXT'):
+        for name in ('RUNNER_WORK_SIZE', 'E2E_USER_SECRET'):
             self.assertRegex(out, r'(?m)^%s +NEED \(placeholder' % re.escape(name))
         mig = filled(HERE, self.t / 'mig-verify', 'SOURCE_PG_SECRET_ID', 'REPLACE_ME_X')
         rc, out = self.run_sh(
@@ -1089,7 +1121,7 @@ class CrossEnvironment(Sandbox):
         self.operator_file('cutover-operator.env', "T7_PR='11'\nADMIN_MERGE='1'\n")
         self.prod_build()
         text = (self.t / 'shm' / 'cutover.env').read_text()
-        self.assertIn("T7_PR='42'", text)
+        self.assertNotIn("'11'", text)
         self.assertIn("ADMIN_MERGE=''", text)
 
     def test_a_prod_operator_file_needs_its_target_line(self):
