@@ -40,6 +40,9 @@ elif cmd == 'logs get-log-events':
     since = int(opt('--start-time'))
     ev = [{'timestamp': now - a, 'message': m} for a, m in ev if now - a >= since]
     tok = opt('--next-token')
+    if opt('--log-stream-name') in st.get('garbled', []):
+        print('<html>throttled</html>')
+        sys.exit(0)
     start = int(tok[1:]) if tok else 0
     page = ev[start:start + 2]
     nxt = 'f%d' % (start + len(page)) if page else (tok or 'f0')
@@ -180,6 +183,7 @@ class Base(unittest.TestCase):
             'CUTOVER_ENV': str(self.env_file),
             'TS': '20261119T000000Z',
             'CELERY_DRAIN_INTERVAL': '0',
+            'CELERY_DRAIN_TIMEOUT': '5',
         }
         e.update(env)
         p = subprocess.run(
@@ -221,6 +225,7 @@ class CeleryDrain(Base):
         rc, out = self.run_tool('read', TARGET_ENV='tb-stage', CUTOVER_ENV=self.stage_env())
         self.assertEqual(rc, 64, out)
         self.assertIn('TARGET_ENV=tb-stage has none', out)
+        self.assertEqual(list((self.t / 'ev').iterdir()), [])
         rc, _ = self.run_tool('read', '--bogus')
         self.assertNotEqual(rc, 0)
         rc, out = self.run_tool('drain')
@@ -254,6 +259,33 @@ class CeleryDrain(Base):
         rc, out = self.run_tool('read', '--apply')
         self.assertIn('celery held=0 received=2 finished=2', out)
         self.assertEqual(self.rows(), [])
+
+    def test_an_unreadable_log_page_stops_the_read(self):
+        self.state(garbled=[STREAM + 'bbb'])
+        rc, out = self.run_tool('read', '--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('logs get-log-events failed for %sbbb' % STREAM, out)
+        self.assertNotIn('celery held=', out)
+
+    def test_log_text_never_leaves_jq(self):
+        (self.bin / 'sort').unlink()
+        (self.bin / 'sort').write_text(
+            '#!%s\n%s -a "$SORT_IN" | %s "$@"\n'
+            % (shutil.which('bash'), shutil.which('tee'), shutil.which('sort'))
+        )
+        (self.bin / 'sort').chmod(0o755)
+        big = 'secret-' + 'x' * 300000
+        ev = [
+            [60000, line(0, TASK, ID1, 'received')],
+            [50000, line(0, TASK, ID1, 'succeeded in 1s: ' + big)],
+        ]
+        self.state(cycles=[{STREAM + 'aaa': ev, STREAM + 'bbb': done(ID2)}])
+        rc, out = self.run_tool('read', '--apply', SORT_IN=str(self.t / 'sort.in'))
+        self.assertEqual(rc, 0, out)
+        self.assertIn('celery held=0 received=2 finished=2', out)
+        seen = (self.t / 'sort.in').read_text()
+        self.assertIn(' %s %s received' % (TASK, ID1), seen)
+        self.assertNotIn('secret', seen + out)
 
     def test_a_retry_or_a_page_boundary_keeps_a_task_held(self):
         ev = done(ID1, 300) + [

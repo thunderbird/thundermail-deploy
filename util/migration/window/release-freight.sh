@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ALLOW_POS=1
+case ${TARGET_ENV:-tb-prod} in tb-prod) ;; *) { echo "release-freight.sh looks up the release Freight of the tb-prod Stage; TARGET_ENV=${TARGET_ENV:-} has none" >&2; exit 64; } ;; esac
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-[ "$TARGET_ENV" = tb-prod ] || { echo "release-freight.sh looks up the release Freight of the tb-prod Stage; TARGET_ENV=$TARGET_ENV has none" >&2; exit 64; }
 [ "${#POS[@]}" = 1 ] && [[ ${POS[0]} =~ ^[0-9a-f]{40}$ ]] || { echo "usage: release-freight.sh <40-hex thunderbird-accounts commit> [--dry-run | --apply] (prints the Freight name as the last line)" >&2; exit 64; }
 need KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_HUB
 C=${POS[0]}

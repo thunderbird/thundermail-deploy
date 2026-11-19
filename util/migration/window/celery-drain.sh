@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ALLOW_POS=1
+case ${TARGET_ENV:-tb-prod} in tb-prod) ;; *) { echo "celery-drain.sh reads the legacy Accounts Celery of the tb-prod cutover; TARGET_ENV=${TARGET_ENV:-} has none" >&2; exit 64; } ;; esac
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-[ "$TARGET_ENV" = tb-prod ] || { echo "celery-drain.sh reads the legacy Accounts Celery of the tb-prod cutover; TARGET_ENV=$TARGET_ENV has none" >&2; exit 64; }
 CMD=${POS[0]:-}
 case "$CMD:${#POS[@]}" in
   read:1|wait:1) ;;
@@ -14,6 +14,7 @@ TIMEOUT=${CELERY_DRAIN_TIMEOUT:-900}
 INTERVAL=${CELERY_DRAIN_INTERVAL:-30}
 LOOKBACK=${CELERY_DRAIN_LOOKBACK:-7200}
 FRESH=${CELERY_DRAIN_FRESH:-180}
+for v in "$TIMEOUT" "$INTERVAL" "$LOOKBACK" "$FRESH"; do [[ $v =~ ^[0-9]+$ ]] || { echo "CELERY_DRAIN_TIMEOUT, _INTERVAL, _LOOKBACK and _FRESH take whole seconds (got '$v')" >&2; exit 64; }; done
 W2_RESTORE=$EVIDENCE_DIR/cut-legacy-restore.txt
 read -ra CELERY <<<"$(tr ' ' '\n' <<<"$LEGACY_ECS_TARGETS" | grep -- '-celery-' | tr '\n' ' ' || :)"
 [ "${#CELERY[@]}" = 1 ] || stop "LEGACY_ECS_TARGETS names ${#CELERY[@]} Celery services, not 1: $LEGACY_ECS_TARGETS"
@@ -32,9 +33,9 @@ events() {
   local s=$1 since=$2 tok="" out next n
   while :; do
     out=$("${RO[@]}" logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-time "$since" --start-from-head ${tok:+--next-token "$tok"} --output json) || return 1
-    jq -r '.events[] | "\(.timestamp) \(.message | gsub("[\r\n]"; " "))"' <<<"$out"
-    n=$(jq '.events | length' <<<"$out")
-    next=$(jq -r '.nextForwardToken // ""' <<<"$out")
+    printf '%s' "$out" | jq -r '.events[] | [(.timestamp | tostring)] + (.message | first(capture("Task (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\] (?<w>[a-z]+)"), (capture("Discarding revoked task: (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "revoked"), {n: "-", i: "-", w: "-"}) | [.n, .i, .w]) | join(" ")' || return 1
+    n=$(printf '%s' "$out" | jq '.events | length') || return 1
+    next=$(printf '%s' "$out" | jq -r '.nextForwardToken // ""') || return 1
     [ "$n" -gt 0 ] && [ -n "$next" ] && [ "$next" != "$tok" ] || return 0
     tok=$next
   done
@@ -42,15 +43,9 @@ events() {
 
 held_count() {
   sort -s -n -k1,1 | awk -v now="$1" '
-    match($0, /Task [A-Za-z0-9_.:]+\[[0-9a-f-]+\] [a-z]+/) {
-      m = substr($0, RSTART + 5, RLENGTH - 5); i = index(m, "["); j = index(m, "]")
-      id = substr(m, i + 1, j - i - 1); last[id] = substr(m, j + 2); name[id] = substr(m, 1, i - 1); at[id] = $1
-      if (last[id] == "received") r++; else if (last[id] != "retry") f++
-    }
-    match($0, /Discarding revoked task: [A-Za-z0-9_.:]+\[[0-9a-f-]+\]/) {
-      m = substr($0, RSTART, RLENGTH); i = index(m, "["); last[substr(m, i + 1, length(m) - i - 1)] = "revoked"; f++
-    }
     $1 + 0 > newest { newest = $1 + 0 }
+    $4 == "-" || NF != 4 { next }
+    { last[$3] = $4; name[$3] = $2; at[$3] = $1; if ($4 == "received") r++; else if ($4 != "retry") f++ }
     END {
       for (id in last) if (last[id] == "received" || last[id] == "retry") { h++; printf "  held %s %s %ds\n", name[id], last[id], (now - at[id]) / 1000 }
       printf "%d %d %d %d\n", h, r, f, newest ? (now - newest) / 1000 : -1
@@ -106,14 +101,17 @@ same_desired() {
 }
 
 plan() {
-  printf '== %s %s: read-only, profile mzla-legacy-ro; no desired count, task or broker is changed\n' "$W" "$CMD"
-  [ "$CMD" = read ] || printf '  every %ss until held=0, at most %ss:\n' "$INTERVAL" "$TIMEOUT"
+  printf '== %s %s: read-only, profile mzla-legacy-ro; changes no desired count, task or broker\n' "$W" "$CMD"
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-groups --log-group-name-prefix "$LEGACY_ECS_CLUSTER_PREFIX" --query 'logGroups[].logGroupName' --output text)"
+  if [ "$CMD" = wait ]; then
+    printf '  + %s   (for each of LEGACY_ECS_TARGETS, against the 1.5 snapshot)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].desiredCount' --output text)"
+    printf '  every %ss until held=0, at most %ss:\n' "$INTERVAL" "$TIMEOUT"
+  fi
   printf '  + %s\n' "$(shq "${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-streams --log-group-name '<celery log group>' --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text)"
   printf '  + %s   (one per running task, the last %ss, paged)\n' "$(shq "${RO[@]}" logs get-log-events --log-group-name '<celery log group>' --log-stream-name '<stream of the task>' --start-time '<now-lookback>' --start-from-head --output json)" "$LOOKBACK"
-  [ "$CMD" = read ] || printf '  + %s   (for each of LEGACY_ECS_TARGETS, against the 1.5 snapshot, before and after)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].desiredCount' --output text)"
+  [ "$CMD" = read ] || printf '  then the desired count check above again, and row celery-drain held 0\n'
 }
 
 plan
