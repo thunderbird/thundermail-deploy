@@ -772,6 +772,7 @@ class Wrapper(tt.Sandbox):
         d.mkdir(mode=0o700)
         if complete:
             (d / 'summary.json').write_text('{"messages": 0}')
+            (d / 'summary.json').chmod(0o600)
         return d
 
     def test_import_needs_an_export_the_tunnel_and_a_running_legacy(self):
