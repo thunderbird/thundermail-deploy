@@ -32,18 +32,19 @@ log_group() {
   LOG_GROUP=${g[0]}
 }
 
-declare -A TOK=()
-SEEN=""
+declare -A TOK=() READ_END=()
+SEEN="" DEADLINE=""
 
 events() {
   local s=$1 tok=${TOK[$1]:-} out next lines
   while :; do
+    [ -z "$DEADLINE" ] || [ "$(date +%s)" -lt "$DEADLINE" ] || return 2
     out=$("${RO[@]}" logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-from-head ${tok:+--next-token "$tok"} --output json) || return 1
     lines=$(printf '%s' "$out" | jq -r '.events[] | [(.timestamp | tostring)] + (.message | first(capture("Task (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\] (?<w>[a-z]+)"), (capture("Discarding revoked task: (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "revoked"), (capture("Hard time limit \\([0-9.]+s\\) exceeded for (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "timeout"), {n: "-", i: "-", w: "-"}) | [.n, .i, .w]) | join(" ")') || return 1
     next=$(printf '%s' "$out" | jq -r '.nextForwardToken // ""') || return 1
     [ -z "$lines" ] || SEEN+=$lines$'\n'
     [ -z "$next" ] || TOK[$s]=$next
-    [ -n "$next" ] && [ "$next" != "$tok" ] || return 0
+    [ -n "$next" ] && [ "$next" != "$tok" ] || { READ_END[$s]=1; return 0; }
     tok=$next
   done
 }
@@ -65,7 +66,7 @@ held_count() {
 }
 
 celery_read() {
-  local svc desired running tasks t s streams now sum held rec fin age ign lines missing="" failed=""
+  local svc desired running tasks t s rc streams now sum held rec fin age ign lines missing="" failed="" partial=""
   svc=$("${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text) || { echo "ecs describe-services $CL/$SV failed"; return 1; }
   read -r desired running <<<"$svc"
   tasks=$("${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text) || { echo "ecs list-tasks $CL/$SV failed"; return 1; }
@@ -74,10 +75,13 @@ celery_read() {
   for t in "${tasks[@]}"; do
     s=$(tr '\t' '\n' <<<"$streams" | grep -m1 -- "/${t##*/}\$" || :)
     [ -n "$s" ] || { missing="$missing ${t##*/}"; continue; }
-    events "$s" || failed="$failed $s"
+    rc=0
+    events "$s" || rc=$?
+    case $rc in 0) ;; 2) CUT=1; [ -n "${READ_END[$s]:-}" ] || partial="$partial $s" ;; *) failed="$failed $s" ;; esac
   done
   [ -z "$missing" ] || { echo "no log stream in $LOG_GROUP for running Celery task(s):$missing"; return 1; }
   [ -z "$failed" ] || { echo "logs get-log-events failed for$failed"; return 1; }
+  [ -z "$partial" ] || { echo "the log history of$partial was not read to its end within ${READ_FOR}s; raise CELERY_DRAIN_READ_FOR"; return 1; }
   now=$(( $(date +%s) * 1000 ))
   [ -z "$HELD_RAW" ] || : > "$HELD_RAW"
   sum=$(printf '%s' "$SEEN" | held_count "$now")
@@ -120,7 +124,7 @@ plan() {
     printf '  + %s   (for each of LEGACY_ECS_TARGETS, against the 1.5 snapshot)\n' "$(shq "${RO[@]}" ecs describe-services --cluster '<cluster>' --services '<service>' --query 'services[0].desiredCount' --output text)"
   fi
   [ "$CMD" != wait ] || printf '  every %ss until held=0, at most %ss:\n' "$INTERVAL" "$TIMEOUT"
-  [ "$CMD" != timed ] || printf '  every %ss for at most %ss, ending early at held=0 (a held task never stops the read):\n' "$INTERVAL" "$READ_FOR"
+  [ "$CMD" != timed ] || printf '  every %ss for at most %ss, ending early at held=0 (a held task never stops the read; a log history not read to its end by then is a failed read):\n' "$INTERVAL" "$READ_FOR"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-streams --log-group-name '<celery log group>' --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text)"
@@ -160,13 +164,16 @@ if [ "$CMD" = timed ]; then
   HELD_RAW=$EVIDENCE_DIR/celery-held-$TS.raw
   start=$(date +%s)
   end=$(( start + READ_FOR ))
+  DEADLINE=$end
   while :; do
-    HELD="" READ_OK=0 LINES=0
+    HELD="" READ_OK=0 LINES=0 CUT=0
     celery_read || stop "celery read failed: a failed read is not an empty read"
     [ "$LINES" -gt 0 ] || stop "no Celery task line in the running workers' log streams: a failed read is not an empty read"
     [ "$READ_OK" = 1 ] && [ "$HELD" = 0 ] && break
+    left=$(( end - $(date +%s) ))
+    [ "$CUT" = 0 ] && [ "$left" -gt 0 ] || break
+    sleep "$(( left < INTERVAL ? left : INTERVAL ))"
     [ "$(date +%s)" -lt "$end" ] || break
-    sleep "$INTERVAL"
   done
   same_desired || stop "desired counts differ from the 1.5 snapshot after the timed read"
   write_held

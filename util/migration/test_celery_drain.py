@@ -241,11 +241,11 @@ class CeleryDrain(Base):
         rc, out = self.run_tool('drain')
         self.assertEqual(rc, 64, out)
         tp = self.mig / 'targets' / 'tb-prod.sh'
-        tp.write_text(
-            tp.read_text().replace(
-                'LEGACY_PG_SECRET_NAME=filled-for-test', 'LEGACY_PG_SECRET_NAME=REPLACE_ME_X'
-            )
+        text, n = re.subn(
+            r'(?m)^LEGACY_PG_SECRET_NAME=.*$', 'LEGACY_PG_SECRET_NAME=REPLACE_ME_X', tp.read_text()
         )
+        self.assertEqual(n, 1)
+        tp.write_text(text)
         rc, out = self.run_tool('read', '--apply')
         self.assertEqual(rc, 64, out)
         rc, out = self.run_tool('read')
@@ -521,7 +521,7 @@ class CeleryDrain(Base):
         self.state(cycles=[cyc])
         rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='1')
         self.assertEqual(rc, 0, out)
-        self.assertGreater(out.count('celery held=2 '), 1, out)
+        self.assertIn('celery held=2 ', out)
         self.assertNotIn('STOP', out)
         f = self.held_tsv()
         self.assertEqual(len(f), 1, out)
@@ -591,7 +591,7 @@ class CeleryDrain(Base):
         ]
         for n, (st, why) in enumerate(cases):
             self.state(**st)
-            rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='0', TS='f%d' % n)
+            rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='30', TS='f%d' % n)
             self.assertEqual(rc, 1, (st, out))
             self.assertIn(why, out)
             self.assertIn('STOP CELERY (apply): ', out)
@@ -609,6 +609,40 @@ class CeleryDrain(Base):
         self.assertIn('celery held=0 received=0 finished=0 ', out)
         self.assertIn('not a drained read: needs desired=running=tasks above 0, a task line', out)
         self.assertNotIn('celery-drain', self.rows())
+
+    def test_timed_read_keeps_to_its_limit(self):
+        self.snapshot()
+        long = [[900000 - i * 1000, line(0, TASK, ID1, 'received')] for i in range(10)]
+        self.state(cycles=[{STREAM + 'aaa': long, STREAM + 'bbb': done(ID2)}], slow=0.6)
+        rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='1')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('the log history of %saaa ' % STREAM, out)
+        self.assertIn('was not read to its end within 1s; raise CELERY_DRAIN_READ_FOR', out)
+        self.assertIn('a failed read is not an empty read', out)
+        self.assertNotIn('celery timed read:', out)
+        pages = [ln for ln in self.log().splitlines() if 'get-log-events' in ln]
+        self.assertLess(len(pages), 6, pages)
+        self.assertEqual(self.held_tsv(), [])
+
+    def test_timed_read_sleeps_no_further_than_its_limit(self):
+        self.snapshot()
+        (self.bin / 'sleep').write_text(
+            '#!%s\necho "$@" >> %s\nexec %s 0.05\n'
+            % (shutil.which('bash'), self.t / 'sleeps', shutil.which('sleep'))
+        )
+        held = {
+            STREAM + 'aaa': done(ID1),
+            STREAM + 'bbb': [[20000, line(0, TASK, ID2, 'received')]],
+        }
+        self.state(cycles=[held])
+        rc, out = self.run_tool(
+            'timed', '--apply', CELERY_DRAIN_READ_FOR='2', CELERY_DRAIN_INTERVAL='30'
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertIn('celery timed read: held=1 ', out)
+        sleeps = (self.t / 'sleeps').read_text().split()
+        self.assertTrue(sleeps, out)
+        self.assertTrue(all(0 < int(x) <= 2 for x in sleeps), sleeps)
 
     def test_timed_dry_run_prints_the_plan_and_calls_nothing(self):
         rc, out = self.run_tool('timed')

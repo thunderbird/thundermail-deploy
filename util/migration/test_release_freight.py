@@ -1,6 +1,7 @@
 import importlib
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -206,11 +207,11 @@ class ReleaseFreight(Base):
         self.assertEqual(rc, 1, out)
         self.assertIn('no %s:<sha> tag on the first-parent history of %s' % (A, self.c[2]), out)
         tp = self.mig / 'targets' / 'tb-prod.sh'
-        tp.write_text(
-            tp.read_text().replace(
-                'LEGACY_PG_SECRET_NAME=filled-for-test', 'LEGACY_PG_SECRET_NAME=REPLACE_ME_X'
-            )
+        text, n = re.subn(
+            r'(?m)^LEGACY_PG_SECRET_NAME=.*$', 'LEGACY_PG_SECRET_NAME=REPLACE_ME_X', tp.read_text()
         )
+        self.assertEqual(n, 1)
+        tp.write_text(text)
         rc, out = self.go(self.c[2], '--apply')
         self.assertEqual(rc, 64, out)
 
