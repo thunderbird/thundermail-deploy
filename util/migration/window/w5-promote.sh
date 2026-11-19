@@ -28,13 +28,17 @@ snap_settings() {
   SETTINGS_BEFORE=$(awk -v p="$S/settings-before-" 'index($0, p) == 1 && /\.ndjson$/ && !/ /' <<<"$out" | tail -1)
   [ -s "$FREIGHT_BEFORE" ] || { echo "no freight-before file"; return 1; }
   [ "$APPLY" = 0 ] || [ -s "$SETTINGS_BEFORE" ] || { echo "snapshot-settings.sh printed no settings-before file"; return 1; }
-  if [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
+  local promote_back
+  if [ "$(cat "$FREIGHT_BEFORE")" = none ]; then
+    promote_back="# no Freight before W5: stage $KARGO_STAGE_CONFIGS had no Freight history ($FREIGHT_BEFORE holds none), so a restore promotes no Freight back"
+    mark "$(sn freight-before)" freight none
+  elif [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
     sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)r/; s/__FREIGHT__/$(cat "$FREIGHT_BEFORE")/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION_RESTORE" || return 1
   else
     printf 'promotion.yaml.tpl missing: render it with __FREIGHT__=%s\n' "$(cat "$FREIGHT_BEFORE")" > "$PROMOTION_RESTORE"
   fi
   printf '%s\n' \
-    "$(shq "${KH[@]}" create -f "$PROMOTION_RESTORE")" \
+    "${promote_back:-$(shq "${KH[@]}" create -f "$PROMOTION_RESTORE")}" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>} --dry-run" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>}" \
     "stalwart-cli create action/ReloadSettings" \
@@ -69,6 +73,7 @@ not_older() {
   local fb="" file a b
   file=${FREIGHT_BEFORE:-$(find "$EVIDENCE_DIR" -maxdepth 1 -name 'freight-before-*.txt' -size +0 -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)}
   [ ! -s "$file" ] || fb=$(cat "$file")
+  if [ "$fb" = none ]; then echo "stage Freight before W5: none (the stage had no Freight history)"; return 0; fi
   if [ -z "$fb" ] || [ "$fb" = "$1" ]; then echo "stage Freight before W5: ${fb:-unknown}"; return 0; fi
   a=$(created "$1") && b=$(created "$fb") || return 1
   echo "stage Freight before W5: $fb ($b); T6 match: $1 ($a)"

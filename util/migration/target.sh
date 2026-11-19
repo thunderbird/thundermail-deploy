@@ -70,6 +70,31 @@ operator_env_default() {
   [ "$TARGET_ENV" != tb-stage ] || [ -e "$f" ] || f=$HOME/.local/state/talos/cutover-operator.env
   printf '%s' "$f"
 }
+cutover_attempt_last() {
+  local n
+  n=$(find "$HOME/.local/state/talos/cutover-$TARGET_ENV" -mindepth 1 -maxdepth 1 -type d -name 'attempt-*' -printf '%f\n' 2>/dev/null | sed -n 's/^attempt-\([1-9][0-9]*\)$/\1/p' | sort -n | tail -1)
+  printf '%s' "${n:-1}"
+}
+evidence_default() {
+  if [ "$TARGET_ENV" = tb-prod ]; then printf '%s/attempt-%s' "$HOME/.local/state/talos/cutover-$TARGET_ENV" "${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}"
+  else printf '%s' "$HOME/.local/state/talos/cutover-$TARGET_ENV"; fi
+}
+secret_default() {
+  if [ "$TARGET_ENV" = tb-prod ]; then printf '%s/cutover-%s/attempt-%s/secret-artifacts' "$(dirname "${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}")" "$TARGET_ENV" "${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}"
+  else printf '%s' "/dev/shm/talos/cutover-$TARGET_ENV/secret-artifacts"; fi
+}
+env_lock_ready() {
+  command -v flock >/dev/null 2>&1 || return 1
+  [ -e "$1.lock" ] || ( umask 077; : >> "$1.lock" ) 2>/dev/null || return 1
+  [ -f "$1.lock" ] && [ ! -L "$1.lock" ] && [ -r "$1.lock" ]
+}
+env_read() {
+  if env_lock_ready "$1"; then
+    { flock -s -w 60 9 || echo "the env file lock $1.lock stayed taken for 60 s: $1 read without it" >&2; cat "$1"; } 9< "$1.lock"
+  else
+    cat "$1"
+  fi
+}
 load_cutover_env() {
   local want=$TARGET_ENV f
   ENV_FILE=${CUTOVER_ENV:-}
@@ -83,7 +108,7 @@ load_cutover_env() {
       exit 1
     fi
     env_target_ok "$ENV_FILE" || exit 64
-    set -a; eval "$(< "$ENV_FILE")"; set +a
+    set -a; eval "$(env_read "$ENV_FILE")"; set +a
     TARGET_ENV=$want
     [ "$TARGET_ENV" != tb-stage ] || : "${KUBECONFIG_TARGET:=${KUBECONFIG_STAGE:-}}"
   fi

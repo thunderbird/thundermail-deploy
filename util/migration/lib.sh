@@ -4,8 +4,9 @@ REPO_DIR=$(cd "$MIG_DIR/../.." && pwd)
 . "$MIG_DIR/target.sh" || return 64
 [ "${CUTOVER_ENV_LOADED:-}" = 1 ] || [ "${BUILDING_ENV:-}" = 1 ] || load_cutover_env
 TS=${TS:-$(date -u +%Y%m%dT%H%M%SZ)}
-EVIDENCE_DIR=${EVIDENCE_DIR:-$HOME/.local/state/talos/cutover-$TARGET_ENV}
-SECRET_DIR=${SECRET_DIR:-/dev/shm/talos/cutover-$TARGET_ENV/secret-artifacts}
+[ "$TARGET_ENV" != tb-prod ] || CUTOVER_ATTEMPT=${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}
+EVIDENCE_DIR=${EVIDENCE_DIR:-$(evidence_default)}
+SECRET_DIR=${SECRET_DIR:-$(secret_default)}
 AWS_REGION=${AWS_REGION:-$TARGET_REGION}
 LEGACY_AWS_PROFILE=${LEGACY_AWS_PROFILE:-$DEF_LEGACY_AWS_PROFILE}
 CF_API=https://api.cloudflare.com/client/v4
