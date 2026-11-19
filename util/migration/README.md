@@ -144,6 +144,15 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
 - `quota-reset.sh --apply` creates the `resetUserQuotas` task from `quota-reset.json.tpl` for
   `$STALWART_ADMIN_ACCOUNT_ID`, waits up to `QUOTA_RESET_TIMEOUT` (600 s) until no StoreMaintenance
   or AccountMaintenance task is queued, then prints how many accounts show usage.
+  `--apply --no-wait` creates the task, prints its id, writes a `quota-reset-started` row and
+  returns at once; `quota-reset.sh status [<id>]` reads it once (exit 0 done, 2 still running,
+  1 unreadable). On tb-prod W5 uses `--no-wait` and a later `quota-status` step prints `WAIT`
+  instead of stopping while the reset runs.
+- `window/hold25.sh cancel-old [--older-than-days N]` (default 5) lists the queued tb-prod
+  messages created more than N days ago (ids, created, size and recipient count to
+  `$EVIDENCE_DIR/queue-cancel-old-<ts>.tsv`, no address); `--apply --go '<words>'` destroys them
+  with `x:QueuedMessage/set` and reads back that none older than the limit is left. It refuses
+  once a `hold25-release-queue` row exists and never touches a younger message.
 - `promotion.yaml.tpl` (tb-stalwart-configs) and `promotion-accounts.yaml.tpl` (tb-accounts) hold
   only `__TS__` and `__FREIGHT__`.
 - `apply_unmigrated.py` re-applies the v0.15 settings `convert` leaves out; `--only KIND[,KIND]`
@@ -393,13 +402,20 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   Exit codes: 0 done (for `read`: all six stopped, or all six `active` and `enabled`), 1 `STOP`
   (a node failed, did not answer within `LEGACY_SSM_WAIT`, or `start` could not reach a node), 2
   `NEED` (nothing sent), 3 `read` found mixed states, 64 usage.
+- A legacy queue that does not drain: `LEGACY_QUEUE_ACCEPT=<n>` lets W4 `queue-drain` (and the
+  W 2.5 `block25.sh block` gate) pass when the legacy queue total is at most `n`. W4 then writes
+  the list (id, created, size, recipient count; no address) to
+  `$EVIDENCE_DIR/legacy-queue-<ts>.tsv`, a `queue-accept` row (value `n`) and the `queue-drain`
+  row with the total, and prints `legacy queue: <total> message(s) move with the data and stay
+  held on the target`. It is a named variable and not `--go`, because `--go` in `--phase read`
+  already means "dump again".
 - On tb-prod a step that fails writes no timing row, so every row a gate reads means a pass:
-  `queue-drain` (value 0), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
+  `queue-drain` (value 0, or at most an earlier `queue-accept` value), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
   `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
   A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
   verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)
-  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` 0 row before a
-  `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
+  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` row of 0 (or of at
+  most an earlier `queue-accept` value) before a `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
   failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
   `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
   `verify-compare` wants both rows at 0 and no later `stop-W6`.

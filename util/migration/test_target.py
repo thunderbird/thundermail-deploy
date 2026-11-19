@@ -1093,6 +1093,128 @@ class Runner(Sandbox):
         self.assertNotIn('Pw-3!', out)
 
 
+
+def jmap_reply(method, body):
+    return json.dumps({'methodResponses': [[method, body, '0']]})
+
+
+class QuotaReset(Sandbox):
+    def setUp(self):
+        super().setUp()
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text(
+            "TARGET_ENV='tb-prod'\nSTALWART_URL='http://127.0.0.1:9'\nSTALWART_USER='admin'\n"
+            "STALWART_PASSWORD='recpw1'\nSTALWART_ADMIN_ACCOUNT_ID='a'\n"
+        )
+        f.chmod(0o600)
+
+    def queue(self, store, account):
+        return [
+            {'tool': 'curl', 'match': 'x:Task/set', 'out': jmap_reply('x:Task/set', {'created': {'quota-reset': {'id': 't9'}}})},
+            {'tool': 'curl', 'match': 'Task/query.*StoreMaintenance', 'out': jmap_reply('x:Task/query', {'ids': store})},
+            {'tool': 'curl', 'match': 'Task/query.*AccountMaintenance', 'out': jmap_reply('x:Task/query', {'ids': account})},
+            {'tool': 'curl', 'match': 'x:Account/query', 'out': jmap_reply('x:Account/query', {'ids': []})},
+        ]
+
+    def tool(self, *args):
+        return self.run_sh([str(HERE / 'quota-reset.sh'), *args], TARGET_ENV='tb-prod')
+
+    def test_no_wait_creates_the_task_writes_a_row_and_does_not_poll(self):
+        self.rules(self.queue(['s1'], ['a1']))
+        rc, out = self.tool('--apply', '--no-wait')
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r'(?m)^created task t9 due \S+$')
+        self.assertIn('not waiting: the reset runs on the server; check it with bash %s/quota-reset.sh status' % HERE, out)
+        self.assertNotIn('Task/query', self.log())
+        rows = [r.split('\t') for r in (self.t / 'ev' / 'timing-tb-prod.tsv').read_text().splitlines()]
+        self.assertEqual([(r[0], r[3], r[4]) for r in rows], [('quota-reset-started', 'task', 't9')])
+        rc, out = self.tool('--no-wait')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('dry-run: then print the task id, write a quota-reset-started row and return without waiting', out)
+
+    def test_status_does_not_report_done_when_the_usage_read_fails(self):
+        first = {'tool': 'curl', 'match': 'x:Account/query.*"position":0,', 'out': jmap_reply('x:Account/query', {'ids': ['a1']})}
+        self.rules([first] + self.queue([], []))
+        rc, out = self.tool('status', 't9')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('quota reset status: the queues are empty but the account usage read failed: usage not read', out)
+        self.assertNotIn('DONE', out)
+
+    def test_status_never_says_done_after_a_failed_read(self):
+        cases = {
+            'account query fails': [r for r in self.queue([], []) if r['match'] != 'x:Account/query'],
+            'task reply without ids': [
+                {'tool': 'curl', 'match': 'Task/query', 'out': jmap_reply('x:Task/query', {'notIds': []})},
+            ],
+        }
+        for case, rules in cases.items():
+            with self.subTest(case=case):
+                self.rules(rules)
+                rc, out = self.tool('status', 't9')
+                self.assertEqual(rc, 1, out)
+                self.assertNotIn('DONE', out)
+        self.rules(self.queue([], []))
+        rc, out = self.tool('status')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('no quota-reset-started row after the last cut-ecs row and no task id given', out)
+
+    def test_status_rejects_malformed_or_incomplete_answers(self):
+        first = lambda ids: {'tool': 'curl', 'match': 'x:Account/query.*"position":0,', 'out': jmap_reply('x:Account/query', {'ids': ids})}
+        cases = {
+            'account ids not an array': [first({})] + self.queue([], []),
+            'account get notFound': [
+                first(['a1']),
+                {'tool': 'curl', 'match': 'x:Account/get', 'out': jmap_reply('x:Account/get', {'list': [], 'notFound': ['a1']})},
+            ] + self.queue([], []),
+            'account get misses an id': [
+                first(['a1', 'a2']),
+                {'tool': 'curl', 'match': 'x:Account/get', 'out': jmap_reply('x:Account/get', {'list': [{'id': 'a1', 'usedDiskQuota': 5}]})},
+            ] + self.queue([], []),
+            'task total below its ids': [
+                {'tool': 'curl', 'match': 'Task/query', 'out': jmap_reply('x:Task/query', {'ids': ['t1'], 'total': 0})},
+                {'tool': 'curl', 'match': 'x:Account/query', 'out': jmap_reply('x:Account/query', {'ids': []})},
+            ],
+            'task total out of range': [
+                {'tool': 'curl', 'match': 'Task/query', 'out': jmap_reply('x:Task/query', {'ids': [], 'total': 10000000000})},
+                {'tool': 'curl', 'match': 'x:Account/query', 'out': jmap_reply('x:Account/query', {'ids': []})},
+            ],
+        }
+        for case, rules in cases.items():
+            with self.subTest(case=case):
+                self.rules(rules)
+                rc, out = self.tool('status', 't9')
+                self.assertEqual(rc, 1, out)
+                self.assertNotIn('DONE', out)
+        self.rules([
+            first(['a1']),
+            {'tool': 'curl', 'match': 'x:Account/get', 'out': jmap_reply('x:Account/get', {'list': [{'id': 'a1', 'usedDiskQuota': 5}], 'notFound': []})},
+        ] + self.queue([], []))
+        rc, out = self.tool('status', 't9')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('DONE  quota reset finished: accounts=1 with_usage=1 used_bytes=5', out)
+
+    def test_status_reads_done_running_and_error(self):
+        (self.t / 'ev' / 'timing-tb-prod.tsv').write_text('quota-reset-started\tx\tx\ttask\tt9\n')
+        self.rules(self.queue([], ['a1', 'a2']))
+        rc, out = self.tool('status')
+        self.assertEqual(rc, 2, out)
+        self.assertIn('quota reset task t9: queued StoreMaintenance=0 AccountMaintenance=2', out)
+        self.assertIn('WAIT  quota reset task t9 not finished: 2 account task(s) and 0 store task(s) still queued', out)
+        self.rules(self.queue([], []))
+        rc, out = self.tool('status')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('DONE  quota reset finished: accounts=0 with_usage=0 used_bytes=0', out)
+        rc, out = self.tool('status', 't7')
+        self.assertIn('quota reset task t7: ', out)
+        self.rules([])
+        rc, out = self.tool('status')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('quota reset status: x:Task/query failed', out)
+        rc, out = self.tool('--wait-forever')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('usage: quota-reset.sh', out)
+
+
 class ZoneCapture(Sandbox):
     def test_a_failed_lookup_reports_a_partial_capture(self):
         recs = [{'id': str(i), 'name': 'h%d.example.test' % i, 'type': 'A'} for i in range(450)]

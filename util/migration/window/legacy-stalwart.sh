@@ -109,7 +109,7 @@ if [ "$MODE" = stop ] || [ "$MODE" = read ]; then
   printf '  + bash %s stop-legacy\n' "$GATE_SH"
   if g=$(gate); then GATE_OK=1; printf 'gate: %s\n' "$g"; else printf 'gate: %s\n' "$g"; fi
   if [ "$MODE" = stop ] && [ "$GATE_OK" != 1 ]; then
-    need_line "window/gate.sh stop-legacy does not pass: stop legacy Stalwart only after W 4.2 (a queue-drain 0 row, then a w4-read-done row, after the last cut-ecs row)"
+    need_line "window/gate.sh stop-legacy does not pass: stop legacy Stalwart only after W 4.2 (a queue-drain 0 row, or one within an earlier queue-accept row, then a w4-read-done row, after the last cut-ecs row)"
   fi
   if [ "$MODE" = read ] && [ "$GATE_OK" != 1 ]; then echo "the read writes no stop-legacy-stalwart row while window/gate.sh stop-legacy waits"; fi
 fi

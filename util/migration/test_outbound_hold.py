@@ -184,7 +184,16 @@ elif url.endswith('/jmap'):
         for i in st.pop('start_before_set', []):
             snap = json.loads(json.dumps(q[i]))
             st.setdefault('attempts', {{}})[i] = {{'left': 200, 'snap': snap}}
-        if st.get('set_error'):
+        if 'destroy' in a:
+            st.setdefault('destroy_calls', []).append(a)
+            if st.get('destroy_error'):
+                res = {{'destroyed': [], 'notDestroyed': {{i: {{'type': st['destroy_error']}} for i in a['destroy']}}}}
+            else:
+                gone = [] if st.get('destroy_noop') else [i for i in a['destroy'] if i in q]
+                for i in gone:
+                    q.pop(i)
+                res = {{'destroyed': gone}}
+        elif st.get('set_error'):
             bad = {{k: {{'type': st['set_error']}} for k in a['update']}}
             res = {{'updated': {{}}, 'notUpdated': bad}}
         else:
@@ -1058,6 +1067,107 @@ class Hold25(Base):
         self.assertIn('queue hold: off', self.run_tool('hold25.sh', 'read').stdout)
 
 
+class CancelOld(Base):
+    def setUp(self):
+        super().setUp()
+        now = time.time()
+        old = dict(msg(now + 3600, domains=('a.example.test', 'b.example.test')), size=2048)
+        self.edit(
+            pods=['stalwart-a'],
+            queue={
+                '21': dict(old, createdAt=iso(now - 9 * 86400)),
+                '22': dict(msg(now + 3600), createdAt=iso(now - 6 * 86400), size=512),
+                '23': dict(msg(now + 3600), createdAt=iso(now - 4 * 86400), size=100),
+                '24': dict(msg(now + 3600), size=50),
+            },
+        )
+
+    def evidence(self):
+        (f,) = self.ev.glob('queue-cancel-old-*.tsv')
+        return f.read_text().splitlines()
+
+    def test_the_dry_run_lists_mail_older_than_five_days_and_writes_nothing(self):
+        p = self.run_tool('hold25.sh', 'cancel-old')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertRegex(
+            p.stdout,
+            r'cancel-old: 2 queued message\(s\) older than 5 days: oldest \S+, newest \S+, total size 2560 bytes; ids in \S+queue-cancel-old-\S+\.tsv',
+        )
+        self.assertIn('x:QueuedMessage/set destroy=<the 2 ids of ', p.stdout)
+        self.assertEqual(sorted(self.state()['queue']), ['21', '22', '23', '24'])
+        self.assertNotIn('destroy_calls', self.state())
+        rows = self.evidence()
+        self.assertEqual(rows[0], 'id\tcreated\tsize\trecipients')
+        self.assertEqual([r.split('\t')[0] for r in rows[1:]], ['21', '22'])
+        self.assertEqual(rows[1].split('\t')[2:], ['2048', '2'])
+        self.assertNotIn('hold25-cancel-old', self.rows())
+        for text in (p.stdout, '\n'.join(rows)):
+            self.assertNotIn('rcpt@', text)
+        p = self.run_tool('hold25.sh', 'cancel-old', '--older-than-days', '3')
+        self.assertIn('cancel-old: 3 queued message(s) older than 3 days', p.stdout)
+
+    def test_no_destroy_when_the_evidence_file_cannot_be_written(self):
+        (self.ev / 'queue-cancel-old-20261119T000000Z.tsv').mkdir(parents=True)
+        p = self.run_tool('hold25.sh', 'cancel-old', '--apply', '--go', 'go 7.6', TS='20261119T000000Z')
+        self.assertNotEqual(p.returncode, 0, p.stdout)
+        self.assertIn('could not write the evidence file', p.stdout)
+        self.assertIn('nothing cancelled', p.stdout)
+        self.assertNotIn('destroy_calls', self.state())
+        self.assertEqual(sorted(self.state()['queue']), ['21', '22', '23', '24'])
+        self.assertNotIn('hold25-cancel-old', self.rows())
+
+    def test_a_day_count_with_a_leading_zero_or_too_long_is_refused(self):
+        for days in ('010', '0', '10000'):
+            with self.subTest(days=days):
+                p = self.run_tool('hold25.sh', 'cancel-old', '--older-than-days', days, '--apply', '--go', 'go 7.6')
+                self.assertEqual(p.returncode, 64, p.stdout + p.stderr)
+                self.assertIn('without a leading zero', p.stdout + p.stderr)
+        self.assertNotIn('destroy_calls', self.state())
+        self.assertEqual(sorted(self.state()['queue']), ['21', '22', '23', '24'])
+
+    def test_apply_destroys_only_the_old_mail_and_reads_it_back(self):
+        p = self.run_tool('hold25.sh', 'cancel-old', '--apply')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('no operator go', p.stdout)
+        p = self.run_tool('hold25.sh', 'cancel-old', '--apply', '--go', 'cancel old 7.6')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state()['destroy_calls'], [{'accountId': 'acc1', 'destroy': ['21', '22']}])
+        self.assertEqual(sorted(self.state()['queue']), ['23', '24'])
+        self.assertIn('read back: no queued message older than 5 days is left', p.stdout)
+        self.assertEqual(self.rows()[-1], 'hold25-cancel-old')
+        self.assertIn('go-HOLD25', self.rows())
+        self.assertNotIn('rcpt@', p.stdout)
+
+    def test_a_refused_destroy_or_a_read_back_with_old_mail_fails(self):
+        for flag, want in (('destroy_error', 'not destroyed: {"21":"forbidden","22":"forbidden"}'), ('destroy_noop', 'read back: 2 queued message(s) older than 5 days are still queued')):
+            with self.subTest(flag=flag):
+                self.edit(**{flag: 'forbidden' if flag == 'destroy_error' else True})
+                p = self.run_tool('hold25.sh', 'cancel-old', '--apply', '--go', 'cancel old 7.6')
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn(want, p.stdout)
+                self.assertIn('STOP HOLD25 (apply): cancel_old failed', p.stdout)
+                self.assertNotIn('hold25-cancel-old', self.rows())
+                st = self.state()
+                st.pop(flag)
+                self.save(st)
+
+    def test_it_refuses_after_the_queue_release(self):
+        self.add_row('hold25-release-queue')
+        for args in ((), ('--apply', '--go', 'cancel old 7.6')):
+            with self.subTest(args=args):
+                p = self.run_tool('hold25.sh', 'cancel-old', *args)
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn('a hold25-release-queue row exists since the last cut-ecs row', p.stdout)
+        self.assertNotIn('destroy_calls', self.state())
+        self.assertEqual(len(self.state()['queue']), 4)
+
+    def test_bad_arguments_are_refused(self):
+        for args in (('cancel-old', '--older-than-days', '0'), ('cancel-old', '--older-than-days', 'x'), ('read', '--older-than-days', '3'), ('cancel-old', '--older-than-days')):
+            with self.subTest(args=args):
+                p = self.run_tool('hold25.sh', *args)
+                self.assertEqual(p.returncode, 64, p.stdout + p.stderr)
+
+
 class Block25(Base):
     def test_block_dry_run_prints_the_writes_and_names_its_gates(self):
         p = self.run_tool('block25.sh', 'block')
@@ -1097,6 +1207,59 @@ class Block25(Base):
         self.assertIn('no operator go', p.stdout)
         self.assertEqual(self.writes(), [])
         self.assertNotIn('legacy-outbound-block', self.rows())
+
+    def test_block_accepts_a_legacy_queue_within_the_limit(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=3)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='2')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('the legacy queue holds 3 message(s): wait for 2.4 (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least 3)', p.stdout)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('legacy queue: 3 message(s) stay queued on legacy and move with the data at 4.2 (LEGACY_QUEUE_ACCEPT=40)', p.stdout)
+        self.assertIn('legacy-outbound-block', self.rows())
+
+    def test_block_refuses_a_total_that_is_not_a_whole_number(self):
+        self.add_row('cut-ecs')
+        for total in (-3, 'x'):
+            with self.subTest(total=total):
+                self.edit(legacy_queue=total)
+                p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+                self.assertNotEqual(p.returncode, 0, p.stdout)
+                self.assertIn('the legacy queue was not read', p.stdout)
+                self.assertNotIn('legacy-outbound-block', self.rows())
+
+    def test_block_refuses_an_out_of_range_total(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=100000000000000000000)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertNotEqual(p.returncode, 0, p.stdout)
+        self.assertIn('the legacy queue was not read', p.stdout)
+        self.assertEqual(self.writes(), [])
+        self.assertNotIn('legacy-outbound-block', self.rows())
+
+    def test_block_cap_semantics_at_40_and_41(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=41)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertNotEqual(p.returncode, 0, p.stdout)
+        self.assertIn('the legacy queue holds 41 message(s)', p.stdout)
+        self.assertEqual(self.writes(), [])
+        self.edit(legacy_queue=40)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('legacy queue: 40 message(s) stay queued on legacy', p.stdout)
+
+    def test_block_refuses_an_invalid_cap_even_with_an_empty_queue(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=0)
+        for cap in ('abc', '010', '1000000000', ''):
+            with self.subTest(cap=cap):
+                p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT=cap)
+                self.assertNotEqual(p.returncode, 0, p.stdout)
+                self.assertIn('LEGACY_QUEUE_ACCEPT=%s is not a whole number below 10^9' % cap, p.stdout)
+                self.assertEqual(self.writes(), [])
+                self.assertNotIn('legacy-outbound-block', self.rows())
 
     def test_block_apply_then_restore(self):
         self.add_row('cut-ecs')

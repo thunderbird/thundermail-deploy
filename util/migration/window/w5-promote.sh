@@ -91,7 +91,19 @@ freight() {
   setenv FREIGHT "$FREIGHT"
 }
 
-quotas() { run bash "$MIG_DIR/quota-reset.sh" --apply; }
+quotas() {
+  if [ "$TARGET_ENV" = tb-prod ]; then run bash "$MIG_DIR/quota-reset.sh" --apply --no-wait; else run bash "$MIG_DIR/quota-reset.sh" --apply; fi
+}
+
+quota_status() {
+  local out rc=0
+  printf '  + bash %s status\n' "$MIG_DIR/quota-reset.sh"
+  [ "$APPLY" = 1 ] || return 0
+  out=$(bash "$MIG_DIR/quota-reset.sh" status 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  [ "$rc" = 0 ] || printf 'WAIT  the quota reset is not finished or not readable (quota-reset.sh status exit %s): W5 goes on; check it again before 7.8 with bash %s status\n' "$rc" "$MIG_DIR/quota-reset.sh"
+  return 0
+}
 
 job_started() { [ "$("${KS[@]}" -n thundermail get job stalwart-config-apply -o jsonpath='{.status.startTime}' 2>/dev/null)" \> "$PROMOTE_AT" ]; }
 
@@ -220,6 +232,7 @@ if [ "$PHASE" = 1 ]; then
   step quotas "" quotas
   step settings-promote succeeded promote
   step stalwart-restart "" restart_stalwart
+  [ "$TARGET_ENV" != tb-prod ] || step quota-status "" quota_status
   step unmigrated-dry-run changes unmigrated_dry
   if [ "$APPLY" = 1 ]; then
     mark unmigrated-plan counts "$PLAN"

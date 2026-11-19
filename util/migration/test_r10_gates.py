@@ -75,6 +75,18 @@ class Gate(unittest.TestCase):
         rc, out = self.gate('merge-recovery', unsent + [('recovery-wait', 'y', 'seconds', '3600')])
         self.assertEqual(rc, 0, out)
 
+    def test_stop_legacy_passes_on_an_accepted_queue_only(self):
+        done = ('w4-read-done', '2026-11-19T04:41:00Z', 'export', 'x')
+        q3 = ('queue-drain', '2026-11-19T04:40:00Z', 'queued', '3')
+        acc = ('queue-accept', '2026-11-19T04:39:00Z', 'limit', '40')
+        rc, out = self.gate('stop-legacy', [CUT, acc, q3, done])
+        self.assertEqual(rc, 0, out)
+        self.assertIn('GO    stop-legacy: queue-drain 3 (queue-accept up to 40) at 2026-11-19T04:40:00Z', out)
+        for rows in ([CUT, q3, done], [CUT, q3, acc, done], [CUT, acc[:3] + ('2',), q3, done]):
+            with self.subTest(rows=[r[0] + '=' + r[3] for r in rows]):
+                rc, out = self.gate('stop-legacy', rows)
+                self.assertEqual((rc, out), (2, 'WAIT  stop-legacy: the last queue-drain row has value 3, not 0\n'))
+
     def test_no_gate_passes_without_a_cut_ecs_row(self):
         q0 = ('queue-drain', '2026-11-19T04:40:00Z', 'queued', '0')
         done = ('w4-read-done', '2026-11-19T04:41:00Z', 'export', 'x')

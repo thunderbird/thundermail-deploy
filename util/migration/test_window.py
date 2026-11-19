@@ -336,6 +336,35 @@ class T7Issuer(Harness):
         self.assertIn('upstream connect error', out)
 
 
+class W5Quota(Harness):
+    def test_tb_prod_starts_the_reset_without_waiting_and_tb_stage_waits(self):
+        for target, cmd in (('tb-prod', '--apply --no-wait'), ('tb-stage', '--apply')):
+            with self.subTest(target=target):
+                self.setUp()
+                out = self.fn('w5-promote.sh', 'APPLY=0; quotas; echo "rc=$?"', env=self.env(TARGET_ENV=target))
+                self.assertIn('  + bash %s/quota-reset.sh %s\nrc=0' % (self.MIG, cmd), out)
+
+    def test_an_unfinished_reset_is_a_wait_line_not_a_stop(self):
+        fake = self.t / 'fakemig'
+        fake.mkdir()
+        for rc, line in ((2, 'WAIT  quota reset task t9 not finished: 5 account task(s) and 0 store task(s) still queued'), (1, 'quota reset status: x:Task/query failed')):
+            with self.subTest(rc=rc):
+                (fake / 'quota-reset.sh').write_text('echo "%s"\nexit %d\n' % (line, rc))
+                out = self.fn('w5-promote.sh', 'MIG_DIR=%s APPLY=1; quota_status; echo "rc=$?"' % fake, env=self.env(TARGET_ENV='tb-prod'))
+                self.assertIn(line, out)
+                self.assertIn(
+                    'WAIT  the quota reset is not finished or not readable (quota-reset.sh status exit %d): W5 goes on; '
+                    'check it again before 7.8 with bash %s/quota-reset.sh status\nrc=0' % (rc, fake),
+                    out,
+                )
+        (fake / 'quota-reset.sh').write_text('echo "DONE  quota reset finished: accounts=3"\n')
+        out = self.fn('w5-promote.sh', 'MIG_DIR=%s APPLY=1; quota_status; echo "rc=$?"' % fake, env=self.env(TARGET_ENV='tb-prod'))
+        self.assertIn('DONE  quota reset finished: accounts=3\nrc=0', out)
+        self.assertNotIn('WAIT', out)
+        text = (self.MIG / 'window' / 'w5-promote.sh').read_text()
+        self.assertIn('  step stalwart-restart "" restart_stalwart\n  [ "$TARGET_ENV" != tb-prod ] || step quota-status "" quota_status\n', text)
+
+
 class W5AccountsCheck(Harness):
     BODY = 'accounts_check; echo "rc=$? needs=$NEEDS"'
 
