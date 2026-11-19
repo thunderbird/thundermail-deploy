@@ -144,6 +144,15 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
 - `quota-reset.sh --apply` creates the `resetUserQuotas` task from `quota-reset.json.tpl` for
   `$STALWART_ADMIN_ACCOUNT_ID`, waits up to `QUOTA_RESET_TIMEOUT` (600 s) until no StoreMaintenance
   or AccountMaintenance task is queued, then prints how many accounts show usage.
+  `--apply --no-wait` creates the task, prints its id, writes a `quota-reset-started` row and
+  returns at once; `quota-reset.sh status [<id>]` reads it once (exit 0 done, 2 still running,
+  1 unreadable). On tb-prod W5 uses `--no-wait` and a later `quota-status` step prints `WAIT`
+  instead of stopping while the reset runs.
+- `window/hold25.sh cancel-old [--older-than-days N]` (default 5) lists the queued tb-prod
+  messages created more than N days ago (ids, created, size and recipient count to
+  `$EVIDENCE_DIR/queue-cancel-old-<ts>.tsv`, no address); `--apply --go '<words>'` destroys them
+  with `x:QueuedMessage/set` and reads back that none older than the limit is left. It refuses
+  once a `hold25-release-queue` row exists and never touches a younger message.
 - `promotion.yaml.tpl` (tb-stalwart-configs) and `promotion-accounts.yaml.tpl` (tb-accounts) hold
   only `__TS__` and `__FREIGHT__`.
 - `apply_unmigrated.py` re-applies the v0.15 settings `convert` leaves out; `--only KIND[,KIND]`
