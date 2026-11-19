@@ -553,6 +553,19 @@ class Tool(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('delivered=0 present=4 linked=0 failed=0', out)
 
+    def test_mail_a_user_moved_on_legacy_is_not_imported_or_moved_back(self):
+        self.assertEqual(self.export('--apply')[0], 0)
+        self.assertEqual(self.run_tool('import', '--from', str(self.out), '--apply')[0], 0)
+        al = self.legacy(self.alice15)
+        al['boxes']['z'] = {'name': 'Archive', 'role': 'archive', 'parentId': None}
+        for e in al['emails'].values():
+            e['mailboxIds'] = {'z': True}
+        rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('delivered=0 present=3 linked=0 failed=0 missing=0 in_legacy=3', out)
+        self.assertEqual(len(al['emails']), 2)
+        self.assertEqual([list(e['mailboxIds']) for e in al['emails'].values()], [['z'], ['z']])
+
 
 FAKE_PY = """#!{py}
 import json, os, sys

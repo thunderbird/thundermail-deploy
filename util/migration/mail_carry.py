@@ -385,8 +385,7 @@ class Legacy:
         self.path = {tuple(v['path']): k for k, v in boxes.items()}
         if 'inbox' not in self.role:
             raise Stop('legacy account %s has no Inbox' % account)
-        self.keys = {}
-        self.emails = {}
+        self.keys = None
         self.created = 0
 
     def mailbox(self, box):
@@ -413,27 +412,17 @@ class Legacy:
         self.path[path] = mid
         return mid
 
-    def present(self, mailbox):
-        if mailbox not in self.keys:
-            found = collections.defaultdict(list)
-            if not mailbox.startswith('new-'):
-                ids = self.j.query_all(
-                    'Email/query', {'accountId': self.acc, 'filter': {'inMailbox': mailbox}}
+    def present(self):
+        if self.keys is None:
+            self.keys = collections.defaultdict(list)
+            ids = self.j.query_all('Email/query', {'accountId': self.acc})
+            props = ['receivedAt', 'size', 'messageId', 'blobId', 'mailboxIds']
+            for e in self.j.get('Email/get', self.acc, ids, props):
+                boxes = {b for b, v in (e.get('mailboxIds') or {}).items() if v}
+                self.keys[key(e)].append(
+                    {'id': e['id'], 'blob': e['blobId'], 'sha': None, 'boxes': boxes}
                 )
-                props = ['receivedAt', 'size', 'messageId', 'blobId', 'mailboxIds']
-                for e in self.j.get('Email/get', self.acc, ids, props):
-                    entry = self.emails.setdefault(
-                        e['id'],
-                        {
-                            'id': e['id'],
-                            'blob': e['blobId'],
-                            'sha': None,
-                            'boxes': {b for b, v in (e.get('mailboxIds') or {}).items() if v},
-                        },
-                    )
-                    found[key(e)].append(entry)
-            self.keys[mailbox] = found
-        return self.keys[mailbox]
+        return self.keys
 
     def sha(self, entry):
         if entry['sha'] is None:
@@ -444,19 +433,16 @@ class Legacy:
             entry['sha'] = hashlib.sha256(self.j.raw(path, timeout=300)).hexdigest()
         return entry['sha']
 
-    def match(self, boxes, m):
-        for b in boxes:
-            for entry in self.present(b).get(key(m), []):
-                if self.sha(entry) == m.get('sha256'):
-                    return entry
+    def match(self, m):
+        for entry in self.present().get(key(m), []):
+            if self.sha(entry) == m.get('sha256'):
+                return entry
         return None
 
     def add(self, entry, boxes, m):
         entry['boxes'].update(boxes)
-        for b in boxes:
-            same = self.present(b)[key(m)]
-            if entry not in same:
-                same.append(entry)
+        if entry not in self.present()[key(m)]:
+            self.present()[key(m)].append(entry)
 
 
 def err_type(r, cid):
@@ -484,10 +470,10 @@ def key(m):
 
 def import_one(j, leg, src, m):
     boxes = [leg.mailbox(b) for b in m['mailboxes']] or [leg.role['inbox']]
-    found = leg.match(boxes, m)
+    found = leg.match(m)
     if found:
         missing = [b for b in boxes if b not in found['boxes']]
-        if not missing:
+        if not missing or len(missing) == len(boxes):
             return 'present', None
         if leg.apply:
             r = j.one(
