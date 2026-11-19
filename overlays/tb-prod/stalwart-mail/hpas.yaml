@@ -21,6 +21,10 @@ spec:
     spec:
       containers:
         - name: stalwart
+          resources:
+            limits:
+              memory: 4Gi
+              cpu: null
           env:
             - name: STALWART_RECOVERY_MODE
               value: "true"
