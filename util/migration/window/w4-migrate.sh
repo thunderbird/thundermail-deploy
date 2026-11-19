@@ -370,6 +370,7 @@ export_ok() {
 }
 
 read_phase() {
+  [ "$APPLY" = 0 ] || mark w4-read-start export "$S/export.json"
   if [ "$APPLY" = 1 ] && [ -z "$GO" ] && export_ok; then
     echo "reusing the export of this cut (w4-export row, $S/export.json): only queue-drain runs; --go '<words>' dumps again"
   else
@@ -384,8 +385,8 @@ read_phase() {
     step domains changes domain_fix_step
     step retarget "" retarget
     [ "$APPLY" = 0 ] || mark w4-export file "$S/export.json"
-    step keep files keep_copy
   fi
+  step keep files keep_copy
   step queue-drain queued queue_drain
   [ "$APPLY" = 0 ] || step read-done "" read_done
 }
