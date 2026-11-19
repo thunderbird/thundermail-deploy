@@ -463,6 +463,21 @@ class FreightFor(Harness):
         self.assertIn('rc=0 FREIGHT_FOUND=f-new', out)
         script = (HERE / 'window' / 'freight-for.sh').read_text()
         self.assertIn('step freight-for freight match', script)
+        out = self.fn(
+            'freight-for.sh',
+            'step freight-for freight match; finish; last_lines',
+            'PATH=%s:$PATH REPO_DIR=%s TMD_URL=%s PREVIEW_BRANCH=env/tb-prod-thundermail-stalwart-configs-preview '
+            'CFG_PATHS="overlays/tb-prod/stalwart-configs bases/stalwart-configs" SHA=%s '
+            'KARGO_PROJECT_CONFIGS=tb-stalwart-configs KARGO_WAREHOUSE_CONFIGS=deploy-thundermail-tb-prod01-git'
+            % (self.t / 'gitbin', clone, r, merge),
+            rules=rules[:1],
+        )
+        self.assertIn('   freight-for done (freight=f-new)', out)
+        self.assertEqual(
+            out.rstrip().splitlines()[-2:],
+            ['Freight f-new (preview commit %s) matches %s' % (preview, merge), 'f-new'],
+            out,
+        )
         p = subprocess.run(
             ['bash', str(HERE / 'window' / 'freight-for.sh'), 'nope'],
             capture_output=True,
