@@ -61,6 +61,20 @@ class Gate(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn('a read phase started at z after the last w4-read-done row', out)
 
+    def test_merge_recovery_passes_after_an_apply_that_sent_nothing(self):
+        base = [
+            CUT,
+            ('reset', '2026-11-19T05:00:00Z', 'last_reset_at', 'x'),
+            ('pre-delete', '2026-11-19T05:02:00Z', 'deleted', '9'),
+            ('recovery-wait', '2026-11-19T05:02:10Z', 'seconds', '3600'),
+            ('apply-start', '2026-11-19T05:10:00Z', 'pod', 'stalwart-apply-a'),
+        ]
+        rc, out = self.gate('merge-recovery', base)
+        self.assertEqual(rc, 2, out)
+        unsent = base + [('apply-unsent', '2026-11-19T05:10:05Z', 'pod', 'stalwart-apply-a')]
+        rc, out = self.gate('merge-recovery', unsent + [('recovery-wait', 'y', 'seconds', '3600')])
+        self.assertEqual(rc, 0, out)
+
     def test_no_gate_passes_without_a_cut_ecs_row(self):
         q0 = ('queue-drain', '2026-11-19T04:40:00Z', 'queued', '0')
         done = ('w4-read-done', '2026-11-19T04:41:00Z', 'export', 'x')

@@ -26,11 +26,12 @@ elif ' attach -i -c cli ' in j:
     open(t + '/attached.bin', 'wb').write(sys.stdin.buffer.read())
     import time
     time.sleep(st.get('attach_sleep', 0))
+    rc = st.get('attach_rc', 0)
 elif ' describe pod ' in j:
     out = 'Events:\n  Warning  Failed  ImagePullBackOff\n'
 elif '{{.status.phase}}' in j:
     out = st.get('phase', 'Succeeded')
-elif ' logs --timestamps -c cli ' in j:
+elif ' logs --timestamps -c cli ' in j or ' logs -c cli ' in j:
     out = st['log']
 elif 'terminated.exitCode' in j:
     out = str(st.get('code', 0))
@@ -51,7 +52,11 @@ def ready(ip, name='stalwart-5d9f-a'):
     }
 
 
-LOG_OK = (
+SCHEMA = (
+    '2026-11-19T05:09:56.000000000Z [debug] <- GET http://10.0.0.5:8080/api/schema status=200 OK '
+    'content-type=application/json content-length=9 content-encoding=identity\n'
+)
+LOG_OK = SCHEMA + (
     '2026-11-19T05:10:00.000000001Z Plan: 0 destroy, 4 update, 5 create, 0 upsert, 0 reconcile (11980 objects)\n'
     '2026-11-19T05:10:00.100000000Z [debug] -> POST http://10.0.0.5:8080/jmap\n'
     '2026-11-19T05:10:33.600000000Z [debug] <- POST http://10.0.0.5:8080/jmap status=200 OK content-type=application/json content-length=9 content-encoding=identity\n'
@@ -59,7 +64,7 @@ LOG_OK = (
     '2026-11-19T05:10:40.700000000Z [debug] <- POST http://10.0.0.5:8080/jmap status=200 OK content-type=application/json content-length=9 content-encoding=identity\n'
     '2026-11-19T05:19:15.000000000Z Done: 0 destroyed, 4 updated, 11972 created (0 failed)\n'
 )
-LOG_FAIL = (
+LOG_FAIL = SCHEMA + (
     '2026-11-19T05:10:00.000000001Z Plan: 0 destroy, 4 update, 5 create, 0 upsert, 0 reconcile (11980 objects)\n'
     "2026-11-19T05:11:00.000000000Z ✗ create Account: u1@a.example.test: primaryKeyViolation\n"
     '2026-11-19T05:11:00.100000000Z Done: 0 destroyed, 0 updated, 500 created (1 failed)\n'
@@ -187,6 +192,52 @@ class InClusterApply(w4.Prod):
         self.assertIn('ImagePullBackOff', diag)
         self.assertTrue((self.t / 'secret' / 'apply.log').exists())
         self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
+
+    def test_no_schema_answer_in_the_log_means_no_row_and_no_send(self):
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK.replace(SCHEMA, '')})
+        self.rows([w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
+        out = self.w4(
+            'APPLY_POD_WAIT=30 APPLY_SCHEMA_WAIT=1; port_forward() { echo PF-OK; }\n'
+            'prod_apply; echo "rc=$?"'
+        )
+        self.assertIn(
+            'log shows no GET /api/schema status=200 within 1s: the CLI did not reach Stalwart at '
+            'http://10.0.0.5:8080 (security group of the pod, credential or URL); nothing sent',
+            out,
+        )
+        self.assertIn('rc=1', out)
+        self.assertFalse((self.t / 'attached.bin').exists())
+        self.assertNotIn('apply-start', [r[0] for r in self.timing()])
+        self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
+        out = self.apply([list(r) for r in self.timing()])
+        self.assertIn('reached Stalwart (GET /api/schema status=200); sending ', out)
+        self.assertIn('rc=0 VALUE=0', out)
+
+    def test_a_failed_attach_before_the_plan_writes_a_row_the_rerun_accepts(self):
+        self.state(
+            {'pods': [ready('10.0.0.5')], 'log': SCHEMA, 'attach_rc': 1, 'phase': 'Running'}
+        )
+        out = self.apply()
+        self.assertIn('and the CLI printed no Plan: line: nothing was applied', out)
+        self.assertIn('apply-unsent row written', out)
+        self.assertIn('rc=1', out)
+        self.assertNotIn('still Running', out)
+        self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
+        names = [r[0] for r in self.timing()]
+        self.assertEqual(names[-2:], ['apply-start', 'apply-unsent'])
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
+        out = self.apply([list(r) for r in self.timing()])
+        self.assertNotIn('an apply started after this pre-delete and did not finish', out)
+        self.assertIn('rc=0 VALUE=0', out)
+        self.state(
+            {'pods': [ready('10.0.0.5')], 'log': LOG_FAIL, 'attach_rc': 1, 'code': 1}
+        )
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.apply()
+        self.assertNotIn('apply-unsent', [r[0] for r in self.timing()])
+        out = self.apply([list(r) for r in self.timing()])
+        self.assertIn('an apply started after this pre-delete and did not finish', out)
 
     def test_no_apply_start_row_means_no_send(self):
         self.rows([w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
