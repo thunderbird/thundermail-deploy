@@ -1106,6 +1106,25 @@ class CancelOld(Base):
         p = self.run_tool('hold25.sh', 'cancel-old', '--older-than-days', '3')
         self.assertIn('cancel-old: 3 queued message(s) older than 3 days', p.stdout)
 
+    def test_no_destroy_when_the_evidence_file_cannot_be_written(self):
+        (self.ev / 'queue-cancel-old-20261119T000000Z.tsv').mkdir(parents=True)
+        p = self.run_tool('hold25.sh', 'cancel-old', '--apply', '--go', 'go 7.6', TS='20261119T000000Z')
+        self.assertNotEqual(p.returncode, 0, p.stdout)
+        self.assertIn('could not write the evidence file', p.stdout)
+        self.assertIn('nothing cancelled', p.stdout)
+        self.assertNotIn('destroy_calls', self.state())
+        self.assertEqual(sorted(self.state()['queue']), ['21', '22', '23', '24'])
+        self.assertNotIn('hold25-cancel-old', self.rows())
+
+    def test_a_day_count_with_a_leading_zero_or_too_long_is_refused(self):
+        for days in ('010', '0', '10000'):
+            with self.subTest(days=days):
+                p = self.run_tool('hold25.sh', 'cancel-old', '--older-than-days', days, '--apply', '--go', 'go 7.6')
+                self.assertEqual(p.returncode, 64, p.stdout + p.stderr)
+                self.assertIn('without a leading zero', p.stdout + p.stderr)
+        self.assertNotIn('destroy_calls', self.state())
+        self.assertEqual(sorted(self.state()['queue']), ['21', '22', '23', '24'])
+
     def test_apply_destroys_only_the_old_mail_and_reads_it_back(self):
         p = self.run_tool('hold25.sh', 'cancel-old', '--apply')
         self.assertNotEqual(p.returncode, 0)
@@ -1199,6 +1218,16 @@ class Block25(Base):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn('legacy queue: 3 message(s) stay queued on legacy and move with the data at 4.2 (LEGACY_QUEUE_ACCEPT=40)', p.stdout)
         self.assertIn('legacy-outbound-block', self.rows())
+
+    def test_block_refuses_a_total_that_is_not_a_whole_number(self):
+        self.add_row('cut-ecs')
+        for total in (-3, 'x'):
+            with self.subTest(total=total):
+                self.edit(legacy_queue=total)
+                p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+                self.assertNotEqual(p.returncode, 0, p.stdout)
+                self.assertIn('the legacy queue was not read', p.stdout)
+                self.assertNotIn('legacy-outbound-block', self.rows())
 
     def test_block_apply_then_restore(self):
         self.add_row('cut-ecs')

@@ -20,7 +20,7 @@ cred() {
 }
 jmap() { curl -sS -m 60 -K <(cred) -H 'Content-Type: application/json' --data "$1" "$API"; }
 call() { jmap "$(jq -cn --arg a "$STALWART_ADMIN_ACCOUNT_ID" --arg m "$1" --argjson args "$2" --argjson using "$USING" '{using: $using, methodCalls: [[$m, ({accountId: $a} + $args), "0"]]}')" | jq -ce '.methodResponses[0] | if .[0] == "error" then error(.[1] | tostring) else .[1] end'; }
-queued() { call x:Task/query "$(jq -cn --arg t "$1" '{filter: {"@type": $t}, limit: 5000}')" | jq -r '.ids | length'; }
+queued() { call x:Task/query "$(jq -cn --arg t "$1" '{filter: {"@type": $t}, limit: 5000, calculateTotal: true}')" | jq -re 'if (.ids | type) == "array" then (.total // (.ids | length)) else error("no ids") end'; }
 usage() {
   local ids
   local ids='[]' page list='[]' i got
@@ -39,11 +39,12 @@ if [ "$MODE" != wait ]; then
   . "$MIG_DIR/timing.sh"
 fi
 if [ "$MODE" = status ]; then
-  id=${2:-$(awk -F'\t' '$1 == "quota-reset-started" {v = $5} END {print v}' "$TIMING_TSV" 2>/dev/null)}
+  id=${2:-$(awk -F'\t' '$1 == "cut-ecs" {v = ""} $1 == "quota-reset-started" {v = $5} END {print v}' "$TIMING_TSV" 2>/dev/null || true)}
+  [ -n "$id" ] || { echo "quota reset status: no quota-reset-started row after the last cut-ecs row and no task id given"; exit 1; }
   s=$(queued StoreMaintenance) && a=$(queued AccountMaintenance) || { echo "quota reset status: x:Task/query failed"; exit 1; }
   printf 'quota reset task %s: queued StoreMaintenance=%s AccountMaintenance=%s\n' "${id:-unknown}" "$s" "$a"
   if [ "$s" = 0 ] && [ "$a" = 0 ]; then
-    u=$(usage) || { echo "quota reset status: the queues are empty but x:Account/get failed: usage not read"; exit 1; }
+    u=$(usage) && [ -n "$u" ] || { echo "quota reset status: the queues are empty but the account usage read failed: usage not read"; exit 1; }
     echo "DONE  quota reset finished: $u"
     exit 0
   fi

@@ -17,7 +17,7 @@ MODE=${POS[0]:-}
 case "$MODE" in set|read|queue-hold|release-port25|release-queue|cancel-old) ;; *) echo "$USAGE" >&2; exit 64 ;; esac
 [ "${#POS[@]}" = 1 ] || { echo "$USAGE" >&2; exit 64; }
 [ "$OLD_SET" = 0 ] || [ "$MODE" = cancel-old ] || { echo "$USAGE" >&2; exit 64; }
-case "$OLD_DAYS" in ''|*[!0-9]*|0) echo "--older-than-days takes a whole number of days above 0, got '$OLD_DAYS'" >&2; exit 64 ;; esac
+case "$OLD_DAYS" in ''|*[!0-9]*|0*|?????*) echo "--older-than-days takes a whole number of days from 1 to 9999 without a leading zero, got '$OLD_DAYS'" >&2; exit 64 ;; esac
 [ "$TARGET_ENV" = tb-prod ] || { echo "hold25.sh holds tb-prod outbound mail only; TARGET_ENV=$TARGET_ENV" >&2; exit 64; }
 need TARGET_STALWART_SG
 SG=$TARGET_STALWART_SG
@@ -331,7 +331,7 @@ cancel_old() {
   VALUE=$n
   [ "$n" -gt 0 ] || { echo "cancel-old: no queued message older than $OLD_DAYS days"; return 0; }
   f=$EVIDENCE_DIR/queue-cancel-old-$TS.tsv
-  ( umask 077; jq -r '(["id", "created", "size", "recipients"] | @tsv), (.[] | [.id, .at, .size, .rcpt] | @tsv)' <<<"$OLD" > "$f" )
+  ( umask 077; jq -r '(["id", "created", "size", "recipients"] | @tsv), (.[] | [.id, .at, .size, .rcpt] | @tsv)' <<<"$OLD" > "$f" ) 2>/dev/null && [ "$(grep -c . "$f" 2>/dev/null)" = "$((n + 1))" ] || { echo "could not write the evidence file $f: nothing cancelled"; return 1; }
   echo "cancel-old: $n queued message(s) older than $OLD_DAYS days: oldest $(jq -r '.[0].at' <<<"$OLD"), newest $(jq -r '.[-1].at' <<<"$OLD"), total size $(jq 'map(.size) | add' <<<"$OLD") bytes; ids in $f"
   if [ "$APPLY" = 0 ]; then printf '  + POST %s/jmap x:QueuedMessage/set destroy=<the %s ids of %s>\n' "$STALWART_URL" "$n" "$f"; return 0; fi
   for ((i = 0; i < n; i += 50)); do

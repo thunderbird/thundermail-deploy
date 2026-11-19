@@ -188,8 +188,10 @@ queue_accept() {
   local a=${LEGACY_QUEUE_ACCEPT:-} body f
   [ -n "$a" ] || { echo "queue not drained: wait or flush, record it, then rerun (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least $VALUE)"; return 1; }
   [[ $a =~ ^[0-9]+$ ]] || { echo "LEGACY_QUEUE_ACCEPT=$a is not a whole number"; return 1; }
-  [ "$VALUE" -le "$a" ] || { echo "legacy queue total $VALUE is above LEGACY_QUEUE_ACCEPT=$a: not accepted"; return 1; }
   body=$(curl -sk -m 60 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/queue/messages?values=1&limit=0") || { echo "legacy queue API did not answer the list"; return 1; }
+  VALUE=$(jq -re '.data.total | select(type == "number" and . >= 0)' <<<"$body" 2>/dev/null) || { echo "the legacy queue list has no total"; return 1; }
+  echo "legacy queue total=$VALUE (full list)"
+  [ "$VALUE" -le "$a" ] || { echo "legacy queue total $VALUE is above LEGACY_QUEUE_ACCEPT=$a: not accepted"; return 1; }
   f=$EVIDENCE_DIR/legacy-queue-$TS.tsv
   ( umask 077; printf 'id\tcreated\tsize\trecipients\n' > "$f"; jq -r '.data.items[] | [.id, .created, .size, (.recipients | length)] | @tsv' <<<"$body" >> "$f" ) || { echo "the legacy queue list could not be read"; return 1; }
   [ "$(( $(grep -c . "$f") - 1 ))" = "$VALUE" ] || { echo "the legacy queue list holds $(( $(grep -c . "$f") - 1 )) message(s), the total is $VALUE: not accepted"; return 1; }

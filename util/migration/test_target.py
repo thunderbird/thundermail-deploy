@@ -1137,8 +1137,26 @@ class QuotaReset(Sandbox):
         self.rules([first] + self.queue([], []))
         rc, out = self.tool('status', 't9')
         self.assertEqual(rc, 1, out)
-        self.assertIn('quota reset status: the queues are empty but x:Account/get failed: usage not read', out)
+        self.assertIn('quota reset status: the queues are empty but the account usage read failed: usage not read', out)
         self.assertNotIn('DONE', out)
+
+    def test_status_never_says_done_after_a_failed_read(self):
+        cases = {
+            'account query fails': [r for r in self.queue([], []) if r['match'] != 'x:Account/query'],
+            'task reply without ids': [
+                {'tool': 'curl', 'match': 'Task/query', 'out': jmap_reply('x:Task/query', {'notIds': []})},
+            ],
+        }
+        for case, rules in cases.items():
+            with self.subTest(case=case):
+                self.rules(rules)
+                rc, out = self.tool('status', 't9')
+                self.assertEqual(rc, 1, out)
+                self.assertNotIn('DONE', out)
+        self.rules(self.queue([], []))
+        rc, out = self.tool('status')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('no quota-reset-started row after the last cut-ecs row and no task id given', out)
 
     def test_status_reads_done_running_and_error(self):
         (self.t / 'ev' / 'timing-tb-prod.tsv').write_text('quota-reset-started\tx\tx\ttask\tt9\n')

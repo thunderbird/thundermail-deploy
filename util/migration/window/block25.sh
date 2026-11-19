@@ -103,6 +103,7 @@ legacy_queue() {
   legacy_tunnel || return 1
   body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/queue/messages?limit=1") || { echo "legacy admin API on $OLD_STALWART_URL did not answer"; return 1; }
   LEGACY_QUEUE=$(jq -re '.data.total' <<<"$body") || { echo "legacy admin API answered without data.total"; return 1; }
+  [[ $LEGACY_QUEUE =~ ^[0-9]+$ ]] || { echo "legacy admin API answered a data.total that is not a whole number: $LEGACY_QUEUE"; return 1; }
   echo "legacy queue total=$LEGACY_QUEUE (admin API through the tunnel)"
 }
 

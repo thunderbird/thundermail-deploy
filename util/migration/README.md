@@ -414,8 +414,8 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
   A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
   verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)
-  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` 0 row before a
-  `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
+  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` row of 0 (or of at
+  most an earlier `queue-accept` value) before a `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
   failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
   `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
   `verify-compare` wants both rows at 0 and no later `stop-W6`.

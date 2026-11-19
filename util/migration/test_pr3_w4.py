@@ -322,6 +322,21 @@ class LegacyQueue(Prod):
         self.assertIn('the legacy queue list holds 2 message(s), the total is 3: not accepted', self.queue(3, self.ITEMS[:2], 40))
         self.assertNotIn('queue-accept', [r[0] for r in self.timing()])
 
+    def test_the_decision_uses_the_total_of_the_full_list(self):
+        items = self.ITEMS + [dict(self.ITEMS[0], id=104)]
+        self.rows([CUT])
+        body = json.dumps({'data': {'items': items, 'total': 4}})
+        stub = (
+            'OLD_STALWART_URL=https://127.0.0.1:18080 OLD_STALWART_USER=admin OLD_STALWART_PASSWORD=pw\n'
+            'legacy_tunnel() { :; }; curl_user() { :; }\n'
+            'curl() { case "$*" in *values=1*) printf "%%s" %s ;; *) printf "%%s" %s ;; esac; }\n'
+            % (shlex.quote(body), shlex.quote(json.dumps({'data': {'total': 3}})))
+        )
+        out = self.w4(stub + 'LEGACY_QUEUE_ACCEPT=40\nstep queue-drain queued queue_drain; echo "rc=$?"')
+        self.assertIn('legacy queue total=4 (full list)', out)
+        self.assertIn('queue-drain done (queued=4)', out)
+        self.assertIn(('queue-drain', 'queued', '4'), [(r[0], r[3], r[4]) for r in self.timing()])
+
     def test_an_accepted_queue_is_listed_without_addresses_and_passes(self):
         out = self.queue(3, accept=40)
         self.assertIn('legacy queue: 3 message(s) move with the data and stay held on the target (LEGACY_QUEUE_ACCEPT=40); list in ', out)
