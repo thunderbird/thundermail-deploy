@@ -77,11 +77,21 @@ def body_sample(default):
     return int(v) or default
 
 
+def dropped_stubs():
+    f = os.environ.get("DROPPED_STUBS")
+    if not f:
+        return set()
+    with open(f, encoding="utf-8") as fh:
+        return {int(i) for i in json.load(fh)["ids"]}
+
+
 def principals():
     """principals.json from `migrate_v016.py dump`. Returns {id: principal} for individual accounts."""
     p = json.load(open(need("PRINCIPALS")))
     items = p if isinstance(p, list) else p.get("items", p)
-    acc = {unwrap_int(x.get("id")): x for x in items if unwrap_str(x.get("type")) == "individual"}
+    stubs = dropped_stubs()
+    acc = {unwrap_int(x.get("id")): x for x in items if unwrap_str(x.get("type")) == "individual"
+           and unwrap_int(x.get("id")) not in stubs}
     rng = account_range()
     if rng:
         acc = {k: v for k, v in acc.items() if rng[0] <= k <= rng[1]}

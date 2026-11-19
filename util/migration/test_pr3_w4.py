@@ -226,7 +226,7 @@ STOPPED = ['stop-legacy-stalwart', '2026-11-19T04:30:00Z', '2026-11-19T04:30:00Z
 
 class ReadPhase(Prod):
     BODY = (
-        'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
+        'dump() { echo DUMP; }; stub_drop() { echo STUBS; cp "$S/principals.json" "$S/principals.kept.json"; VALUE=0; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
         'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
@@ -235,8 +235,8 @@ class ReadPhase(Prod):
     def test_order_marks_and_a_queue_rerun_reads_the_queue_only(self):
         self.rows([CUT])
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
-        order = [x for x in out.split() if x in ('DUMP', 'DUP', 'CONVERT', 'RETARGET', 'QUEUE')]
-        self.assertEqual(order, ['DUMP', 'DUP', 'CONVERT', 'RETARGET', 'QUEUE'])
+        order = [x for x in out.split() if x in ('DUMP', 'STUBS', 'DUP', 'CONVERT', 'RETARGET', 'QUEUE')]
+        self.assertEqual(order, ['DUMP', 'STUBS', 'DUP', 'CONVERT', 'RETARGET', 'QUEUE'])
         self.assertIn('legacy-read phase done', out)
         names = [r[0] for r in self.timing()]
         self.assertLess(names.index('w4-export'), names.index('queue-drain'))

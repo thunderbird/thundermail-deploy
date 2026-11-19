@@ -3,7 +3,7 @@
 import json
 import os
 
-from common import principals, x_all, dec, Report, short, norm_addr, norm_domain, strings, unwrap_int, unwrap_str
+from common import dropped_stubs, principals, x_all, dec, Report, short, norm_addr, norm_domain, strings, unwrap_int, unwrap_str
 
 r = Report("02 directory")
 dropped, dkim_kept = set(), None
@@ -17,6 +17,13 @@ if os.environ.get("DROPPED_DOMAINS"):
         r.fail(f"dropped-domain list {os.environ['DROPPED_DOMAINS']} unreadable ({type(e).__name__}): run the domains step of w4-migrate.sh")
     else:
         r.ok(f"domains dropped before the apply (domain_fix.py), left out of the source set: {len(listed['domains'])}")
+if os.environ.get("DROPPED_STUBS"):
+    try:
+        stub_ids = dropped_stubs()
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        r.fail(f"dropped-stub list {os.environ['DROPPED_STUBS']} unreadable ({type(e).__name__}): run the stubs step of w4-migrate.sh")
+    else:
+        r.ok(f"stub accounts dropped before the convert (stub_drop.py), left out of the source set: {len(stub_ids)}")
 src, items = principals()
 doms = {d["id"]: d for d in x_all("Domain")}
 dname = {i: norm_domain(d["name"]) for i, d in doms.items()}

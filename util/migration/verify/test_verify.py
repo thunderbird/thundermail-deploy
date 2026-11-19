@@ -86,7 +86,7 @@ class Verify(unittest.TestCase):
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.shutdown)
 
-    def run_check(self, script, emails, gone=()):
+    def run_check(self, script, emails, gone=(), **extra):
         Jmap.emails, Jmap.gone = emails, set(gone)
         env = {
             'PATH': '/usr/bin:/bin',
@@ -95,6 +95,7 @@ class Verify(unittest.TestCase):
             'TARGET_URL': 'http://127.0.0.1:%d' % self.server.server_port,
             'TARGET_USER': 'admin',
             'TARGET_PASSWORD': 'pw',
+            **extra,
         }
         p = subprocess.run(
             [sys.executable, str(HERE / script)],
@@ -128,6 +129,18 @@ class Verify(unittest.TestCase):
         self.assertRegex(out, r'WARN  extra on target: 1 ')
         self.assertIn('PASS  bodies downloaded: 2/2 of 2 migrated', out)
         self.assertEqual(self.unexpected(out), [])
+
+    def test_03_leaves_out_the_messages_of_dropped_stub_accounts(self):
+        src = json.loads((self.t / 'source.json').read_text())
+        src['messages']['9:0'] = [len(BODY), RCVD]
+        (self.t / 'source.json').write_text(json.dumps(src))
+        rc, out = self.run_check('03_messages.py', self.LIVE, gone={'b2'})
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r'FAIL  messages: source 3, .*missing on target 1 \[\(9, 0\)\]')
+        (self.t / 'stubs.json').write_text(json.dumps({'ids': [9], 'stubs': []}))
+        rc, out = self.run_check('03_messages.py', self.LIVE, gone={'b2'}, DROPPED_STUBS=str(self.t / 'stubs.json'))
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r'PASS  messages: source 2, ')
 
     def test_04_counts_inbound_growth_as_a_warning(self):
         rc, out = self.run_check('04_collections.py', self.LIVE)

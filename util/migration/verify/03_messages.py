@@ -7,7 +7,7 @@ import datetime, json, os, random, re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from common import principals, enc, dec, ids_of, get_paged, download, OUT, GATE_SUBJECT, Report, short
-from common import body_sample
+from common import body_sample, dropped_stubs
 
 r = Report("03 messages")
 src_acc, _ = principals()
@@ -16,6 +16,8 @@ if "--sample" in sys.argv[1:]:
 
     sample.compare(r, src_acc)
 src = {tuple(map(int, k.split(":"))): v for k, v in json.load(open(f"{OUT}/source.json"))["messages"].items()}
+stub_ids = dropped_stubs()
+src = {k: v for k, v in src.items() if k[0] not in stub_ids}
 
 
 def account(lid):
