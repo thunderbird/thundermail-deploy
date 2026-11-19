@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -13,6 +14,7 @@ Sandbox = importlib.import_module('test_target').Sandbox
 Harness = importlib.import_module('test_window').Harness
 
 HERE = pathlib.Path(__file__).resolve().parent
+os.umask(0o077)
 KUBE = r"""#!{py}
 import json, os, re, sys
 AUTH = 'psql: error: FATAL:  password authentication failed for user "o"' + chr(10) + 'rc=2'
@@ -148,7 +150,7 @@ class Prod(Harness):
         super().setUp()
         b = self.t / 'bin'
         b.mkdir()
-        for name, src in (('kubectl', KUBE), ('nb', NB), ('gpg', '#!/bin/sh\nexit 0\n')):
+        for name, src in (('kubectl', KUBE), ('nb', NB)):
             (b / name).write_text(src.format(py=sys.executable))
             (b / name).chmod(0o755)
         if shutil.which('yq'):
@@ -226,7 +228,7 @@ class ReadPhase(Prod):
     BODY = (
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
-        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }; keep_copy() { echo KEEP; }\n'
+        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
@@ -242,7 +244,7 @@ class ReadPhase(Prod):
         self.assertIn('w4-read-done', names)
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
         self.assertIn('reusing the export of this cut', out)
-        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['KEEP', 'QUEUE'])
+        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['QUEUE'])
         self.assertEqual([r[0] for r in self.timing()].count('w4-read-start'), 2)
         out = self.w4(self.BODY + 'queue_drain() { echo QUEUE; return 1; }\nread_phase')
         gate = subprocess.run(

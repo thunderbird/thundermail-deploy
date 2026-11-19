@@ -348,14 +348,6 @@ domain_fix_step() {
   echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature; $(grep -c '^warning: not restoring the catch-all ' "$S/domain-fixed.txt" || true) catch-all(s) not restored ($S/domain-fixed.txt)"
 }
 
-keep_copy() {
-  local out rc=0
-  out=$(bash "$MIG_DIR/window/keep.sh" save "$(apply_flag)" 2>&1) || rc=$?
-  grep -E '^(kept|keep:|NEED|KEEP_GPG_RECIPIENT|gpg|STOP)' <<<"$out" || true
-  [ "$APPLY" = 1 ] || { grep -q '^NEED' <<<"$out" && NEEDS=$((NEEDS + 1)); return 0; }
-  VALUE=$(sed -n 's/^keep: \([0-9]*\) file.*/\1/p' <<<"$out")
-  [ "$rc" = 0 ]
-}
 
 read_done() {
   [ -s "$S/export.json" ] || { echo "no $S/export.json"; return 1; }
@@ -388,7 +380,6 @@ read_phase() {
     step retarget "" retarget
     [ "$APPLY" = 0 ] || mark w4-export sha256 "$(sha256sum "$S/export.json" | cut -d' ' -f1)"
   fi
-  step keep files keep_copy
   step queue-drain queued queue_drain
   [ "$APPLY" = 0 ] || step read-done "" read_done
 }
@@ -611,7 +602,6 @@ reset_phase() {
   fi
   step neon-reset reset_at neon_reset
   step source-branch-create created_at source_branch
-  step keep-source files keep_copy
   step branch-check parent_lsn branch_check
   step schema-before schema schema_before
   step guard-check "" guard
@@ -630,11 +620,11 @@ prod_main() {
   case "$PHASE" in
     read)
       GATE_ID=go-W4-read prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh window/keep.sh gpg "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh "$PY"
       read_phase ;;
     reset|boot)
       GATE_ID=go-W4-reset prereqs
-      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env window/keep.sh gpg stalwart-cli python3 "$PY"
+      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
       need_recovery_pr
       if [ "$PHASE" = reset ]; then reset_phase; else [ "$APPLY" = 0 ] || boot_resume || stop "--phase boot has nothing to resume"; fi
       boot_phase ;;
@@ -642,7 +632,7 @@ prod_main() {
       [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
       GATE_ID=go-W4-read prereqs
       GATE_ID=go-W4-reset prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env window/keep.sh gpg stalwart-cli python3 "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
       need_recovery_pr
       read_phase
       reset_phase

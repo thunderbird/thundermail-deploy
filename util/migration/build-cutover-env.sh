@@ -33,7 +33,7 @@ PROD_OPERATOR_REQUIRED="TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_US
 PREV_IGNORED=0
 if [ "$TARGET_ENV" = tb-prod ]; then
   SECRET_VARS=${SECRET_VARS/ STALWART_LEGACY_PG_PASSWORD/}
-  WINDOW_OPERATOR_VARS="${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/} KEEP_GPG_RECIPIENT"
+  WINDOW_OPERATOR_VARS=${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/}
 fi
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -320,7 +320,8 @@ build() {
   local tsv; tsv=$(op TIMING_TSV)
   [ "$TARGET_ENV" != tb-prod ] || case "$tsv" in "$EVIDENCE_DIR"/*) ;; *) tsv="" ;; esac
   put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
-  put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"
+  if [ "$TARGET_ENV" = tb-prod ]; then put SECRET_DIR "$SECRET_DIR" "directory for secret artifacts on disk (mode 700, files 600), kept over a reboot; deleted after the cutover (W8)"
+  else put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"; fi
   for side in "LEG:$LEGACY_AWS_PROFILE" "TGT:$TARGET_AWS_PROFILE"; do
     local p=${side%%:*}
     put "RCLONE_CONFIG_${p}_TYPE" s3 rclone
@@ -350,12 +351,6 @@ build() {
   mv "$tmp" "$ENV_FILE"
   exec 9>&-
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
-  if [ "$TARGET_ENV" = tb-prod ] && [ -s "$EVIDENCE_DIR/keep/manifest.tsv" ]; then
-    local f
-    while IFS=$'\t' read -r f _; do
-      [ -z "$f" ] || [ -s "$SECRET_DIR/$f" ] || printf '%s is missing from %s: bash %s/window/keep.sh restore --apply, then build-cutover-env.sh --rebuild again\n' "$f" "$SECRET_DIR" "$MIG_DIR"
-    done < "$EVIDENCE_DIR/keep/manifest.tsv"
-  fi
   old=$HOME/.local/state/talos/cutover-$TARGET_ENV.env
   [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
   [ "$missing" = 0 ]
