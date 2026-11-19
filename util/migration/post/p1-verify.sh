@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-APPT_HOST=${APPT_HOST:-appointment-stage.tb.pro}
-AUTH_HOST=${AUTH_HOST:-auth.stage-thundermail.com}
-ACCOUNTS_HOST=${ACCOUNTS_HOST:-accounts.stage-thundermail.com}
-CALDAV_HOST=${CALDAV_HOST:-stage-thundermail.com}
-OLD_AUTH_HOST=auth-stage.tb.pro
-OLD_ACCOUNTS_HOST=accounts-stage.tb.pro
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
+no_placeholders APPT_HOST CALDAV_HOST AUTH_HOST ACCOUNTS_HOST || exit 64
+OLD_AUTH_HOST=$LEGACY_AUTH_HOST
+OLD_ACCOUNTS_HOST=$LEGACY_ACCOUNTS_HOST
 OIDC_CLIENT_ID=thunderbird-appointment-frontend
 
 TMP=$(mktemp -d)
@@ -54,8 +51,8 @@ done
 contains "oidc root (new)" "$TMP/bundle.js" "https://$AUTH_HOST/realms/tbpro/"
 contains "dashboard url (new)" "$TMP/bundle.js" "https://$ACCOUNTS_HOST/dashboard"
 contains "support url (new)" "$TMP/bundle.js" "https://$ACCOUNTS_HOST/contact"
-absent "old auth host" "$TMP/bundle.js" "$OLD_AUTH_HOST"
-absent "old accounts host" "$TMP/bundle.js" "$OLD_ACCOUNTS_HOST"
+[ "$OLD_AUTH_HOST" = "$AUTH_HOST" ] || absent "old auth host" "$TMP/bundle.js" "$OLD_AUTH_HOST"
+[ "$OLD_ACCOUNTS_HOST" = "$ACCOUNTS_HOST" ] || absent "old accounts host" "$TMP/bundle.js" "$OLD_ACCOUNTS_HOST"
 
 echo "## login flow"
 AUTH_RES=$(resolve_arg "$AUTH_HOST") || fail=1

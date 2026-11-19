@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-versions() { aws_stage secretsmanager list-secret-version-ids --secret-id "$1" --include-deprecated --output json | jq -c '[.Versions[].VersionId]'; }
-current_of() { aws_stage secretsmanager describe-secret --secret-id "$1" | jq -r '.VersionIdsToStages | to_entries[] | select(.value | index("AWSCURRENT")) | .key'; }
+versions() { aws_target secretsmanager list-secret-version-ids --secret-id "$1" --include-deprecated --output json | jq -c '[.Versions[].VersionId]'; }
+current_of() { aws_target secretsmanager describe-secret --secret-id "$1" | jq -r '.VersionIdsToStages | to_entries[] | select(.value | index("AWSCURRENT")) | .key'; }
 if [ "${1:-}" = --check ]; then
   shift
   [ $# -gt 0 ] || die "usage: restore-secret-version.sh --check SECRET_ID..."
@@ -21,7 +21,7 @@ jq -e --arg v "$TARGET" 'index($v) != null' <<<"$(versions "$ID")" >/dev/null ||
 printf 'secret=%s current=%s target=%s\n' "$ID" "$current" "$TARGET"
 if [ "$current" = "$TARGET" ]; then echo 'already AWSCURRENT: nothing to do'; exit 0; fi
 if [ "$APPLY" = 1 ]; then
-  aws_stage secretsmanager update-secret-version-stage --secret-id "$ID" --version-stage AWSCURRENT --move-to-version-id "$TARGET" --remove-from-version-id "$current" --query Name --output text >/dev/null
+  aws_target secretsmanager update-secret-version-stage --secret-id "$ID" --version-stage AWSCURRENT --move-to-version-id "$TARGET" --remove-from-version-id "$current" --query Name --output text >/dev/null
   echo 'mode=apply AWSCURRENT moved'
 else
   echo 'mode=dry-run would move AWSCURRENT to the target version'

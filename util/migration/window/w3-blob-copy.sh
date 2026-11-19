@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+DELTA=0
+A=()
+for a in "$@"; do if [ "$a" = --delta ]; then DELTA=1; else A+=("$a"); fi; done
+set -- "${A[@]+"${A[@]}"}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need LEGACY_BLOB_BUCKET TARGET_BLOB_BUCKET SECRET_DIR RCLONE_CONFIG_LEG_TYPE RCLONE_CONFIG_LEG_PROFILE RCLONE_CONFIG_TGT_TYPE RCLONE_CONFIG_TGT_PROFILE
 mkdir -p "$SECRET_DIR"
@@ -92,10 +96,52 @@ check_blobs() {
   if [ "$rc" = 0 ]; then VALUE=0; else VALUE=errors-exit-$rc; return 1; fi
 }
 
+delta_snap() {
+  listed leg "$LEGACY_BLOB_BUCKET" || { echo "$LEGACY_BLOB_BUCKET not listed by rclone lsd leg:"; return 1; }
+  listed tgt "$TARGET_BLOB_BUCKET" || { echo "$TARGET_BLOB_BUCKET not listed by rclone lsd tgt:"; return 1; }
+  VALUE='delta'
+  if restore_staged; then
+    grep -q '^none staged: delta mode ' "$RESTORE" || { echo "a W3 restore without delta mode is staged for this cut ($RESTORE): delta mode does not run on top of it"; return 1; }
+    echo "restore already staged for this cut: $RESTORE"
+    return 0
+  fi
+  printf 'none staged: delta mode copies into the pre-synced %s and deletes nothing, so the objects it held before stay\n' "$TGT" > "$RESTORE" || return 1
+  mark_restore
+}
+
+delta_copy() {
+  local out rc=0
+  out=$(bash "$MIG_DIR/blob-delta.sh" copy "$SECRET_DIR/rclone-copy-$(mode)-$TS" "--$(mode)") || rc=$?
+  printf '%s\n' "$out"
+  [ "$APPLY" = 1 ] || return 0
+  VALUE=$(sed -n 's/.* copied=\([0-9]*\) .*/\1/p' <<<"$out")
+  BYTES=$(sed -n 's/.* bytes=\([0-9]*\) .*/\1/p' <<<"$out")
+  [ "$rc" = 0 ] || { echo "rclone copy failed (exit $rc); log $SECRET_DIR/rclone-copy-$(mode)-$TS.log"; return 1; }
+}
+
+delta_check() {
+  local out rc=0 d
+  out=$(bash "$MIG_DIR/blob-delta.sh" check "$EVIDENCE_DIR/blobs-check-$(mode)-$TS" "--$(mode)") || rc=$?
+  printf '%s\n' "$out"
+  [ "$APPLY" = 1 ] || return 0
+  [ "$rc" != 0 ] || { VALUE=0; return 0; }
+  d=$(sed -n 's/.* differences=\([0-9]*\) .*/\1/p' <<<"$out")
+  if [ -n "$d" ] && [ "$d" != 0 ]; then VALUE=$d; else VALUE=errors-exit-$rc; fi
+  return 1
+}
+
 prereqs
-step snap-blobs objects snap_blobs
-step legacy-size objects legacy_size
-step blob-copy objects copy
-again "$(sn blob-copy)" bytes "$BYTES" || stop "could not write the blob-copy bytes row"
-step blob-check differences check_blobs
+if [ "$DELTA" = 1 ]; then
+  BYTES=""
+  step snap-blobs mode delta_snap
+  step blob-copy objects delta_copy
+  again "$(sn blob-copy)" bytes "$BYTES" || stop "could not write the blob-copy bytes row"
+  step blob-check differences delta_check
+else
+  step snap-blobs objects snap_blobs
+  step legacy-size objects legacy_size
+  step blob-copy objects copy
+  again "$(sn blob-copy)" bytes "$BYTES" || stop "could not write the blob-copy bytes row"
+  step blob-check differences check_blobs
+fi
 finish

@@ -3,10 +3,15 @@
 # 01 must succeed: the later checks compare against the snapshot it writes, so a stale one would give false PASSes.
 set -u
 cd "$(dirname "$0")" || exit 99
-usage() { echo "usage: run_all.sh [--group source|data|config]"; exit 99; }
+. ../target.sh
+case "$PLACEHOLDERS" in *verify/*) echo "== refusing: placeholder in verify/$TARGET_ENV.env:$(tr ' ' '\n' <<<"$PLACEHOLDERS" | sed -n 's|^verify/[^:]*:||p' | tr '\n' ' ')"; exit 99 ;; esac
+usage() { echo "usage: run_all.sh [--group source|data|config|compare] | --piece buckets|counts|bodies [--resume]"; exit 99; }
 GROUP=all
+PIECE=""
+RESUME=""
 case "${1:-}" in
   --group) GROUP=${2:-} ;;
+  --piece) PIECE=${2:-}; RESUME=${3:-}; case "$PIECE:$RESUME" in buckets:|counts:|bodies:|buckets:--resume|counts:--resume|bodies:--resume) ;; *) usage ;; esac ;;
   "") ;;
   *) usage ;;
 esac
@@ -14,22 +19,33 @@ case "$GROUP" in
   source) checks="" ;;
   data) checks="02_directory.py 03_messages.py 04_collections.py 05_folders.py 06_buckets.py" ;;
   config) checks="07_target_config.py" ;;
+  compare) checks="02_directory.py 03_messages.py 07_target_config.py" ;;
   all) checks="02_directory.py 03_messages.py 04_collections.py 05_folders.py 06_buckets.py 07_target_config.py" ;;
   *) usage ;;
 esac
+if [ "$TARGET_ENV" = tb-prod ] && [ "$GROUP" != config ] && [ "$PIECE" != buckets ]; then
+  python3 -c 'from common import prod_source; prod_source()' 2>&1 || { echo "== refusing: no tb-prod source, nothing ran"; exit 99; }
+fi
 OUT=${VERIFY_OUT:-out}
 mkdir -p "$OUT"
 rm -f "$OUT"/check-*.txt
-if [ "$GROUP" != config ]; then
+if [ -n "$PIECE" ]; then
+  python3 pieces.py "$PIECE" ${RESUME:+"$RESUME"}
+  fails=$?
+  GROUP="piece $PIECE"
+  checks=""
+elif [ "$GROUP" != config ] && [ "$GROUP" != compare ]; then
   rm -f "$OUT/source.json" "$OUT/target-message-blobs.json"
   python3 01_source_snapshot.py > "$OUT/check-01_source_snapshot.txt" 2>&1
   rc=$?
   cat "$OUT/check-01_source_snapshot.txt"
   [ "$rc" = 0 ] || { echo "== 01 failed: stopping, later checks need a fresh source snapshot"; exit 99; }
 fi
-fails=0
+[ -n "$PIECE" ] || fails=0
 for s in $checks; do
-  python3 "$s" > "$OUT/check-${s%.py}.txt" 2>&1 || fails=$((fails + 1))
+  a=""
+  [ "$GROUP:$s" != compare:03_messages.py ] || a=--sample
+  python3 "$s" ${a:+"$a"} > "$OUT/check-${s%.py}.txt" 2>&1 || fails=$((fails + 1))
   cat "$OUT/check-${s%.py}.txt"
 done
 warns=$(cat "$OUT"/check-*.txt | grep '^  WARN  ' || true)

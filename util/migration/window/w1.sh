@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need ARGO_APPS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_STAGE KUBECONFIG_HUB PI_DIR FREEZE_PR
+need ARGO_APPS KARGO_PROJECT_ACCOUNTS KARGO_STAGE_ACCOUNTS KUBECONFIG_TARGET KUBECONFIG_HUB PI_DIR FREEZE_PR
 pending DECISIONS_COMMENT_URL
 PI=thunderbird/platform-infrastructure
 THAW=$MIG_DIR/thaw.sh
@@ -29,7 +29,7 @@ snap() {
   mark_restore
 }
 
-app_rev() { "${KH[@]}" -n argocd get application tb-stage-app-of-apps -o jsonpath='{.status.sync.revision}'; }
+app_rev() { "${KH[@]}" -n argocd get application "$ARGO_APP_OF_APPS" -o jsonpath='{.status.sync.revision}'; }
 synced_to() { local r; r=$(app_rev) && [ -n "$r" ] && git -C "$PI_DIR" fetch -q origin main && git -C "$PI_DIR" merge-base --is-ancestor "$1" "$r"; }
 self_heal() { local a; for a in $ARGO_APPS; do [ "$("${KH[@]}" -n argocd get application "$a" -o jsonpath='{.spec.syncPolicy.automated.selfHeal}')" = "$1" ] || return 1; done; }
 auto_promote() { [ "$("${KH[@]}" -n "$KARGO_PROJECT_ACCOUNTS" get projectconfig "$KARGO_PROJECT_ACCOUNTS" -o jsonpath="{.spec.promotionPolicies[?(@.stage==\"$KARGO_STAGE_ACCOUNTS\")].autoPromotionEnabled}")" = "$1" ]; }
@@ -44,7 +44,7 @@ freeze() {
   bash "$THAW" --apply || { echo "thaw.sh failed"; return 1; }
   set -a; eval "$(< "$ENV_FILE")"; set +a
   if [ -z "${FREEZE_SHA:-}" ] || [ -z "${THAW_PR:-}" ]; then echo "thaw.sh did not append FREEZE_SHA and THAW_PR"; return 1; fi
-  until_ok 400 synced_to "$FREEZE_SHA" || { echo "tb-stage-app-of-apps did not sync a revision containing $FREEZE_SHA"; return 1; }
+  until_ok 400 synced_to "$FREEZE_SHA" || { echo "$ARGO_APP_OF_APPS did not sync a revision containing $FREEZE_SHA"; return 1; }
   until_ok 400 self_heal false || { echo "selfHeal is not false on every app in ARGO_APPS"; return 1; }
   until_ok 400 auto_promote false || { echo "auto-promotion for $KARGO_STAGE_ACCOUNTS is not false"; return 1; }
   open=$(open_promotions) || return 1

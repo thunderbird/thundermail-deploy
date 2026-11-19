@@ -22,8 +22,12 @@ done
 jq -s 'map({id,name,type,content,data,priority,ttl,proxied,comment})' "$tmp" > "$out"
 count=$(jq 'length' "$out")
 : > "$doh"
-jq -r 'map(select(.type | IN("A","AAAA","CNAME","MX","TXT","SRV","TLSA","CAA","NS"))) | map("\(.name) \(.type)") | unique | .[]' "$out" | head -400 | while read -r name type; do
-  ans=$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$name&type=$type" | jq -c '[.Answer[]? | select(.type != 46) | .data] | sort')
+names=$(jq -r 'map(select(.type | IN("A","AAAA","CNAME","MX","TXT","SRV","TLSA","CAA","NS"))) | map("\(.name) \(.type)") | unique | .[]' "$out")
+unread=0
+while read -r name type; do
+  [ -n "$name" ] || continue
+  ans=$(curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$name&type=$type" | jq -ce '[.Answer[]? | select(.type != 46) | .data] | sort') || unread=$((unread + 1))
   printf '%s\t%s\t%s\n' "$name" "$type" "${ans:-[]}" >> "$doh"
-done
+done <<<"$names"
+[ "$unread" = 0 ] || printf 'doh capture partial: %s of %s names unread\n' "$unread" "$(grep -c . <<<"$names")"
 printf 'zone=%s name=%s records=%s doh_lines=%s\n%s\n%s\n' "$ZONE" "$zone_name" "$count" "$(wc -l < "$doh")" "$doh" "$out"

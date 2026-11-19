@@ -221,6 +221,7 @@ class Harness(unittest.TestCase):
             'SECRET_DIR': str(self.t / 'secret'),
             'TIMING_TSV': str(self.t / 'ev' / 'timing.tsv'),
             'TS': '20261112T000000Z',
+            'TARGET_ENV': 'tb-stage',
         }
         e.update(extra)
         return e
@@ -284,7 +285,7 @@ class Harness(unittest.TestCase):
             'SECRET_NAMES=""\n'
             'MIG_DIR=%s ENV_FILE=%s/cutover.env LOG=%s/run.log RESTORE=%s/restore.txt\n'
             'KS=(kubectl --kubeconfig /dev/null) KH=(kubectl --kubeconfig /dev/null)\n'
-            '. %s/defs.sh\n' % (mig, self.t, self.t, self.t, self.t)
+            '. %s/target.sh\n. %s/defs.sh\n' % (mig, self.t, self.t, self.t, mig, self.t)
         )
         return self.netns(head + setup + '\n' + body + '\n', **kw)
 
@@ -338,7 +339,9 @@ class T7Issuer(Harness):
 class W5AccountsCheck(Harness):
     BODY = 'accounts_check; echo "rc=$? needs=$NEEDS"'
 
-    def check(self, code, body, *rows, run=None):
+    READY = {'tool': 'kubectl', 'match': 'get deploy accounts-web', 'out': '1'}
+
+    def check(self, code, body, *rows, run=None, ready=READY):
         tsv = ''.join(
             '%s\t2026-11-12T0%d:00:00Z\t2026-11-12T0%d:00:00Z\t\t\n' % (r, i, i)
             for i, r in enumerate(rows)
@@ -346,9 +349,26 @@ class W5AccountsCheck(Harness):
         (self.t / 'ev').mkdir(mode=0o700)
         (self.t / 'ev' / 'timing.tsv').write_text(tsv)
         rules = [
-            {'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '%s\n%s' % (body, code)}
+            ready,
+            {'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '%s\n%s' % (body, code)},
         ]
         return self.fn('w5-promote.sh', run or self.BODY, rules=rules)
+
+    def test_accounts_at_zero_replicas_is_pending_without_an_exec(self):
+        for out_ in ('', '0'):
+            with self.subTest(ready=out_):
+                self.setUp()
+                ready = {'tool': 'kubectl', 'match': 'get deploy accounts-web', 'out': out_}
+                out = self.check(401, '{}', 'cut-ecs', 'put-accounts-bundle', ready=ready)
+                self.assertIn('PENDING  Accounts is not up yet', out)
+                self.assertIn('rc=0 needs=1', out)
+                self.assertNotIn('STOP TEST', out)
+                self.assertNotIn('exec deploy/accounts-web', (self.t / 'fake.log').read_text())
+
+    def test_a_failed_replica_read_is_a_failure(self):
+        ready = {'tool': 'kubectl', 'match': 'get deploy accounts-web', 'rc': 1}
+        out = self.check(200, '{}', 'cut-ecs', ready=ready)
+        self.assertIn('rc=1 needs=0', out)
 
     def test_401_before_the_bundle_write_is_pending(self):
         out = self.check(401, '{}', 'cut-ecs')
@@ -377,7 +397,7 @@ class W5AccountsCheck(Harness):
         out = self.check(401, '{}', 'cut-ecs')
         line = next(x for x in out.splitlines() if x.startswith('PENDING  '))
         cmd = line.split('record the row with: ', 1)[1]
-        rules = [{'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '{}\n401'}]
+        rules = [self.READY, {'tool': 'kubectl', 'match': 'exec deploy/accounts-web', 'out': '{}\n401'}]
         out = self.fn('w5-promote.sh', cmd + '\n' + self.BODY, rules=rules)
         self.assertIn('rc=1 needs=0', out)
 
@@ -555,7 +575,7 @@ class RestartProbe(Harness):
             },
         ]
         setup = (
-            'kubectl port-forward svc/stalwart-mgmt 18080:1 >/dev/null 2>&1 &\n'
+            'kubectl --kubeconfig /dev/null port-forward svc/stalwart-mgmt 18080:1 >/dev/null 2>&1 &\n'
             'until [ -n "$(listener 18080)" ]; do sleep 0.1; done\n'
             'STALWART_URL=http://127.0.0.1:18080 PF_OK=1 PF=""'
         )
@@ -563,6 +583,41 @@ class RestartProbe(Harness):
         self.assertNotIn('does not answer', out)
         self.assertIn('stopped the reused kubectl port-forward on :18080', out)
         self.assertIn('port-forward pod/stalwart-new -> http://127.0.0.1:18080', out)
+        self.assertIn('rc=0 pf_ok=1', out)
+
+    def reuse_in_prod(self, kubeconfig, target_env='tb-prod'):
+        rules = [
+            {
+                'tool': 'kubectl',
+                'match': 'port-forward svc/stalwart-mgmt 18080:8080',
+                'serve': 18080,
+            }
+        ]
+        setup = (
+            'kubectl --kubeconfig %s port-forward svc/stalwart-mgmt 18080:8080'
+            ' >/dev/null 2>&1 &\n'
+            'until [ -n "$(listener 18080)" ]; do sleep 0.1; done\n'
+            'STALWART_URL=http://127.0.0.1:18080 PF_OK=0 PF=""' % kubeconfig
+        )
+        body = 'port_forward; echo "rc=$? pf_ok=$PF_OK"'
+        return self.fn('lib.sh', body, setup, rules=rules, env=self.env(TARGET_ENV=target_env))
+
+    def test_a_reused_prod_port_forward_with_another_kubeconfig_is_refused(self):
+        (self.t / 'kc-other').write_text('')
+        out = self.reuse_in_prod(self.t / 'kc-other')
+        self.assertIn('was not started with --kubeconfig /dev/null: credentials not sent', out)
+        self.assertIn('rc=1 pf_ok=0', out)
+        self.assertNotIn('reusing', out)
+
+    def test_a_stage_run_refuses_a_port_forward_of_another_kubeconfig(self):
+        (self.t / 'kc-prod').write_text('')
+        out = self.reuse_in_prod(self.t / 'kc-prod', 'tb-stage')
+        self.assertIn('was not started with --kubeconfig /dev/null: credentials not sent', out)
+        self.assertIn('rc=1 pf_ok=0', out)
+
+    def test_a_reused_prod_port_forward_with_the_target_kubeconfig_is_reused(self):
+        out = self.reuse_in_prod('/dev/null')
+        self.assertIn('reusing the kubectl port-forward on http://127.0.0.1:18080', out)
         self.assertIn('rc=0 pf_ok=1', out)
 
     def test_a_signal_during_the_probe_stops_the_mail_port_forward(self):
@@ -829,7 +884,7 @@ class W6Verify(Harness):
     def test_folders_run_even_when_verify_fails(self):
         mig = self.t / 'fix'
         (mig / 'verify').mkdir(parents=True)
-        (mig / 'verify' / 'stage.env').write_text('')
+        (mig / 'verify' / 'tb-stage.env').write_text('')
         (mig / 'verify' / 'expected-warn.txt').write_text('extra on target:\n')
         (mig / 'verify' / 'run_all.sh').write_text(
             'echo "  FAIL  emails: source 1, target 0"; exit 1\n'
@@ -927,17 +982,17 @@ class DryRun(Harness):
         {'tool': 'kubectl', 'match': 'get stage s', 'out': 'f0'},
     ]
 
-    def dry(self, script):
+    def dry(self, script, mode='--dry-run', **values):
         mig = self.t / 'mig'
         shutil.copytree(self.MIG, mig, ignore=shutil.ignore_patterns('__pycache__', 'test_*.py'))
         (mig / 'check-prereqs.sh').write_text('echo "HAVE 1  NEED 0"\n')
         (self.t / 'secret').mkdir(mode=0o700)
         (self.t / 'secret' / 'realm-before-1.json').write_text('{}')
         env = self.t / 'cutover.env'
-        env.write_text(''.join("%s='%s'\n" % kv for kv in self.ENV.items()))
+        env.write_text(''.join("%s='%s'\n" % kv for kv in {**self.ENV, **values}.items()))
         env.chmod(0o600)
         e = self.env(CUTOVER_ENV=str(env), VENV_PY=sys.executable, CF_API_TOKEN_AGENT='cf-token')
-        cmd = 'bash %s/window/%s --dry-run; echo "rc=$?"\n' % (mig, script)
+        cmd = 'bash %s/window/%s %s </dev/null; echo "rc=$?"\n' % (mig, script, mode)
         return self.netns(cmd, rules=self.RULES, mock=self.MOCK, env=e)
 
     def test_every_changed_script_dry_runs_to_exit_0(self):
@@ -952,7 +1007,23 @@ class DryRun(Harness):
             with self.subTest(script=script):
                 self.setUp()
                 out = self.dry(script)
-                self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+                self.assertRegex(out, r'(?m)^rc=0$')
+
+    def test_an_empty_load_balancer_name_is_pending_then_names_the_rebuild(self):
+        for script in ('test-sender-password.sh', 'w6-verify.sh'):
+            with self.subTest(script=script):
+                self.setUp()
+                out = self.dry(script, TARGET_NLB_DNS='')
+                self.assertIn('PENDING  TARGET_NLB_DNS is filled in-window', out)
+                self.assertRegex(out, r'(?m)^rc=0$')
+                self.setUp()
+                out = self.dry(script, '--apply', TARGET_NLB_DNS='')
+                self.assertIn(
+                    'TARGET_NLB_DNS is empty in %s (it stays empty until the mail load balancer'
+                    ' exists; then run build-cutover-env.sh --rebuild)' % (self.t / 'cutover.env'),
+                    out,
+                )
+                self.assertRegex(out, r'(?m)^rc=1$')
 
     def test_w5_and_w7_restart_stalwart_after_the_promote(self):
         for script, before in (

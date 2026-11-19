@@ -4,8 +4,8 @@ set -euo pipefail
 DUMP=${1:-}
 [ -n "$DUMP" ] || die "usage: restore-target-db.sh /work/<file>.dump [--apply] | --assert-only"
 need STALWART_TARGET_PG_HOST STALWART_TARGET_PG_USER STALWART_TARGET_PG_DB STALWART_LEGACY_PG_HOST
-expected=$(yq -r '.stalwartPgHost' "$REPO_DIR/overlays/tb-stage-thundermail/stalwart-configs/config/values.yaml" | sed 's/-pooler//')
-[ "$STALWART_TARGET_PG_HOST" = "$expected" ] || die "target host does not match the tb-stage overlay host (direct form)"
+expected=$(yq -r '.stalwartPgHost' "$REPO_DIR/$CONFIGS_OVERLAY/config/values.yaml" | sed 's/-pooler//')
+[ "$STALWART_TARGET_PG_HOST" = "$expected" ] || die "target host does not match the $TARGET_ENV overlay host (direct form)"
 [ "$STALWART_TARGET_PG_HOST" != "$STALWART_LEGACY_PG_HOST" ] || die "target host equals the legacy host"
 [ "$STALWART_TARGET_PG_DB" = neondb ] || die "target database is not neondb"
 db=$(pod psql -h "$STALWART_TARGET_PG_HOST" -U "$STALWART_TARGET_PG_USER" -d "$STALWART_TARGET_PG_DB" -Atc 'select current_database()')
