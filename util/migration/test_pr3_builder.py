@@ -529,6 +529,15 @@ class Attempts(Base):
         self.assertIn('EVIDENCE_DIR=%s has no attempt-2 part' % shared, out)
         self.assertEqual(self.values()['CUTOVER_ATTEMPT'], '1')
 
+    def test_a_carried_name_in_the_operator_file_does_not_refuse_a_new_attempt(self):
+        self.build_ns()
+        op = self.t / 'home' / 'op-carried.env'
+        op.write_text("TARGET_ENV=tb-prod\nWINDOW_END='2026-11-20T06:00:00Z'\n")
+        op.chmod(0o600)
+        rc, out = self.build_ns(CUTOVER_ATTEMPT='2', OPERATOR_ENV=str(op))
+        self.assertNotIn('is set in this shell', out)
+        self.assertEqual(self.values()['CUTOVER_ATTEMPT'], '2', out)
+
     def test_a_shell_value_of_the_old_attempt_refuses_a_new_one(self):
         self.build_ns()
         rc, out = self.build_ns(CUTOVER_ATTEMPT='2', FREIGHT='f1')

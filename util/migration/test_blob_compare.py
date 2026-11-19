@@ -724,10 +724,10 @@ class Compare(Harness):
     def fill(self):
         L, T = self.state['buckets'][LEGACY], self.state['buckets'][TBPROD]
         L += [
-            obj('STALWART_WEBADMIN', 'webadmin-015'),
-            obj('SPAM_TRAINER_KEY', 'trainer'),
-            obj('SPAM_CLASSIFIER_KEY', 'classifier-new', version='v2'),
-            obj('SPAM_CLASSIFIER_KEY', 'classifier-old', latest=False),
+            obj('knkectcxifjfix7xivbecrcnjfha', 'webadmin-015'),
+            obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 'trainer'),
+            obj('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'classifier-new', version='v2'),
+            obj('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'classifier-old', latest=False),
             obj('0abc', 'same'),
             obj('a', 'boundary key'),
             obj('aaaa', 'gone in tb'),
@@ -739,9 +739,9 @@ class Compare(Harness):
             obj('~tail', 'after alphabet'),
         ]
         T += [
-            obj('STALWART_WEBADMIN', 'webadmin-016'),
-            obj('SPAM_TRAINER_KEY', 'trainer'),
-            obj('SPAM_CLASSIFIER_KEY', 'classifier-old'),
+            obj('knkectcxifjfix7xivbecrcnjfha', 'webadmin-016'),
+            obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 'trainer'),
+            obj('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'classifier-old'),
             obj('0abc', 'same'),
             obj('a', 'boundary key'),
             dm('aaaa', version='d9'),
@@ -803,12 +803,12 @@ class Compare(Harness):
         )
         self.assertIn('dry run: nothing copied', out)
         self.assertIn(
-            'named SPAM_TRAINER_KEY legacy=%s/7 tb-prod=%s/7 match'
+            'named STALWART_SPAM_TRAIN_DATA.lz4 (knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di) legacy=%s/7 tb-prod=%s/7 match'
             % ((hashlib.md5(b'trainer').hexdigest(),) * 2),
             out,
         )
-        self.assertRegex(out, r'named STALWART_WEBADMIN legacy=\w+/12 tb-prod=\w+/12 differ')
-        self.assertRegex(out, r'named SPAM_CLASSIFIER_KEY legacy=\w+/14 tb-prod=\w+/14 differ')
+        self.assertRegex(out, r'named STALWART_WEBADMIN \(knkectcxifjfix7xivbecrcnjfha\) legacy=\w+/12 tb-prod=\w+/12 differ')
+        self.assertRegex(out, r'named STALWART_SPAM_CLASSIFIER_MODEL\.lz4 \(knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna\) legacy=\w+/14 tb-prod=\w+/14 differ')
         self.assertIn('NEED  6 difference(s) left: run compare --apply', out)
         self.assertEqual(
             self.last(r),
@@ -830,10 +830,21 @@ class Compare(Harness):
         checks = sorted(
             json.loads(x)['key'] for x in (run / 'checksum.jsonl').read_text().splitlines()
         )
-        self.assertEqual(checks, ['SPAM_CLASSIFIER_KEY', 'STALWART_WEBADMIN', 'cccc'])
+        self.assertEqual(checks, ['cccc', 'knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'knkectcxifjfix7xivbecrcnjfha'])
         sizes = [json.loads(x) for x in (run / 'size.jsonl').read_text().splitlines()]
         self.assertEqual(
             [(d['key'], d['size'], d['tb_prod_size']) for d in sizes], [('bbbb', 11, 16)]
+        )
+
+    def test_the_named_keys_are_the_s3_keys_stalwart_writes(self):
+        m = tool()
+        self.assertEqual(
+            sorted(m.NAMED.items()),
+            [
+                ('knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna', 'STALWART_SPAM_CLASSIFIER_MODEL.lz4'),
+                ('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 'STALWART_SPAM_TRAIN_DATA.lz4'),
+                ('knkectcxifjfix7xivbecrcnjfha', 'STALWART_WEBADMIN'),
+            ],
         )
 
     def test_apply_copies_differences_then_rerun_passes(self):
@@ -841,7 +852,7 @@ class Compare(Harness):
         self.fill()
         r = self.compare('--apply')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN legacy=(\S+) tb-prod=\1 copied, match')
+        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN \(knkectcxifjfix7xivbecrcnjfha\) legacy=(\S+) tb-prod=\1 copied, match')
         self.assertIn('PASS  blob compare: 0 differences left', r.stdout)
         self.assertTrue(self.last(r).startswith('blob-compare mode=apply result=pass '))
         self.assertIn(' copied=6 failed=0 left=0 ', self.last(r) + ' ')
@@ -881,12 +892,16 @@ class Compare(Harness):
 
     def test_the_three_named_keys_must_match(self):
         self.cut()
-        self.state['buckets'][LEGACY] = [obj('k1', 'one'), obj('SPAM_TRAINER_KEY', 't')]
-        self.state['buckets'][TBPROD] = [obj('k1', 'one'), obj('SPAM_TRAINER_KEY', 't')]
+        self.state['buckets'][LEGACY] = [obj('k1', 'one'), obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 't')]
+        self.state['buckets'][TBPROD] = [obj('k1', 'one'), obj('knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di', 't')]
         r = self.compare()
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn('named STALWART_WEBADMIN absent in both buckets', r.stdout)
-        self.assertIn('NEED  named key(s) not matching by checksum in both buckets: ', r.stdout)
+        self.assertIn('named STALWART_WEBADMIN (knkectcxifjfix7xivbecrcnjfha) absent in both buckets', r.stdout)
+        self.assertIn(
+            'NEED  named key(s) not matching by checksum in both buckets: '
+            'STALWART_WEBADMIN STALWART_SPAM_CLASSIFIER_MODEL.lz4',
+            r.stdout,
+        )
         r = self.compare('--apply')
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn('STOP  named key(s) not matching by checksum in both buckets: ', r.stdout)
@@ -969,13 +984,13 @@ class Compare(Harness):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.state['buckets'][TBPROD] = [
             obj('k1', 'one'),
-            obj('STALWART_WEBADMIN', 'changed-after-the-dry-run'),
-            *[obj(k, 'n' + k) for k in m.NAMED if k != 'STALWART_WEBADMIN'],
+            obj('knkectcxifjfix7xivbecrcnjfha', 'changed-after-the-dry-run'),
+            *[obj(k, 'n' + k) for k in m.NAMED if m.NAMED[k] != 'STALWART_WEBADMIN'],
         ]
         r = self.compare('--apply')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(TBPROD, {c['opts']['bucket'] for c in self.lists()})
-        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN legacy=(\S+) tb-prod=\1 copied, match')
+        self.assertRegex(r.stdout, r'named STALWART_WEBADMIN \(knkectcxifjfix7xivbecrcnjfha\) legacy=(\S+) tb-prod=\1 copied, match')
 
     def test_a_run_leaves_other_runs_temporary_files(self):
         self.cut()
@@ -1106,7 +1121,7 @@ class Compare(Harness):
                 r'\(3 workers, one connection per shard\)\n' % (side, n),
             )
         self.assertIn('\nlisted legacy pages=11 versions=21 in ', r.stdout)
-        self.assertIn('\nlisted tb-prod pages=10 versions=20 in ', r.stdout)
+        self.assertIn('\nlisted tb-prod pages=9 versions=18 in ', r.stdout)
         r = self.compare()
         self.assertEqual(self.s3.requests, [])
         self.assertIn('\nlisted legacy pages=0 versions=0 in ', r.stdout)
@@ -1358,34 +1373,7 @@ CLI_SUMMARY = (
 )
 CLI_SHARDS = json.loads(
     r"""
-{"legacy/0": [["0abc", "obj", 4, "51037a4a37730f52c8732586d3aaa316", "v1"],
-  ["SPAM_CLASSIFIER_KEY", "obj", 14, "d74762915b76ef4410f170256034212d", "v2"],
-  ["SPAM_TRAINER_KEY", "obj", 7, "2c065aae9fcb37b49043a5a2012b3dbf", "v1"],
-  ["STALWART_WEBADMIN", "obj", 12, "f982555217f5fc6aabcd70a5cfe8ef39", "v1"],
-  ["a", "obj", 12, "be7135d551de8a6173c0726458c72444", "v1"],
-  ["aaaa", "obj", 10, "688b3ec07198860b2a8b0c2dc44fe595", "v1"],
-  ["bbbb", "obj", 11, "38b66e40b4faf70361c1b7f88d747e05", "v1"]],
- "legacy/1": [["cccc", "obj", 6, "6ef380fd46f6b008d566bbe3ceb3d923", "v1"],
-  ["dddd", "dm", 0, "", "d2"],
-  ["dir/a b+c", "obj", 6, "7daa5df1afb09f7b9b5be4afd095c626", "v1"]],
- "legacy/2": [["k%2Fx", "obj", 7, "354f047ba64552895b016bbdd60ab174", "v1"]],
- "legacy/3": [["zzzz", "obj", 4, "7aea2552dfe7eb84b9443b6fc9ba6e01", "v1"],
-  ["~tail", "obj", 14, "8ced71457d957d269376c8f978236f6c", "v1"],
-  ["été", "obj", 6, "727b79a9a430ccddcf9260a381d5ab10", "v1"]],
- "tb-prod/0": [["0abc", "obj", 4, "51037a4a37730f52c8732586d3aaa316", "v1"],
-  ["SPAM_CLASSIFIER_KEY", "obj", 14, "872e4de98f0485c131beb771a3a294c4", "v1"],
-  ["SPAM_TRAINER_KEY", "obj", 7, "2c065aae9fcb37b49043a5a2012b3dbf", "v1"],
-  ["STALWART_WEBADMIN", "obj", 12, "1d6ba93aaa8575601ec8c5bd7a52824c", "v1"],
-  ["a", "obj", 12, "be7135d551de8a6173c0726458c72444", "v1"],
-  ["aaaa", "dm", 0, "", "d9"],
-  ["bbbb", "obj", 16, "e69beccfe42f8af5c726c109d1ba577c", "v1"]],
- "tb-prod/1": [["cccc", "obj", 6, "4e5dc3764ba8e9a8952e7232d5626ce3", "v1"],
-  ["dddd", "obj", 14, "b12ed5bf0e86be3e697a4ffcc9617cbd", "v1"],
-  ["dir/a b+c", "obj", 6, "7daa5df1afb09f7b9b5be4afd095c626", "v1"]],
- "tb-prod/2": [["k%2Fx", "obj", 7, "354f047ba64552895b016bbdd60ab174", "v1"],
-  ["only-tb", "obj", 5, "ea9f91b2cda019730f2891bd12a7a4d6", "v1"]],
- "tb-prod/3": [["zzzz", "obj", 4, "7aea2552dfe7eb84b9443b6fc9ba6e01", "v1"],
-  ["été", "obj", 6, "727b79a9a430ccddcf9260a381d5ab10", "v1"]]}
+{"legacy/0": [["0abc", "obj", 4, "51037a4a37730f52c8732586d3aaa316", "v1"], ["a", "obj", 12, "be7135d551de8a6173c0726458c72444", "v1"], ["aaaa", "obj", 10, "688b3ec07198860b2a8b0c2dc44fe595", "v1"], ["bbbb", "obj", 11, "38b66e40b4faf70361c1b7f88d747e05", "v1"]], "legacy/1": [["cccc", "obj", 6, "6ef380fd46f6b008d566bbe3ceb3d923", "v1"], ["dddd", "dm", 0, "", "d2"], ["dir/a b+c", "obj", 6, "7daa5df1afb09f7b9b5be4afd095c626", "v1"]], "legacy/2": [["k%2Fx", "obj", 7, "354f047ba64552895b016bbdd60ab174", "v1"], ["knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna", "obj", 14, "d74762915b76ef4410f170256034212d", "v2"], ["knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di", "obj", 7, "2c065aae9fcb37b49043a5a2012b3dbf", "v1"], ["knkectcxifjfix7xivbecrcnjfha", "obj", 12, "f982555217f5fc6aabcd70a5cfe8ef39", "v1"]], "legacy/3": [["zzzz", "obj", 4, "7aea2552dfe7eb84b9443b6fc9ba6e01", "v1"], ["~tail", "obj", 14, "8ced71457d957d269376c8f978236f6c", "v1"], ["été", "obj", 6, "727b79a9a430ccddcf9260a381d5ab10", "v1"]], "tb-prod/0": [["0abc", "obj", 4, "51037a4a37730f52c8732586d3aaa316", "v1"], ["a", "obj", 12, "be7135d551de8a6173c0726458c72444", "v1"], ["aaaa", "dm", 0, "", "d9"], ["bbbb", "obj", 16, "e69beccfe42f8af5c726c109d1ba577c", "v1"]], "tb-prod/1": [["cccc", "obj", 6, "4e5dc3764ba8e9a8952e7232d5626ce3", "v1"], ["dddd", "obj", 14, "b12ed5bf0e86be3e697a4ffcc9617cbd", "v1"], ["dir/a b+c", "obj", 6, "7daa5df1afb09f7b9b5be4afd095c626", "v1"]], "tb-prod/2": [["k%2Fx", "obj", 7, "354f047ba64552895b016bbdd60ab174", "v1"], ["knkectcxifjfix7tkbau7x7djravgu7jizeukus3jvhuirkmfzwhuna", "obj", 14, "872e4de98f0485c131beb771a3a294c4", "v1"], ["knkectcxifjfix7tkbau7x7ukjausts3iraviqjonr0di", "obj", 7, "2c065aae9fcb37b49043a5a2012b3dbf", "v1"], ["knkectcxifjfix7xivbecrcnjfha", "obj", 12, "1d6ba93aaa8575601ec8c5bd7a52824c", "v1"], ["only-tb", "obj", 5, "ea9f91b2cda019730f2891bd12a7a4d6", "v1"]], "tb-prod/3": [["zzzz", "obj", 4, "7aea2552dfe7eb84b9443b6fc9ba6e01", "v1"], ["été", "obj", 6, "727b79a9a430ccddcf9260a381d5ab10", "v1"]]}
 """
 )
 

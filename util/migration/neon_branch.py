@@ -148,14 +148,19 @@ class Neon:
             time.sleep(SLEEP)
         sys.exit(f'{what}: project operations still running after 600 s')
 
-    def settle(self, bid, what):
+    def settle(self, bid, what, answer=None, since=None):
+        ids = {o.get('id') for o in (answer or {}).get('operations') or [] if o.get('id')}
         for _ in range(int(600 / max(SLEEP, 0.01))):
             b = self.branch(bid)
             ops = self.call('GET', f'/projects/{self.project}/operations?limit=50').get(
                 'operations', []
             )
             mine = [o for o in ops if o.get('branch_id') == bid]
-            failed = [o for o in mine if o.get('status') in ('failed', 'error')]
+            if ids:
+                ours = [o for o in mine if o.get('id') in ids]
+            else:
+                ours = [o for o in mine if since is None or (o.get('created_at') or '') >= since]
+            failed = [o for o in ours if o.get('status') in ('failed', 'error')]
             if failed:
                 sys.exit(
                     f'{what}: operation {failed[0].get("action")} on {bid} is {failed[0]["status"]}'
@@ -171,6 +176,11 @@ class Neon:
             sys.exit(f'REFUSED: branch {name} is the parent, the default or a protected branch')
         if b.get('parent_id') != self.parent:
             sys.exit(f'REFUSED: branch {name} is not a child of the parent branch')
+
+
+def started():
+    t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=120)
+    return t.strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def line(b):
@@ -254,13 +264,14 @@ def cmd_reset(n, a):
         print(f'plan: reset {a.branch} from its parent; nothing written (dry run)')
         return 0
     n.quiet('reset')
-    n.call(
+    since = started()
+    r = n.call(
         'POST',
         f'/projects/{n.project}/branches/{b["id"]}/restore',
         {'source_branch_id': n.parent},
     )
     before = b.get('parent_lsn')
-    b = n.settle(b['id'], 'reset')
+    b = n.settle(b['id'], 'reset', r, since)
     print('after: ' + line(b))
     if not later(b.get('last_reset_at'), a.after):
         print(
@@ -307,6 +318,7 @@ def cmd_source(n, a):
         else:
             sys.exit(f'{a.name} still listed 300 s after the delete')
         n.child = None
+    since = started()
     r = n.call(
         'POST',
         f'/projects/{n.project}/branches',
@@ -322,18 +334,20 @@ def cmd_source(n, a):
     if b['id'] == n.parent or b.get('parent_id') != n.parent:
         sys.exit('REFUSED: the created branch is not a new child of the parent')
     n.child = plain_id(b['id'], 'branch id')
-    b = n.settle(b['id'], 'create')
+    b = n.settle(b['id'], 'create', r, since)
     if a.lsn and b.get('parent_lsn') != a.lsn:
         sys.exit(f'{a.name} has parent_lsn {b.get("parent_lsn") or "-"}, asked for {a.lsn}')
     eps = n.endpoints(b['id'])
     if len(eps) != 1 or eps[0].get('type') != 'read_only':
         sys.exit(f'{a.name} has {len(eps)} endpoint(s), want one read_only endpoint')
-    pw = n.call(
+    since = started()
+    r = n.call(
         'POST',
         f'/projects/{n.project}/branches/{b["id"]}/roles/'
         f'{urllib.parse.quote(a.role, safe="")}/reset_password',
-    )['role']['password']
-    n.settle(b['id'], 'password reset')
+    )
+    pw = r['role']['password']
+    n.settle(b['id'], 'password reset', r, since)
     if any('\n' in v or '\r' in v for v in (eps[0]['host'], a.db, a.role, pw)):
         sys.exit('REFUSED: a credential value holds a line break')
     out = pathlib.Path(a.out)
