@@ -442,7 +442,7 @@ class W4Duplicates(Data):
                 {'id': 4, 'type': 'list', 'name': 'c@example.com', 'emails': []},
             ]
         )
-        out = self.w4('step duplicates duplicates duplicates\nstep convert export_lines convert')
+        out = self.w4('step stubs dropped stub_drop\nstep duplicates duplicates duplicates\nstep convert export_lines convert')
         self.assertIn('  class Group:alias + MailingList:primary 1', out)
         self.assertIn('  class User:alias + User:primary 1', out)
         self.assertIn('  total 2', out)
@@ -455,9 +455,37 @@ class W4Duplicates(Data):
         self.assertIn('\tc@example.com\t', listed)
         self.assertIn(['duplicates', 'duplicates', '2'], [[r[0], r[3], r[4]] for r in self.rows()])
 
+    def test_an_empty_stub_is_dropped_before_the_check_and_only_its_id_is_printed(self):
+        self.write(
+            [
+                {'id': 1, 'type': 'individual', 'name': 'a@example.com', 'emails': ['a@example.com', 'b@example.com']},
+                {'id': 2, 'type': 'individual', 'name': 'b@example.com', 'roles': ['user']},
+            ]
+        )
+        out = self.w4('STUBS_EXPECTED=1\nstep stubs dropped stub_drop\nstep duplicates duplicates duplicates')
+        self.assertIn('stubs: dropped=1 expected=1 ids 2\n', out)
+        self.assertIn('stubs done (dropped=1)', out)
+        self.assertIn('duplicates done (duplicates=0)', out)
+        self.assertNotIn('@example.com', out.replace('dup_check.py', ''))
+        self.assertIn(['stubs', 'dropped', '1'], [[r[0], r[3], r[4]] for r in self.rows()])
+        self.assertEqual(json.loads((self.t / 'secret' / 'stubs-dropped.json').read_text())['ids'], [2])
+        self.assertEqual(len(json.loads((self.t / 'secret' / 'principals.json').read_text())), 2)
+
+    def test_a_name_holder_with_a_secret_is_kept_and_the_check_stops_as_before(self):
+        self.write(
+            [
+                {'id': 1, 'type': 'individual', 'name': 'a@example.com', 'emails': ['a@example.com', 'b@example.com']},
+                {'id': 2, 'type': 'individual', 'name': 'b@example.com', 'roles': ['user'], 'secrets': ['$2y$x']},
+            ]
+        )
+        out = self.w4('step stubs dropped stub_drop\nstep duplicates duplicates duplicates')
+        self.assertIn('stubs: dropped=0 expected=0 ids -\n', out)
+        self.assertIn('1 duplicate address(es) by class above', out)
+        self.assertIn('STOP TEST (apply): duplicates failed', out)
+
     def test_convert_reports_its_own_error_not_a_duplicate(self):
         self.write([{'id': 1, 'type': 'individual', 'name': 'a@example.com', 'emails': []}])
-        out = self.w4('step duplicates duplicates duplicates\nstep convert export_lines convert')
+        out = self.w4('step stubs dropped stub_drop\nstep duplicates duplicates duplicates\nstep convert export_lines convert')
         self.assertIn('duplicates done (duplicates=0)', out)
         self.assertIn(
             'convert exit 1: DataStore could not be built (storage.data missing or invalid); '
@@ -468,7 +496,7 @@ class W4Duplicates(Data):
 
     def test_another_convert_error_in_the_check_is_masked_in_the_log(self):
         self.write([{'type': 'individual', 'name': 'noid@example.com', 'emails': []}])
-        out = self.w4('step duplicates duplicates duplicates')
+        out = self.w4('step stubs dropped stub_drop\nstep duplicates duplicates duplicates')
         self.assertIn("dup_check.py exit 1: user '<value>' has no id; full text in", out)
         self.assertNotIn('noid@', out)
 

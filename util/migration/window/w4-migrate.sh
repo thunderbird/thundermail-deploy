@@ -201,11 +201,21 @@ dump() {
   bash "$MIG_DIR/dump-check.sh" "$S/principals.json" || { echo "dump-check.sh: the dump does not match the server's principal totals"; return 1; }
 }
 
+stub_drop() {
+  local rc=0
+  run_to "$S/stubs.txt" "$PY" "$MIG_DIR/stub_drop.py" --principals "$S/principals.json" --output "$S/principals.kept.json" --dropped-list "$S/stubs-dropped.json" --expected "${STUBS_EXPECTED:-0}" || rc=$?
+  [ "$APPLY" = 1 ] || return 0
+  [ "$rc" = 0 ] || { echo "stub_drop.py exit $rc: $(sed -n 's/^error: //p' "$S/stubs.txt" | head -1); full text in $S/stubs.txt"; return 1; }
+  grep '^stubs: ' "$S/stubs.txt" || { echo "stub_drop.py printed no stubs line; see $S/stubs.txt"; return 1; }
+  VALUE=$(sed -n 's/^stubs: dropped=\([0-9]*\) .*/\1/p' "$S/stubs.txt")
+  [ -n "$VALUE" ] && [ -s "$S/principals.kept.json" ] || { echo "stub_drop.py wrote no principals.kept.json"; return 1; }
+}
+
 first_error() { sed -n 's/^error: //p' "$1" | head -1 | sed -E "s/'[^']*'|\"[^\"]*\"/'<value>'/g; s/((User|Group|MailingList|Account) [^ ]+ )\([^)]*\)/\1(<name>)/g; s/[^[:space:]]+@[^[:space:]]+/<address>/g"; }
 
 duplicates() {
   local rc=0
-  run_to "$S/duplicates.txt" "$PY" "$MIG_DIR/dup_check.py" --principals "$S/principals.json" --settings "$S/settings.json" || rc=$?
+  run_to "$S/duplicates.txt" "$PY" "$MIG_DIR/dup_check.py" --principals "$S/principals.kept.json" --settings "$S/settings.json" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   grep -E $'^(class|total)\t' "$S/duplicates.txt" | tr '\t' ' ' | sed 's/^/  /' || true
   VALUE=$(sed -n $'s/^total\t//p' "$S/duplicates.txt")
@@ -218,7 +228,7 @@ duplicates() {
 
 convert() {
   local rc=0
-  run_err "$S/convert.stderr" "$PY" "$MIG_DIR/migrate_v016.py" convert --settings "$S/settings.json" --principals "$S/principals.json" --config "$S/config.json" --output "$S/export.json" --unmigrated-output "$S/unmigrated.txt" || rc=$?
+  run_err "$S/convert.stderr" "$PY" "$MIG_DIR/migrate_v016.py" convert --settings "$S/settings.json" --principals "$S/principals.kept.json" --config "$S/config.json" --output "$S/export.json" --unmigrated-output "$S/unmigrated.txt" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || { echo "convert exit $rc: $(first_error "$S/convert.stderr"); full text in $S/convert.stderr"; return 1; }
   [ -s "$S/export.json" ] || { echo "convert wrote no export.json"; return 1; }
@@ -339,7 +349,7 @@ neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon r
 
 domain_fix_step() {
   local rc=0
-  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --principals "$S/principals.json" --dropped-list "$S/domains-dropped.json" || rc=$?
+  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --principals "$S/principals.kept.json" --dropped-list "$S/domains-dropped.json" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
@@ -356,9 +366,10 @@ read_done() {
 }
 
 export_ok() {
-  local e s want
-  e=$(cut_line w4-export) s=$(cut_line w4-export-start)
+  local e s st want
+  e=$(cut_line w4-export) s=$(cut_line w4-export-start) st=$(cut_line start-legacy-stalwart)
   [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ] || return 1
+  [ -z "$st" ] || [ "$e" -gt "$st" ] || { echo "a start-legacy-stalwart row follows the w4-export row: legacy Stalwart ran again after the export, so it is stale"; return 1; }
   want=$(cut_row w4-export | awk -F'\t' '$5 == "sha256" {print $6}')
   [ -z "$want" ] || [ "$(sha256sum "$S/export.json" | cut -d' ' -f1)" = "$want" ]
 }
@@ -370,6 +381,7 @@ read_phase() {
   else
     [ "$APPLY" = 0 ] || mark w4-export-start file "$S/export.json"
     step dump "" dump
+    step stubs dropped stub_drop
     step duplicates duplicates duplicates
     step convert export_lines convert
     if [ "$APPLY" = 1 ]; then
@@ -393,14 +405,15 @@ no_stalwart() {
 }
 
 reset_preflight() {
-  local read stop bad=0
-  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart)
+  local read stop start bad=0
+  read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart) start=$(cut_line start-legacy-stalwart)
   STOP_AT=$(cut_time stop-legacy-stalwart)
   if [ -n "$read" ] && ! export_ok; then echo "the export of the last read run did not pass its checks (no w4-export row after the last w4-export-start row)"; read=""; fi
   if ! awk -F'\t' '$1 == "cut-ecs" {f = 1} END {exit !f}' "$TIMING_TSV" 2>/dev/null; then echo "no cut-ecs row in $TIMING_TSV: W2 has not cut legacy in this attempt"; bad=1; fi
   if [ -z "$read" ] || [ ! -s "$S/export.json" ]; then echo "no w4-read-done row after the last cut-ecs row (or no $S/export.json): run --phase read first"; bad=1; fi
   if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
   elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
+  elif [ -n "$start" ] && [ "$start" -gt "$stop" ]; then echo "a start-legacy-stalwart row follows the stop-legacy-stalwart row: legacy Stalwart was started again; stop and read it again (W 4.3)"; bad=1
   else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
   if runner_up; then echo "runner Running"; else echo "runner pod is not Running: bash $MIG_DIR/window/runner-start.sh --apply"; bad=1; fi
   no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }
@@ -705,7 +718,7 @@ prod_main() {
   case "$PHASE" in
     read)
       GATE_ID=go-W4-read prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh "$PY"
+      helpers migrate_v016.py dump_legacy.py stub_drop.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh "$PY"
       read_phase ;;
     reset|boot)
       GATE_ID=go-W4-reset prereqs
@@ -717,7 +730,7 @@ prod_main() {
       [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
       GATE_ID=go-W4-read prereqs
       GATE_ID=go-W4-reset prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env apply-pod.yaml apply_requests.py stalwart-cli python3 "$PY"
+      helpers migrate_v016.py dump_legacy.py stub_drop.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env apply-pod.yaml apply_requests.py stalwart-cli python3 "$PY"
       need_recovery_pr
       read_phase
       reset_phase
@@ -734,7 +747,7 @@ if [ "$TARGET_ENV" = tb-prod ]; then
 fi
 
 prereqs
-helpers migrate_v016.py dup_check.py blob-delta.sh dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli rclone "$PY"
+helpers migrate_v016.py stub_drop.py dup_check.py blob-delta.sh dump-check.sh retarget-export.sh schema-version.sh restore-target-db.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli rclone "$PY"
 if [ -z "${TM_RECOVERY_PR:-}" ]; then
   printf 'NEED  TM_RECOVERY_PR is empty: export the number of the recovery-mode PR before W4\n'
   [ "$APPLY" = 1 ] && stop "TM_RECOVERY_PR is empty"
@@ -748,6 +761,7 @@ step w4-preflight "" preflight
 step queue-drain queued queue_drain
 step task-queue tasks task_queue
 step dump "" dump
+step stubs dropped stub_drop
 step duplicates duplicates duplicates
 step convert export_lines convert
 if [ "$APPLY" = 1 ]; then

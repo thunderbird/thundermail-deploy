@@ -23,6 +23,7 @@ LOOPBACK = ('127.0.0.1', 'localhost', '::1')
 CORE = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 GET_PAGE = 500
 QUERY_PAGE = 1000
+QUERY_LISTINGS = 5
 MAIL_TYPES = ('User', 'Group')
 FULL = ['blobId', 'size', 'receivedAt', 'mailboxIds', 'keywords', 'messageId']
 ID = re.compile(r'[A-Za-z0-9_-]{1,255}')
@@ -171,18 +172,32 @@ class Jmap:
         return r[1]
 
     def query_all(self, name, args):
-        ids, total = [], None
-        while True:
-            r = self.one(
-                name, {**args, 'position': len(ids), 'limit': QUERY_PAGE, 'calculateTotal': True}
+        for listing in range(1, QUERY_LISTINGS + 1):
+            ids, total, state = [], None, None
+            while True:
+                r = self.one(
+                    name,
+                    {**args, 'position': len(ids), 'limit': QUERY_PAGE, 'calculateTotal': True},
+                )
+                if not ids:
+                    state = r.get('queryState')
+                elif r.get('queryState') != state:
+                    break
+                batch, total = r['ids'], r.get('total', total)
+                ids += batch
+                if not batch or (total is not None and len(ids) >= total):
+                    if total is not None and len(ids) != total:
+                        raise Stop(
+                            '%s: got %d ids, the server reports %d' % (name, len(ids), total)
+                        )
+                    return ids
+            print(
+                '%s: the list changed between pages, reading it again (%d of %d)'
+                % (name, listing, QUERY_LISTINGS)
             )
-            batch, total = r['ids'], r.get('total', total)
-            ids += batch
-            if not batch or (total is not None and len(ids) >= total):
-                break
-        if total is not None and len(ids) != total:
-            raise Stop('%s: got %d ids, the server reports %d' % (name, len(ids), total))
-        return ids
+        raise Stop(
+            '%s: the list changed between pages in %d listings in a row' % (name, QUERY_LISTINGS)
+        )
 
     def admin_account(self):
         session = json.loads(self.raw('/jmap/session'))

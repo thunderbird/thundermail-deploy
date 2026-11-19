@@ -72,7 +72,7 @@ class Directory(unittest.TestCase):
         self.addCleanup(self.srv.server_close)
         self.addCleanup(self.srv.shutdown)
 
-    def run02(self, dropped=None):
+    def run02(self, dropped=None, stubs=None):
         env = {
             'PATH': '/usr/bin:/bin',
             'VERIFY_OUT': str(self.t / 'out'),
@@ -84,6 +84,9 @@ class Directory(unittest.TestCase):
         if dropped is not None:
             (self.t / 'dropped.json').write_text(json.dumps(dropped, ensure_ascii=False))
             env['DROPPED_DOMAINS'] = str(self.t / 'dropped.json')
+        if stubs is not None:
+            (self.t / 'stubs.json').write_text(json.dumps(stubs))
+            env['DROPPED_STUBS'] = str(self.t / 'stubs.json')
         p = subprocess.run(
             [sys.executable, str(HERE / '02_directory.py')],
             env=env,
@@ -116,6 +119,22 @@ class Directory(unittest.TestCase):
         self.assertIn('WARN  DkimSignature count: target 1 is above the export after the drop (0)', out)
         warn = [x for x in (HERE / 'expected-warn.txt').read_text().splitlines() if x.strip()]
         self.assertTrue(any(w in out.split('WARN  DkimSignature')[1] for w in warn))
+
+    def test_dropped_stub_accounts_are_left_out_of_the_account_compare(self):
+        items = json.loads((self.t / 'principals.json').read_text())
+        items.append({'id': 6, 'type': 'individual', 'name': 'stub@a.example.com', 'roles': ['user']})
+        (self.t / 'principals.json').write_text(json.dumps(items, ensure_ascii=False))
+        listed = {'domains': [BAD, UNI, PUNY], 'dkim_dropped': 6, 'dkim_kept': 1}
+        rc, out = self.run02(listed)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('FAIL  account ids: source 2, target 1, missing [6]', out)
+        rc, out = self.run02(listed, {'ids': [6], 'stubs': [{'id': 6, 'name': 'x', 'alias_holder': 1}]})
+        self.assertEqual(rc, 0, out)
+        self.assertIn('PASS  stub accounts dropped before the convert (stub_drop.py), left out of the source set: 1', out)
+        self.assertIn('PASS  account ids: source 1, target 1', out)
+        rc, out = self.run02(listed, {'nope': 1})
+        self.assertEqual(rc, 1, out)
+        self.assertIn('dropped-stub list', out)
 
     def test_an_unreadable_list_fails(self):
         (self.t / 'dropped.json').write_text('{')
