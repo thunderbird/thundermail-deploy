@@ -277,8 +277,9 @@ the keying for the real hosts.
   `stubs-dropped.json` (mode 600) holds the dropped ids and names. It prints
   `stubs: dropped=<n> expected=<STUBS_EXPECTED> ids <ids>`, with `CHECK` after the expected count
   when they differ (2 on tb-prod, 0 elsewhere), and never stops; any other duplicate still stops
-  `duplicates` as before. The verify suite reads the ids through `DROPPED_STUBS`
-  (`verify/tb-prod.env`) and leaves those accounts out of every compare. `domains` runs
+  `duplicates` as before. It reads every field as `convert` does (wrapped values, members by name
+  or id). The verify suite reads the ids through `DROPPED_STUBS` (`verify/tb-prod.env` and
+  `verify/tb-stage.env`) and leaves those accounts out of every compare. `domains` runs
   `domain_fix.py` on the export. It drops each Domain that Stalwart 0.16 refuses, with the DKIM
   signatures that point at it: a name no public suffix rule matches (`domain-suffixes.txt`, the
   rules of the `psl` crate 2.1.241 that Stalwart 0.16.27 is built with, in ASCII form, plus the

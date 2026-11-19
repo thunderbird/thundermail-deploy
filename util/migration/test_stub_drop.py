@@ -137,6 +137,7 @@ class StubDrop(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            env=self.env,
             timeout=60,
         )
         self.assertEqual(p.stdout, 'stubs: dropped=0 expected=0 ids -\n')
@@ -162,6 +163,18 @@ class StubDrop(unittest.TestCase):
             'no role': ([HOLDER, dict(STUB, roles=[])], None),
             'a permission': ([HOLDER, dict(STUB, enabledPermissions=['impersonate'])], None),
             'another field': ([HOLDER, dict(STUB, tenant='t1')], None),
+            'listed by id in a list': (
+                [HOLDER, STUB, {'id': 14, 'type': 'list', 'name': 'all@example.com', 'members': [{'integer': 11}]}],
+                None,
+            ),
+            'listed by wrapped name': (
+                [HOLDER, STUB, dict(group, members={'stringList': ['stub@example.com']})],
+                None,
+            ),
+            'listed by bare id': ([HOLDER, STUB, dict(group, members=[11])], None),
+            'wrapped memberOf': ([HOLDER, dict(STUB, memberOf={'stringList': ['team@example.com']})], None),
+            'wrapped secret': ([HOLDER, dict(STUB, secrets={'stringList': ['$2y$x']})], None),
+            'wrapped quota': ([HOLDER, dict(STUB, quota={'integer': 5})], None),
         }
         for case, (items, _) in cases.items():
             with self.subTest(case=case):
@@ -170,6 +183,20 @@ class StubDrop(unittest.TestCase):
                 self.assertIn('dropped=0 ', out)
                 p = self.dup_check()
                 self.assertEqual(p.returncode, 3, p.stdout + p.stderr)
+
+    def test_wrapped_values_are_read_as_the_converter_reads_them(self):
+        holder = dict(HOLDER, emails={'stringList': ['holder@example.com', 'stub@example.com']})
+        stub = {'id': {'integer': 11}, 'type': 'individual', 'name': {'string': 'stub@example.com'}, 'roles': {'stringList': ['user']}}
+        out, listed = self.drop([holder, stub])
+        self.assertEqual(listed['ids'], [11])
+        self.assertEqual(out, 'stubs: dropped=1 expected=1 ids 11\n')
+        self.assertEqual(self.dup_check().returncode, 0)
+
+    def test_both_verify_files_read_the_dropped_list(self):
+        for env in ('tb-stage', 'tb-prod'):
+            with self.subTest(env=env):
+                text = (HERE / 'verify' / ('%s.env' % env)).read_text()
+                self.assertIn('DROPPED_STUBS="$SECRET_DIR/stubs-dropped.json"', text)
 
     def test_an_unclaimed_empty_account_is_not_a_stub(self):
         lone = dict(STUB, name='lone@example.com')
