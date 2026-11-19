@@ -172,9 +172,10 @@ build() {
   KUBECONFIG_TARGET=$(realpath -m "${KUBECONFIG_TARGET:-$HOME/.local/state/talos/$TARGET_KUBECONFIG_NAME}")
   KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
   KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
-  [ "$TARGET_ENV" != tb-prod ] || attempt_guard
-  mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
+  mkdir -p "$(dirname "$ENV_FILE")"
   env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
+  [ "$TARGET_ENV" != tb-prod ] || attempt_guard
+  mkdir -p "$EVIDENCE_DIR" "$SECRET_DIR"
   local count=0 missing=0
   PUT=" "
   [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
