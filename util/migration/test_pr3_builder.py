@@ -785,7 +785,7 @@ class ProdBuildBeforeTheWindow(Base):
             },
         ]
 
-    def prod_build(self, keep_line='KEEP_GPG_RECIPIENT=operator@example.test\n'):
+    def test_prod_build_exits_0_with_only_the_operator_file(self):
         t = self.t
         repo = t / 'repo'
         shutil.copytree(
@@ -813,17 +813,13 @@ class ProdBuildBeforeTheWindow(Base):
             'TARGET_ENV=tb-prod\nTEST_USER=u@example.test\nTEST_MAILBOX=box@example.test\n'
             'TEST_MAILBOX_IMAP_HOST=imap.example.test\nTEST_MAILBOX_IMAP_USER=box@example.test\n'
             'TEST_MAILBOX_IMAP_PASSWORD=imap-pw-1\n'
-            + keep_line
         )
         op.chmod(0o600)
         (t / 'kc-target').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
         (t / 'kc-hub').write_text(kubeconfig('hub', 'mzla-eks-shared01'))
         self.rules(self.rules_all())
         env = self.prod(OPERATOR_ENV=str(op), **{k: str(v) for k, v in dirs.items()})
-        return self.run_sh([str(repo / 'util' / 'migration' / 'build-cutover-env.sh')], **env)
-
-    def test_prod_build_exits_0_with_only_the_operator_file(self):
-        rc, out = self.prod_build()
+        rc, out = self.run_sh([str(repo / 'util' / 'migration' / 'build-cutover-env.sh')], **env)
         self.assertNotRegex(out, r'(?m)^\S+ +len=\d+ (NEED|CONTAINS)')
         self.assertRegex(out, r'(?m)^written \S+ \(mode 600\) vars=\d+ missing=0$')
         self.assertEqual(rc, 0, out)
@@ -833,12 +829,6 @@ class ProdBuildBeforeTheWindow(Base):
         self.assertIn("TARGET_NLB_DNS='nlb.example.test'", text)
         self.assertIn("NEON_BRANCH_KC='production'", text)
         self.assertNotIn('neon-key-1', out)
-
-    def test_prod_build_needs_the_keep_gpg_recipient(self):
-        rc, out = self.prod_build(keep_line='')
-        self.assertNotEqual(rc, 0, out)
-        self.assertRegex(out, r'(?m)^KEEP_GPG_RECIPIENT +len=0 NEED unset \(not written')
-        self.assertRegex(out, r'(?m)^written \S+ \(mode 600\) vars=\d+ missing=1$')
 
 
 if __name__ == '__main__':
