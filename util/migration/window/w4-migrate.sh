@@ -402,7 +402,7 @@ reset_preflight() {
   if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1
   elif [ -n "$read" ] && [ "$stop" -lt "$read" ]; then echo "the stop-legacy-stalwart row comes before the w4-read-done row: stop legacy Stalwart after the read phase"; bad=1
   else echo "legacy Stalwart stopped at $STOP_AT (stop-legacy-stalwart row)"; fi
-  if runner_up; then echo "runner Running"; else echo "runner pod is not Running"; bad=1; fi
+  if runner_up; then echo "runner Running"; else echo "runner pod is not Running: bash $MIG_DIR/window/runner-start.sh --apply"; bad=1; fi
   no_stalwart || { echo "the reset needs deploy/stalwart at 0 replicas and no app=stalwart pod"; bad=1; }
   [ "$bad" = 0 ] && return 0
   [ "$APPLY" = 1 ] && return 1
