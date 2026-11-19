@@ -461,13 +461,14 @@ schema_before() {
 }
 
 auth_failed() { grep -q 'password authentication failed' <<<"$1" && grep -q '^rc=[1-9]' <<<"$1"; }
+read_only_refused() { grep -q 'in a read-only transaction' <<<"$1" && grep -q '^rc=[1-9]' <<<"$1"; }
 
 guard() {
   local hosts parent branch out pw
   printf '  + %s hosts --branch %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH"
   printf '  + runner: %s -c %s (cutover branch login through .pgpass)\n' "$(shq "${TPSQL[@]}")" "'select 1'"
   printf '  + runner: the same credential against the production endpoint: pass only on password authentication failed\n'
-  printf '  + runner: the %s credential: login on its host, then password authentication failed on production\n' "$SOURCE_BRANCH"
+  printf '  + runner: the %s credential: login on its host, a write there refused as read-only (in a rolled-back transaction), then password authentication failed on production\n' "$SOURCE_BRANCH"
   [ "$APPLY" = 1 ] || return 0
   hosts=$("${NB[@]}" hosts --branch "$CUTOVER_BRANCH") || { printf '%s\n' "$hosts"; return 1; }
   parent=$(sed -n 's/^parent_host=//p' <<<"$hosts") branch=$(sed -n 's/^branch_host=//p' <<<"$hosts")
@@ -489,6 +490,9 @@ guard() {
     else
       [ "$(head -1 <<<"$out")" = 1 ] && grep -qx 'rc=0' <<<"$out" || { echo "$SOURCE_BRANCH login failed: $(grep -v '^rc=' <<<"$out" | tail -1)"; return 1; }
       echo "$SOURCE_BRANCH login: ok"
+      out=$(printf '%s\n' "$pw" | "${POD[@]}" sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; psql -h "$1" -U "$2" -d "$3" -Atc "begin; create table w4_guard_probe (i int); rollback" 2>&1; echo "rc=$?"' sh "$h" "$STALWART_SOURCE_PG_USER" "$STALWART_SOURCE_PG_DB")
+      read_only_refused "$out" || { echo "GUARD FAILED: $SOURCE_BRANCH did not refuse a write as read-only: $(grep -v '^rc=' <<<"$out" | tail -1) ($(grep '^rc=' <<<"$out"))"; return 1; }
+      echo "$SOURCE_BRANCH refuses a write: read-only transaction"
     fi
   done
   mark guard result pass
