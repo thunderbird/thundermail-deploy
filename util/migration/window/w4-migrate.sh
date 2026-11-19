@@ -337,6 +337,17 @@ apply_flag() { [ "$APPLY" = 1 ] && echo --apply || echo --dry-run; }
 APPLY_ARG=()
 neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon read failed (dry run continues)\n' "$2"; NEEDS=$((NEEDS + 1)); }; }
 
+domain_fix_step() {
+  local rc=0
+  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --principals "$S/principals.json" --dropped-list "$S/domains-dropped.json" || rc=$?
+  [ "$APPLY" = 1 ] || return 0
+  [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
+  grep '^domains checked=' "$S/domain-fix.txt" || true
+  grep '^warning: ' "$S/domain-fix.txt" > "$S/domain-fixed.txt" || true
+  VALUE=$(grep -cE '^warning: dropping (Domain|DkimSignature) ' "$S/domain-fixed.txt" || true)
+  echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature; $(grep -c '^warning: not restoring the catch-all ' "$S/domain-fixed.txt" || true) catch-all(s) not restored ($S/domain-fixed.txt)"
+}
+
 read_done() {
   [ -s "$S/export.json" ] || { echo "no $S/export.json"; return 1; }
   mark w4-read-done export "$S/export.json"
@@ -361,6 +372,7 @@ read_phase() {
       again convert dropped_accounts "$DROPPED" || stop "could not write the convert dropped_accounts row"
       [ "$DROPPED" = 0 ] || stop "convert.stderr reports $DROPPED dropped or renamed User/Group line(s) outside the T10 baseline ($S/convert-dropped.txt)"
     fi
+    step domains changes domain_fix_step
     step retarget "" retarget
     [ "$APPLY" = 0 ] || mark w4-export file "$S/export.json"
   fi
@@ -598,7 +610,7 @@ prod_main() {
   case "$PHASE" in
     read)
       GATE_ID=go-W4-read prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py dump-check.sh retarget-export.sh "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh "$PY"
       read_phase ;;
     reset|boot)
       GATE_ID=go-W4-reset prereqs
@@ -610,7 +622,7 @@ prod_main() {
       [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
       GATE_ID=go-W4-read prereqs
       GATE_ID=go-W4-reset prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
       need_recovery_pr
       read_phase
       reset_phase

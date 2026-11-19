@@ -264,7 +264,17 @@ the keying for the real hosts.
 - On tb-prod W4 has three phases, and `--apply` without one exits 64; the dry run without a
   phase prints all three. `--phase read` (gate `go-W4-read`) dumps through `dump_legacy.py` (the
   password stays in the environment, `DUMP_WORKERS` concurrent reads, default 8), then runs
-  `duplicates`, `convert`, `retarget` and `queue-drain` last. It writes `$SECRET_DIR` and the
+  `duplicates`, `convert`, `domains`, `retarget` and `queue-drain` last. `domains` runs
+  `domain_fix.py` on the export. It drops each Domain that Stalwart 0.16 refuses, with the DKIM
+  signatures that point at it: a name no public suffix rule matches (`domain-suffixes.txt`, the
+  rules of the `psl` crate 2.1.241 that Stalwart 0.16.27 is built with, in ASCII form, plus the
+  reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
+  (compared after NFKC and punycode, as 0.16 reads them). It prints one
+  `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does an address of `principals.json` on a dropped Domain. A catch-all there (`@<domain>`, which `convert` leaves out and W5 puts back) is a `warning:` line instead: `apply_unmigrated.py --dropped-domains` (W5 on tb-prod) skips it and prints the count. `domain_fix.py --dropped-list` writes the list that `verify/02_directory.py` reads (`DROPPED_DOMAINS`). Names are compared in the punycode form 0.16 stores (`shapes.norm_domain`).
+  `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
+  `class Domain:refused-by-0.16` lines, and the names convert drops itself as
+  `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
   `w4-export` and `w4-read-done` rows only. A rerun after a `queue-drain` stop reads the queue
   only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
   without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`

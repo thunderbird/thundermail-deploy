@@ -39,6 +39,30 @@ def claims(conv, accounts, mailing_lists):
     }
 
 
+def load_domains():
+    spec = importlib.util.spec_from_file_location('domains', HERE / 'domains.py')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def domain_report(m, conv, by_class):
+    names = dict(conv.domain_cid_to_name)
+    kept = {c: n for c, n in names.items() if m.is_valid_domain_name(n)}
+    for c in sorted(set(names) - set(kept)):
+        by_class['Domain:dropped-by-convert'] += 1
+        print('domain\tDomain:dropped-by-convert\t%s' % names[c])
+    dups, bad = load_domains().survey(kept)
+    for a, cids in sorted(dups.items()):
+        by_class['Domain:idna-duplicate'] += 1
+        print(
+            'domain\tDomain:idna-duplicate\t%s\t%s' % (a, '; '.join(kept[c] for c in sorted(cids)))
+        )
+    for c, why in sorted(bad.items()):
+        by_class['Domain:refused-by-0.16'] += 1
+        print('domain\tDomain:refused-by-0.16\t%s\t%s' % (kept[c], why))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description='List every address that migrate_v016.py convert would reject as a duplicate.'
@@ -77,6 +101,7 @@ def main(argv=None):
             'duplicate\t%s\t%s\t%s'
             % (cls, addr, '; '.join('%s %s %s (%s)' % (k, r, c, n) for k, r, c, n in who))
         )
+    domain_report(m, conv, by_class)
     for cls, n in sorted(by_class.items()):
         print('class\t%s\t%d' % (cls, n))
     print('total\t%d' % len(dups))

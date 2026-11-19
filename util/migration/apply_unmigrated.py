@@ -14,7 +14,7 @@ Exit code is 1 if any write failed.
 import argparse, base64, json, os, sys, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from shapes import duration_ms, norm_addr, strings, unwrap_str
+from shapes import duration_ms, norm_addr, norm_domain, strings, unwrap_str
 
 EVENT_RENAMES = {"queue.queue-message-authenticated": "queue.authenticated-message-queued"}
 
@@ -142,7 +142,7 @@ def plan(s):
     return out
 
 
-def catch_alls(principals_path):
+def catch_alls(principals_path, dropped=frozenset(), skipped=None):
     """v0.15 catch-alls: an account address of the form `@domain`. Returns {domain: owner's primary address}.
     `convert` drops them; in 0.16 a catch-all is the Domain's catchAllAddress."""
     p = json.load(open(principals_path))
@@ -156,6 +156,10 @@ def catch_alls(principals_path):
         for e in emails:
             if e.startswith("@"):
                 d = e[1:]
+                if norm_domain(d) in dropped:
+                    if skipped is not None:
+                        skipped.append(d)
+                    continue
                 if d in out and out[d] != primary:
                     sys.exit(f"catch-all @{d} is claimed by both {out[d]} and {primary}; fix it in v0.15 first")
                 out[d] = primary
@@ -185,6 +189,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--settings", default="settings.json", help="v0.15 settings dump (default: settings.json)")
     ap.add_argument("--principals", help="v0.15 principals dump; when given, catch-all addresses are re-applied too")
+    ap.add_argument("--dropped-domains", help="domains-dropped.json of domain_fix.py: catch-alls on those Domains are skipped and counted")
     ap.add_argument("--webhook-url", action="append", default=[], metavar="NAME=URL", help="override a webhook URL, e.g. posthog=https://...")
     ap.add_argument("--webhook-secret-env", action="append", default=[], metavar="NAME=ENVVAR",
                     help="take a webhook's signing key from an env var instead of the dump, e.g. posthog=WEBHOOK_SECRET")
@@ -263,9 +268,14 @@ def main():
             print(f"  {obj}: {c['create']} to create, {c['skip']} already present")
 
     if a.principals and wanted("Domain", only, a.skip):
-        domains = {d["name"].lower(): d for d in j.all("Domain")}
-        for dom, addr in sorted(catch_alls(a.principals).items()):
-            d = domains.get(dom)
+        domains = {norm_domain(d["name"]): d for d in j.all("Domain")}
+        dropped = set()
+        if a.dropped_domains:
+            with open(a.dropped_domains, encoding="utf-8") as fh:
+                dropped = {norm_domain(x) for x in json.load(fh)["domains"]}
+        left_out = []
+        for dom, addr in sorted(catch_alls(a.principals, dropped, left_out).items()):
+            d = domains.get(norm_domain(dom))
             if not d:
                 failures += 1
                 print(f"  FAILED catch-all @{dom}: domain does not exist on the target")
@@ -279,6 +289,9 @@ def main():
                 if r.get("notUpdated") or d["id"] not in (r.get("updated") or {}):
                     failures += 1
                     print(f"    FAILED: {r.get('notUpdated') or 'not in updated'}")
+
+    if a.principals and wanted("Domain", only, a.skip) and a.dropped_domains:
+        print(f"  skip   catch-alls on Domains dropped before the apply (domain_fix.py): {len(left_out)}")
 
     if a.apply:
         for obj, items in creates.items():

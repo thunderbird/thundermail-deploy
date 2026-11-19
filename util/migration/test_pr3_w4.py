@@ -1,3 +1,4 @@
+import importlib
 import json
 import pathlib
 import re
@@ -8,8 +9,8 @@ import time
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from test_target import Sandbox  # noqa: E402
-from test_window import Harness  # noqa: E402
+Sandbox = importlib.import_module('test_target').Sandbox
+Harness = importlib.import_module('test_window').Harness
 
 HERE = pathlib.Path(__file__).resolve().parent
 KUBE = r"""#!{py}
@@ -110,7 +111,7 @@ elif cmd == 'source':
               'created_at=%s x endpoint=read_only' % st['created_at'])
 """
 TOP = re.compile(
-    r'(?m)^(?:NS|S|POD|RECOVERY_[A-Z]+|REVERT|RULE|TPSQL|NB|WANT_SCHEMA|CUTOVER_BRANCH|SOURCE_BRANCH|APPLY_ARG)=.*$'
+    r'(?m)^(?:NS|S|POD|RECOVERY_[A-Z]+|REVERT|RULE|TPSQL|NB|WANT_SCHEMA|CUTOVER_BRANCH|SOURCE_BRANCH|APPLY_ARG|DROP_BASELINE)=.*$'
 )
 AUTH = 'psql: error: FATAL:  password authentication failed for user "o"\nrc=2'
 ARN = 'arn:aws:eks:eu-central-1:1:cluster/mzla-eks-tb-prod01'
@@ -226,7 +227,7 @@ class ReadPhase(Prod):
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
         'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }\n'
-        'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
+        'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
     def test_order_marks_and_a_queue_rerun_reads_the_queue_only(self):
