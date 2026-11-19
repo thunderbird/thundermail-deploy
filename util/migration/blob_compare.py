@@ -29,7 +29,23 @@ TBPROD_RW = 'mzla-tb-prod'
 RULE = 'tb-prod-cutover'
 RULE_APPLIED = '2026-11-19T02:48:00Z'
 OPERATOR_FILE = '~/.local/state/talos/cutover-operator-tb-prod.env'
-NAMED = ('STALWART_WEBADMIN', 'SPAM_TRAINER_KEY', 'SPAM_CLASSIFIER_KEY')
+STALWART_ALPHABET = b'abcdefghijklmnopqrstuvwxyz792013'
+
+
+def s3_key(blob_key):
+    std = b'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+    raw = base64.b32encode(blob_key.encode()).rstrip(b'=')
+    return raw.translate(bytes.maketrans(std, STALWART_ALPHABET)).decode()
+
+
+NAMED = {
+    s3_key(name): name
+    for name in (
+        'STALWART_WEBADMIN',
+        'STALWART_SPAM_TRAIN_DATA.lz4',
+        'STALWART_SPAM_CLASSIFIER_MODEL.lz4',
+    )
+}
 READ_VERBS = {
     ('s3api', 'list-object-versions'),
     ('s3api', 'get-object'),
@@ -536,7 +552,7 @@ def record(i, x, y, reason, ev, counts, named):
 
 def named_line(key, state, copied):
     if state is None:
-        return 'named %s absent in both buckets' % key
+        return 'named %s (%s) absent in both buckets' % (NAMED[key], key)
     x, y, reason = state
 
     def show(e):
@@ -553,7 +569,7 @@ def named_line(key, state, copied):
         y = x
     else:
         verdict = 'differ' if reason in ('size', 'checksum') else 'missing in tb-prod'
-    return 'named %s legacy=%s tb-prod=%s %s' % (key, show(x), show(y), verdict)
+    return 'named %s (%s) legacy=%s tb-prod=%s %s' % (NAMED[key], key, show(x), show(y), verdict)
 
 
 def md5_range(fh, length):
@@ -822,7 +838,7 @@ def cmd_compare(a, summary):
         text = named_line(k, named.get(k), copied_keys)
         print(text)
         if not text.endswith(' match'):
-            named_bad.append(k)
+            named_bad.append(NAMED[k])
     summary['left'] = diffs - summary['copied']
     if a.apply and named_bad and not summary['left'] and not summary['failed']:
         lock.close()
@@ -887,7 +903,7 @@ def parser():
     w.add_argument('--interval', type=int, default=60)
     c.add_argument('--out')
     c.add_argument('--shards', type=int, default=128)
-    c.add_argument('--workers', type=int, default=16)
+    c.add_argument('--workers', type=int, default=48)
     c.add_argument('--alphabet', default=STALWART_ALPHABET)
     c.add_argument('--relist', action='store_true')
     c.add_argument('--skip-wait-check', action='store_true')
