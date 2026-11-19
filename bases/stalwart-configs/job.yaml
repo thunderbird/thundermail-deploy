@@ -37,6 +37,7 @@ spec:
                   == (($values.dnsManagement // "Manual") == "Automatic")
                 )
                 | select(.object != "WebHook" or $values.webhookURL != null)
+                | select(.object != "DataRetention" or $values.dataRetention != null)
                 | (
                   .. | select(tag == "!!map")
                 ) |= with_entries(
@@ -84,6 +85,10 @@ spec:
                 (
                   .. | select(. == "__ADDRESS_BOOK_NAME__")
                 ) = $values.addressBookName
+                |
+                (
+                  .. | select(. == "__DATA_RETENTION__")
+                ) = $values.dataRetention
                 |
                 (
                   select(.object == "AllowedIp") | .value

@@ -482,3 +482,7 @@ value:
     signatureKey:
       '@type': Value
       secret: __WEBHOOK_SECRET__
+---
+'@type': update
+object: DataRetention
+value: __DATA_RETENTION__
