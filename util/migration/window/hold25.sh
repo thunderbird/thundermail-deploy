@@ -17,6 +17,7 @@ DRAIN_POLL=${QUEUE_DRAIN_POLL_SECONDS:-15}
 DRAIN_MAX=${QUEUE_DRAIN_MAX_SECONDS:-5400}
 LOCK_SECS=605
 QUERY_LIMIT=5000
+WRITE_SECS=30
 MEMF=$EVIDENCE_DIR/hold25-memory.json
 MEM='{}'
 PLAN='{}'
@@ -136,9 +137,9 @@ connect() {
 
 read_queue() {
   local qids page list='[]' i now min cut=${1:-9999999999}
-  page=$(call x:QueuedMessage/query "{\"limit\": $QUERY_LIMIT}") || return 1
+  page=$(call x:QueuedMessage/query "{\"limit\": $QUERY_LIMIT, \"calculateTotal\": true}") || return 1
   qids=$(jq -c '.ids' <<<"$page") || return 1
-  [ "$(jq '.ids | length' <<<"$page")" -lt "$(jq --argjson l "$QUERY_LIMIT" '.limit // $l' <<<"$page")" ] || { echo "queue: one query returned $(jq '.ids | length' <<<"$page") ids, its limit; the queue may hold more and cannot be read in one scan"; return 1; }
+  jq -e '.total == (.ids | length)' <<<"$page" >/dev/null || { echo "queue: one query returned $(jq '.ids | length' <<<"$page") ids of total $(jq '.total' <<<"$page"); the queue cannot be read in one scan"; return 1; }
   for ((i = 0; i < $(jq length <<<"$qids"); i += 100)); do
     page=$(call x:QueuedMessage/get "$(jq -c --argjson i "$i" '{ids: .[$i:$i + 100]}' <<<"$qids")" | jq -c '.list') || return 1
     list=$(printf '%s\n%s\n' "$list" "$page" | jq -cs '.[0] + .[1]') || return 1
@@ -149,7 +150,7 @@ read_queue() {
     def due: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
     map({id, created: ((.createdAt // "1970-01-01T00:00:00Z") | due), pend: [(.recipients // {}) | (if type == "array" then .[] else to_entries[] | .value + {address: .key} end) | select(.status["@type"] == "Scheduled" or .status["@type"] == "TemporaryFailure")]})
     | map(. + {remote: any(.pend[]; .queueName != "local"), held: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) >= $min)), later: ((.pend | length) > 0 and all(.pend[]; (.retryDue | due) > $now)), enc: (if (.pend | length) > 0 then ([.pend[].retryDue | due] | min) - $hold else 0 end), rem: [.pend[] | select(.queueName != "local") | {a: (.address // ""), d: ((.address // "") | ascii_downcase | split("@") | last), u: (.retryDue | due), c: (.retryCount // 0)}]})
-    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created <= $cut) | .id], later: [.[] | select(.remote and .later) | .id], msgs: [.[] | select(.remote) | {id, created, held, enc, dd: ([.rem[] | select(.u <= $t) | .d] | unique | length), att: ([.rem[] | select(.c >= 1) | .d] | unique | length), umin: ([.rem[] | select(.u <= $t) | .u] | min), counts: ([.rem[] | {(.a): .c}] | add // {})}]}' <<<"$list") || return 1
+    | {total: length, remote: [.[] | select(.remote) | .id], held: [.[] | select(.remote and .held) | .id], not_held: [.[] | select(.remote and (.held | not)) | .id], hold: [.[] | select(.remote and (.held | not) and .created <= $cut) | .id], later: [.[] | select(.remote and .later) | .id], msgs: [.[] | select(.remote) | {id, created, held, enc, rem: [.rem[] | {d, u}], att: ([.rem[] | select(.c >= 1) | .d] | unique | length), counts: ([.rem[] | {(.a): .c}] | add // {})}]}' <<<"$list") || return 1
 }
 
 show_queue() { jq -r '"queue: total=\(.total) remote=\(.remote | length) held=\(.held | length) not_held=\(.not_held | length)" + (if (.not_held | length) != (.hold | length) then " queued_after_release=\((.not_held | length) - (.hold | length))" else "" end)' <<<"$Q"; }
@@ -173,17 +174,21 @@ mem_load() {
 }
 
 plan() {
-  PLAN=$(printf '%s\n%s\n' "$Q" "$MEM" | jq -cs --argjson t "$(date -u +%s)" --argjson p "$DOMAIN_SECS" --argjson lock "$LOCK_SECS" --argjson cut "$1" --argjson wcut "${2:-$1}" --argjson hold "$((HOLD_HOURS * 3600))" '
+  local t
+  t=$(date -u +%s)
+  PLAN=$(printf '%s\n%s\n' "$Q" "$MEM" | jq -cs --argjson t "$t" --argjson tw "$((t + WRITE_SECS))" --argjson p "$DOMAIN_SECS" --argjson lock "$LOCK_SECS" --argjson cut "$1" --argjson wcut "${2:-$1}" --argjson hold "$((HOLD_HOURS * 3600))" '
     .[1] as $mem
     | [.[0].msgs[] | ($mem[.id]) as $k
        | (($k != null) and all(.counts | to_entries[]; .value <= (($k.counts[.key] // 0) + 1))) as $known
-       | ($t + .dd * $p) as $cur
-       | (if .umin != null and .umin + $lock <= $t then $cur else 0 end) as $part
+       | ([.rem[] | select(.u <= $tw) | .d] | unique | length) as $dd
+       | ([.rem[] | select(.u <= $tw) | .u] | min) as $umin
+       | ($tw + $dd * $p) as $cur
+       | (if $umin != null and $umin + $lock <= $tw then $cur else 0 end) as $part
        | . + (if .held then {safe: .enc, again: false}
               elif $known then {safe: ([$k.floor, $cur] | max), floor: ([$k.floor, $part] | max), again: true}
-              else {safe: ([$cur, $t + .att * $p] | max), floor: ([$t + .att * $p, $part] | max), again: ($k != null)} end)] as $m
+              else {safe: ([$cur, $tw + .att * $p] | max), floor: ([$tw + .att * $p, $part] | max), again: ($k != null)} end)] as $m
     | [$m[] | select(.created <= $cut) | .safe - $t | select(. > 0)] as $w
-    | {t: $t, writes: ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): (.safe + $hold)}] | add // {}),
+    | {t: $t, tw: $tw, writes: ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): (.safe + $hold)}] | add // {}),
        mem: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts}}] | add // {})),
        again: [$m[] | select(.again) | .id], old: ([$m[] | select(.created <= $cut)] | length),
        late: ([$m[] | select(.created > $cut)] | length), tohold: ([$m[] | select((.held | not) and .created <= $cut)] | length),
@@ -194,6 +199,7 @@ hold_pass() {
   [ "$(jq '.writes | length' <<<"$PLAN")" -gt 0 ] || return 0
   set_retry "$(jq -c .writes <<<"$PLAN")" || return 1
   [ "$APPLY" = 1 ] || return 0
+  [ "$(date -u +%s)" -le "$(jq .tw <<<"$PLAN")" ] || { echo "hold write finished more than $WRITE_SECS s after the queue read; the waits it wrote start too early"; return 1; }
   MEM=$(jq -c .mem <<<"$PLAN") || return 1
   printf '%s\n' "$MEM" > "$MEMF"
 }
@@ -240,6 +246,7 @@ drain() {
     if [ -z "$end" ]; then
       end=$((start + (DRAIN_MAX > w + DOMAIN_SECS ? DRAIN_MAX : w + DOMAIN_SECS)))
       echo "drain: expected wait at most $w s, until $(date -u -d "@$((now + w))" +%FT%TZ) (sooner when the running attempts end); stops with port 25 closed at $(date -u -d "@$end" +%FT%TZ)"
+      echo "drain: the wait is an estimate of $DOMAIN_SECS s per due remote domain: one route group per domain, 5 MX hosts x 2 addresses x the 127 s kernel SYN timeout (below Stalwart's 300 s connect timeout), plus DNS lookups"
     fi
     if [ "$APPLY" = 0 ]; then
       echo "drain: --apply would wait up to $w s, read the queue every $DRAIN_POLL s, hold again what an ending attempt overwrites, and stop after $((end - start)) s"
@@ -308,7 +315,12 @@ case "$MODE" in
     printf 'bash %s set --dry-run\nbash %s set --apply\n' "$0" "$0" > "$RESTORE"
     open_25 || stop "opening port 25 on $SG failed"
     OPEN_AT=$(date -u +%s)
-    with_queue hold_queue "$OPEN_AT"
+    if [ "$APPLY" = 0 ]; then with_queue hold_queue "$OPEN_AT"
+    elif ! { connect && hold_queue "$OPEN_AT"; }; then
+      echo "queue hold after opening port 25 failed: closing port 25 again"
+      close_25 || stop "queue hold after opening port 25 failed, and closing port 25 again failed: run bash $0 set --apply"
+      stop "queue hold after opening port 25 failed; port 25 is closed again, rerun release-port25"
+    fi
     [ "$APPLY" = 0 ] || echo "release: $(jq --argjson d "$DRAIN_AT" --argjson o "$OPEN_AT" '[.msgs[] | select(.created >= $d and .created <= $o)] | length' <<<"$Q") message(s) queued between the end of the drain and the port opening, held now, but sent at once if an attempt was already running"
     [ "$APPLY" = 0 ] || mark hold25-release-port25 held "$VALUE" ;;
   release-queue)
