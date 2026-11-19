@@ -389,7 +389,7 @@ class Keep(Prod):
         text = (HERE / 'window' / 'w4-migrate.sh').read_text()
         body = text[text.index('read_phase() {') :]
         body = body[: body.index('\n}\n')]
-        self.assertLess(body.index('mark w4-export file'), body.index('step keep files keep_copy'))
+        self.assertLess(body.index('mark w4-export sha256'), body.index('step keep files keep_copy'))
         reset = text[text.index('reset_phase() {') :]
         self.assertLess(
             reset.index('step source-branch-create'), reset.index('step keep-source files keep_copy')
