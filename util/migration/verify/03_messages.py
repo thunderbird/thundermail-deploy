@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """03: messages. Per-message match on (account, document id), size and receivedAt; message bodies downloaded and
 checked for size and RFC 5322 header shape. Needs $VERIFY_OUT/source.json from 01.
+--sample: VERIFY_BODY_SAMPLE (default 200) messages picked on the source, see sample.py.
 VERIFY_SKIP_BODIES=1 downloads a random sample (VERIFY_BODY_SAMPLE, default 1% and at least 200) instead of every body."""
 import datetime, json, os, random, re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from common import principals, enc, dec, ids_of, get_paged, download, OUT, GATE_SUBJECT, Report, short
+from common import body_sample, dropped_stubs
 
 r = Report("03 messages")
 src_acc, _ = principals()
+if "--sample" in sys.argv[1:]:
+    import sample
+
+    sample.compare(r, src_acc)
 src = {tuple(map(int, k.split(":"))): v for k, v in json.load(open(f"{OUT}/source.json"))["messages"].items()}
+stub_ids = dropped_stubs()
+src = {k: v for k, v in src.items() if k[0] not in stub_ids}
 
 
 def account(lid):
@@ -56,7 +65,7 @@ HEADER = re.compile(rb"^[!-9;-~]+:", re.M)
 items = [(k, tgt[k]) for k in sorted(both)]
 sampled = os.environ.get("VERIFY_SKIP_BODIES") == "1"
 if sampled:
-    n = int(os.environ.get("VERIFY_BODY_SAMPLE", "0")) or max(200, len(items) // 100)
+    n = body_sample(0) or max(200, len(items) // 100)
     items = random.sample(items, min(n, len(items)))
 
 

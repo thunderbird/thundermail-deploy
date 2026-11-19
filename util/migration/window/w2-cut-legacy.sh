@@ -4,8 +4,7 @@ set -euo pipefail
 need LEGACY_PUB_SG LEGACY_PUB_SG_RULE_IDS LEGACY_PUB_LB_ARN LEGACY_ECS_TARGETS LEGACY_ASG_RESOURCE_IDS OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD
 RESTORE=$EVIDENCE_DIR/cut-legacy-restore$SUF.txt
 AWSL=(aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION")
-MAIL_HOST=mail.stage-thundermail.com
-WEB_HOSTS="accounts-stage.tb.pro auth-stage.tb.pro"
+WEB_HOSTS="$LEGACY_ACCOUNTS_HOST $LEGACY_AUTH_HOST"
 read -ra RULES <<<"$LEGACY_PUB_SG_RULE_IDS"
 
 snap_sg() {
@@ -14,7 +13,7 @@ snap_sg() {
   printf '%s\n' "$out"
   SG_SNAP=$(tail -1 <<<"$out")
   for id in "${RULES[@]}"; do
-    jq -e --arg id "$id" 'any(.rules[]; .SecurityGroupRuleId == $id and .IsEgress == false)' "$SG_SNAP" >/dev/null || { echo "rule $id is not an ingress rule of $LEGACY_PUB_SG"; return 1; }
+    jq -e --arg id "$id" 'any(.rules[]; .SecurityGroupRuleId == $id and .IsEgress == false)' "$SG_SNAP" >/dev/null || { echo "rule $id is not an ingress rule of $LEGACY_PUB_SG"; [ "$TARGET_ENV" != tb-prod ] || echo "a rollback puts the rules back with new ids: build the env file again (build-cutover-env.sh reads LEGACY_PUB_SG_RULE_IDS live), then rerun"; return 1; }
   done
   jq -r '.rules[] | select(.IsEgress == false) | "  \(.SecurityGroupRuleId) \(.IpProtocol) \(.FromPort)-\(.ToPort) \(.CidrIpv4 // .CidrIpv6 // .ReferencedGroupInfo.GroupId // .PrefixListId)"' "$SG_SNAP"
   VALUE=$(jq '[.rules[] | select(.IsEgress == false)] | length' "$SG_SNAP")
@@ -62,7 +61,7 @@ resume() {
 mgmt() {
   local body
   legacy_tunnel || return 1
-  body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/principal?types=domain") || { echo "mgmt API on $OLD_STALWART_URL did not answer"; return 1; }
+  body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/principal?types=domain&limit=1") || { echo "mgmt API on $OLD_STALWART_URL did not answer"; return 1; }
   jq -e '.data' <<<"$body" >/dev/null 2>&1 || { echo "mgmt API on $OLD_STALWART_URL answered without data"; return 1; }
   echo "mgmt API answers on $OLD_STALWART_URL (domains=$(jq -r '.data.total // (.data.items | length)' <<<"$body"))"
 }

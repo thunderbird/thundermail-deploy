@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need TARGET_NLB_DNS
-pending TEST_USER
-M=mail.stage-thundermail.com
-OPERATOR_ENV=${OPERATOR_ENV:-$HOME/.local/state/talos/cutover-operator.env}
+pending TARGET_NLB_DNS TEST_USER
+M=$MAIL_HOST
+OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
 printf 'n/a: stores one value in the env file\n' > "$RESTORE"
 
 capture() {

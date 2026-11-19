@@ -1,8 +1,8 @@
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Promotion
 metadata:
-  name: deploy-thundermail-tb-stage01-manual-__TS__
-  namespace: tb-stalwart-configs
+  name: __STAGE__-manual-__TS__
+  namespace: __PROJECT__
 spec:
-  stage: deploy-thundermail-tb-stage01
+  stage: __STAGE__
   freight: __FREIGHT__

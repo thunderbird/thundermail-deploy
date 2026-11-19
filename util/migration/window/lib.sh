@@ -1,15 +1,6 @@
 # shellcheck shell=bash
-ENV_FILE=${CUTOVER_ENV:-}
-if [ -z "$ENV_FILE" ]; then
-  for ENV_FILE in /dev/shm/talos/cutover-tb-stage.env "$HOME/.local/state/talos/cutover-tb-stage.env"; do [ -f "$ENV_FILE" ] && break; done
-fi
-if [ -f "$ENV_FILE" ]; then
-  if [ -L "$ENV_FILE" ] || [ -L "$(dirname "$ENV_FILE")" ] || [ ! -O "$ENV_FILE" ] || [ ! -O "$(dirname "$ENV_FILE")" ] || [ -n "$(find "$ENV_FILE" "$(dirname "$ENV_FILE")" -maxdepth 0 -perm /022)" ]; then
-    echo "refusing to load $ENV_FILE: a symlink, not owned by $(id -un), or writable by group or others" >&2
-    exit 1
-  fi
-  set -a; eval "$(< "$ENV_FILE")"; set +a
-fi
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
+load_cutover_env
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../timing.sh"
 export TS
@@ -25,12 +16,11 @@ while [ $# -gt 0 ]; do
 done
 W=$(basename "$0" .sh)
 KEY=$(tr '[:lower:]' '[:upper:]' <<<"${W%%-*}")
-SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
-KS=(kubectl --kubeconfig "${KUBECONFIG_STAGE:-}")
+SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_SOURCE_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
+KS=(kubectl --kubeconfig "${KUBECONFIG_TARGET:-}")
 KH=(kubectl --kubeconfig "${KUBECONFIG_HUB:-}")
 TMD_URL=https://github.com/thunderbird/thundermail-deploy.git
-PREVIEW_BRANCH=env/tb-stage-thundermail-stalwart-configs-preview
-CFG_PATHS="overlays/tb-stage-thundermail/stalwart-configs bases/stalwart-configs"
+CFG_PATHS="$CONFIGS_OVERLAY bases/stalwart-configs"
 SUF=""
 [ "$APPLY" = 1 ] || SUF=.dry-run
 RESTORE=$EVIDENCE_DIR/$W-restore$SUF.txt
@@ -42,6 +32,7 @@ MAIL_PF=""
 exec > >(exec setsid tee -a "$LOG") 2>&1
 trap 'stop "command failed at line $LINENO"' ERR
 trap 'stop "interrupted by signal"' INT TERM HUP
+if [ -n "$PLACEHOLDERS" ]; then printf 'NEED  placeholders:%s\n' "$PLACEHOLDERS"; NEEDS=$((NEEDS + 1)); fi
 trap '[ -z "$PF" ] || kill "$PF" 2>/dev/null || true; [ -z "$MAIL_PF" ] || kill "$MAIL_PF" 2>/dev/null || true' EXIT
 
 sn() { if [ "$APPLY" = 1 ]; then printf '%s' "$1"; else printf 'dryrun-%s' "$1"; fi; }
@@ -114,11 +105,19 @@ go_gate() {
   printf '== operator go recorded in %s: %s\n' "$TIMING_TSV" "$GO"
 }
 
+gate_id() {
+  [ -z "${GATE_ID:-}" ] || { printf '%s' "$GATE_ID"; return 0; }
+  case "$KEY" in
+    W1) echo go-W1 ;; W2) echo go-W2 ;; T7) echo go-T7 ;; T8) echo go-T8 ;; W3|W4) echo go-W4 ;;
+    W5) echo go-W5 ;; W6) echo go-predns ;; W7) echo go-open ;; W8) echo go-W8 ;; *) echo "$KEY" ;;
+  esac
+}
+
 prereqs() {
-  local out
-  if out=$(bash "$MIG_DIR/check-prereqs.sh" --for "$KEY" 2>&1); then printf '%s\n' "$(tail -1 <<<"$out")"; return 0; fi
+  local out id; id=$(gate_id)
+  if out=$(bash "$MIG_DIR/check-prereqs.sh" --for "$id" 2>&1); then printf '%s\n' "$(tail -1 <<<"$out")"; return 0; fi
   grep '^NEED' <<<"$out" || printf '%s\n' "$out"
-  [ "$APPLY" = 1 ] && stop "check-prereqs.sh --for $KEY reports NEED"
+  [ "$APPLY" = 1 ] && stop "check-prereqs.sh --for $id reports NEED"
   NEEDS=$((NEEDS + 1))
 }
 
@@ -144,18 +143,28 @@ pending() {
   local v
   for v in "$@"; do
     [ -n "${!v:-}" ] && continue
-    [ "$APPLY" = 1 ] && stop "$v is empty in $ENV_FILE (an earlier window step appends it)"
+    [ "$APPLY" = 1 ] && stop "$v is empty in $ENV_FILE ($(need_hint "$v" | grep . || echo "an earlier window step appends it"))"
     printf "PENDING  %s is filled in-window; shown as \${%s} below\n" "$v" "$v"
     printf -v "$v" "\${%s}" "$v"
   done
 }
+
+env_locked() {
+  local rc=0
+  command -v flock >/dev/null 2>&1 || { "$@"; return; }
+  { flock -w 60 9 || { echo "the env file lock $ENV_FILE.lock is held by another writer for 60 s"; return 1; }; "$@" || rc=$?; } 9>>"$ENV_FILE.lock" || { echo "cannot open the env file lock $ENV_FILE.lock"; return 1; }
+  return "$rc"
+}
+env_append() { printf "%s='%s'\n" "$1" "$2" >> "$ENV_FILE"; }
+window_value() { [ "$TARGET_ENV" != tb-prod ] || printf '%s\t%s\n' "$1" "$2" >> "$EVIDENCE_DIR/window-values.tsv"; }
 
 setenv() {
   local q
   printf '  + append %s=%s to %s\n' "$1" "$2" "$ENV_FILE"
   [ "$APPLY" = 1 ] || return 0
   q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
-  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE" || return 1
+  env_locked env_append "$1" "$q" || return 1
+  case $2 in *[$'\t\n']*) ;; *) window_value "$1" "$2" || true ;; esac
   export "$1=$2"
 }
 
@@ -164,7 +173,7 @@ setenv_secret() {
   printf '  + append %s (len=%s) to %s\n' "$1" "${#2}" "$ENV_FILE"
   [ "$APPLY" = 1 ] || return 0
   q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
-  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE" || return 1
+  env_locked env_append "$1" "$q" || return 1
   export "$1=$2"
 }
 
@@ -220,10 +229,26 @@ legacy_tunnel() {
   owned_by "${hp##*:}" session-manager || { echo "no SSM tunnel owned by $(id -un) on :${hp##*:} (or a foreign listener): credentials not sent"; return 1; }
 }
 
+forward_kubeconfig_ok() {
+  local pid a prev last args=()
+  for pid in $(listener "$1" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+    mapfile -d '' -t args 2>/dev/null < "/proc/$pid/cmdline" || return 1
+    prev="" last=""
+    for a in "${args[@]}"; do
+      [ "$a" != -- ] || break
+      [ "$prev" != --kubeconfig ] || last=$a
+      case $a in --kubeconfig=*) last=${a#--kubeconfig=} ;; esac
+      prev=$a
+    done
+    [ -n "$last" ] && [ "$last" = "${KS[2]}" ] && kube_args_ok "${args[@]}" >/dev/null 2>&1 || return 1
+  done
+}
+
 port_forward() {
   local pod port=${STALWART_URL##*:}
   if [ -n "$(listener "$port")" ]; then
     owned_by "$port" kubectl || { echo "a listener on :$port is not a kubectl owned by $(id -un): credentials not sent"; return 1; }
+    forward_kubeconfig_ok "$port" || { echo "the kubectl on :$port was not started with --kubeconfig ${KS[2]}: credentials not sent"; return 1; }
     curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "kubectl listener on :$port does not answer"; return 1; }
     echo "reusing the kubectl port-forward on $STALWART_URL"
     PF_OK=1
@@ -231,7 +256,8 @@ port_forward() {
   fi
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart --field-selector=status.phase=Running -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | "pod/" + .metadata.name][0] // empty')
   [ -n "$pod" ] || { echo "no Running Stalwart pod"; return 1; }
-  "${KS[@]}" -n thundermail port-forward "$pod" "$port:8080" >/dev/null 2>&1 &
+  kube_args_ok "${KS[@]:1}" || return 1
+  command "${KS[@]}" -n thundermail port-forward "$pod" "$port:8080" >/dev/null 2>&1 &
   PF=$!
   until_ok 30 curl -sf -m 5 -o /dev/null "$STALWART_URL/healthz/live" || { echo "port-forward to $pod did not answer"; return 1; }
   echo "port-forward $pod -> $STALWART_URL"
@@ -241,7 +267,7 @@ port_forward() {
 mail_tls() {
   local st=()
   case "$1" in 25|587) st=(-starttls smtp) ;; esac
-  timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername mail.stage-thundermail.com -verify_return_error -verify_hostname mail.stage-thundermail.com "${st[@]}" </dev/null >/dev/null 2>&1
+  timeout 15 openssl s_client -connect "127.0.0.1:$((10000 + $1))" -servername "$MAIL_HOST" -verify_return_error -verify_hostname "$MAIL_HOST" "${st[@]}" </dev/null >/dev/null 2>&1
 }
 
 port_free() { [ -z "$(listener "$1")" ]; }
@@ -252,7 +278,7 @@ restart_stalwart() {
   local pod p pid sport bad="" fwd=()
   run "${KS[@]}" -n thundermail rollout restart deploy/stalwart || return 1
   run "${KS[@]}" -n thundermail rollout status deploy/stalwart --timeout=600s || return 1
-  printf '  + port-forward a Running stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993, then up to 60s per port for TLS verified for mail.stage-thundermail.com (STARTTLS on 25 and 587)\n'
+  printf '  + port-forward a Running stalwart-nginx pod 10025:25 10465:465 10587:587 10993:993, then up to 60s per port for TLS verified for %s (STARTTLS on 25 and 587)\n' "$MAIL_HOST"
   [ "$APPLY" = 1 ] || return 0
   pod=$("${KS[@]}" -n thundermail get pod -l app=stalwart-nginx --field-selector=status.phase=Running -o name | head -1)
   [ -n "$pod" ] || { echo "no Running stalwart-nginx pod"; return 1; }
@@ -260,14 +286,15 @@ restart_stalwart() {
     [ -z "$(listener $((10000 + p)))" ] || { echo "local port $((10000 + p)) is already in use: stop that listener, then rerun"; return 1; }
     fwd+=("$((10000 + p)):$p")
   done
-  "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
+  kube_args_ok "${KS[@]:1}" || return 1
+  command "${KS[@]}" -n thundermail port-forward "$pod" "${fwd[@]}" >/dev/null 2>&1 &
   MAIL_PF=$!
   until_ok 30 mail_forwarded || { kill "$MAIL_PF" 2>/dev/null || true; MAIL_PF=""; echo "port-forward to $pod did not open 10025 10465 10587 10993"; return 1; }
   for p in 25 465 587 993; do until_ok 60 mail_tls "$p" || bad="$bad $p"; done
   kill "$MAIL_PF" 2>/dev/null || true
   MAIL_PF=""
   [ -z "$bad" ] || { echo "after the Stalwart restart, no verified TLS through $pod on:$bad"; return 1; }
-  echo "Stalwart restarted; 25 465 587 993 answer through $pod with TLS verified for mail.stage-thundermail.com"
+  echo "Stalwart restarted; 25 465 587 993 answer through $pod with TLS verified for $MAIL_HOST"
   [ "$PF_OK" = 1 ] || return 0
   sport=${STALWART_URL##*:}
   if [ -n "$PF" ]; then

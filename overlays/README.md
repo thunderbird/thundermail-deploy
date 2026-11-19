@@ -43,6 +43,11 @@ The complete setup is in
 The values file is packaged into `stalwart-config-values-*`; Kustomize updates
 the Job's hashed ConfigMap reference when it changes.
 
+The optional `dataRetention` key holds properties of Stalwart's
+`DataRetention` object, such as `expungeSchedule`. When the key is absent, the
+Job does not touch `DataRetention`. Removing the key keeps the stored values,
+so to go back to the defaults, set them explicitly.
+
 ## ConfigMap behavior
 
 The base and overlay generate immutable ConfigMaps:

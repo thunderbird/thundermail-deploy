@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: __NAME__
+  namespace: thundermail
+  labels:
+    app.kubernetes.io/name: stalwart-config-applier
+    app.kubernetes.io/component: window-apply
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 3600
+  terminationGracePeriodSeconds: 5
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  nodeSelector:
+    role: mail
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: cli
+      image: ghcr.io/stalwartlabs/cli:1.0.13@sha256:9a1e07307d6f890a193322c4b737fc0868405f0f8486a19922cbf362f43884fd
+      args:
+        - --no-color
+        - --debug
+        - apply
+        - --stdin
+      stdin: true
+      stdinOnce: true
+      env:
+        - name: STALWART_URL
+          value: __STALWART_URL__
+        - name: STALWART_USER
+          valueFrom:
+            secretKeyRef:
+              name: stalwart-recovery-admin
+              key: STALWART_USER
+        - name: STALWART_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: stalwart-recovery-admin
+              key: STALWART_PASSWORD
+        - name: NO_COLOR
+          value: "1"
+        - name: HOME
+          value: /tmp
+        - name: XDG_CACHE_HOME
+          value: /tmp/cache
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir:
+        sizeLimit: 256Mi

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
+case "${TEST_MAILBOX_CHECK:-}" in
+  '') ;;
+  manual) die "TEST_MAILBOX_CHECK=manual: p3-verify.sh reads TEST_MAILBOX over IMAP and needs TEST_MAILBOX_IMAP_HOST, TEST_MAILBOX_IMAP_USER and TEST_MAILBOX_IMAP_PASSWORD; check the reset mail in TEST_MAILBOX by hand instead" ;;
+  *) die "TEST_MAILBOX_CHECK=$TEST_MAILBOX_CHECK: the only value is manual" ;;
+esac
 need TEST_USER TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD
 
-AUTH_HOST=${AUTH_HOST:-auth.stage-thundermail.com}
-FROM_DOMAIN=${FROM_DOMAIN:-auth-stage.tb.pro}
+FROM_DOMAIN=${FROM_DOMAIN:-$LEGACY_AUTH_HOST}
 REALM=${REALM:-tbpro}
 WAIT=${P3_MAIL_TIMEOUT:-300}
 RESET_URL="https://$AUTH_HOST/realms/$REALM/login-actions/reset-credentials"
@@ -80,5 +84,5 @@ if out=$(imap poll "$uidnext" "$FROM_DOMAIN" "$WAIT"); then rc=0; else rc=$?; fi
 end=$(date -u +%FT%TZ)
 echo "$out"
 [ "$rc" = 4 ] && echo "hint: check that TEST_USER's Keycloak email is TEST_MAILBOX before taking the SES fallback"
-printf 'p3-smtp\t%s\t%s\tpoll_rc\t%s\n' "$start" "$end" "$rc" >> "${TIMING_TSV:-$EVIDENCE_DIR/timing-tb-stage.tsv}"
+printf 'p3-smtp\t%s\t%s\tpoll_rc\t%s\n' "$start" "$end" "$rc" >> "${TIMING_TSV:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}"
 [ "$rc" = 0 ] && echo "P3 VERIFY: PASS" || { echo "P3 VERIFY: FAIL"; exit "$rc"; }

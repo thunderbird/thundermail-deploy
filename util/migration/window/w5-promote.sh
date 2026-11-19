@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-need STALWART_URL STALWART_USER STALWART_PASSWORD KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KUBECONFIG_STAGE KUBECONFIG_HUB SECRET_DIR
+need STALWART_URL STALWART_USER STALWART_PASSWORD KARGO_PROJECT_CONFIGS KARGO_STAGE_CONFIGS KUBECONFIG_TARGET KUBECONFIG_HUB SECRET_DIR
 pending STALWART_ADMIN_ACCOUNT_ID TEST_USER
 export STALWART_URL STALWART_USER STALWART_PASSWORD STALWART_ADMIN_ACCOUNT_ID
 PY=${VENV_PY:-$HOME/.local/state/talos/venv/bin/python}
@@ -10,7 +10,10 @@ PHASE=1
 [ "$APPLY" = 1 ] && [ -n "$GO" ] && PHASE=2
 PROMOTION=$EVIDENCE_DIR/promotion-configs-$TS.yaml
 PROMOTION_RESTORE=$EVIDENCE_DIR/promotion-configs-restore$SUF-$TS.yaml
-UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname mail.stage-thundermail.com
+DROPPED_DOMAINS_ARG=()
+[ "$TARGET_ENV" != tb-prod ] || DROPPED_DOMAINS_ARG=(--dropped-domains "$S/domains-dropped.json")
+UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname "$MAIL_HOST"
+  ${DROPPED_DOMAINS_ARG[@]+"${DROPPED_DOMAINS_ARG[@]}"}
   --skip WebHook --skip AllowedIp --skip MtaSts --skip MtaQueueQuota --skip Security --skip Calendar --skip AddressBook --skip Http)
 
 snap_settings() {
@@ -28,13 +31,17 @@ snap_settings() {
   SETTINGS_BEFORE=$(awk -v p="$S/settings-before-" 'index($0, p) == 1 && /\.ndjson$/ && !/ /' <<<"$out" | tail -1)
   [ -s "$FREIGHT_BEFORE" ] || { echo "no freight-before file"; return 1; }
   [ "$APPLY" = 0 ] || [ -s "$SETTINGS_BEFORE" ] || { echo "snapshot-settings.sh printed no settings-before file"; return 1; }
-  if [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
-    sed "s/__TS__/$(date -u +%s)r/; s/__FREIGHT__/$(cat "$FREIGHT_BEFORE")/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION_RESTORE" || return 1
+  local promote_back
+  if [ "$(cat "$FREIGHT_BEFORE")" = none ]; then
+    promote_back="# no Freight before W5: stage $KARGO_STAGE_CONFIGS had no Freight history ($FREIGHT_BEFORE holds none), so a restore promotes no Freight back"
+    mark "$(sn freight-before)" freight none
+  elif [ -e "$MIG_DIR/promotion.yaml.tpl" ]; then
+    sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)r/; s/__FREIGHT__/$(cat "$FREIGHT_BEFORE")/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION_RESTORE" || return 1
   else
     printf 'promotion.yaml.tpl missing: render it with __FREIGHT__=%s\n' "$(cat "$FREIGHT_BEFORE")" > "$PROMOTION_RESTORE"
   fi
   printf '%s\n' \
-    "$(shq "${KH[@]}" create -f "$PROMOTION_RESTORE")" \
+    "${promote_back:-$(shq "${KH[@]}" create -f "$PROMOTION_RESTORE")}" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>} --dry-run" \
     "stalwart-cli apply --file ${SETTINGS_BEFORE:-<settings-before file>}" \
     "stalwart-cli create action/ReloadSettings" \
@@ -45,12 +52,12 @@ snap_settings() {
 }
 
 resolve_t6() {
-  local sha
+  local sha pr=${T6_PR:-${T6_PR_DEFAULT:-}}
   [ -z "${T6_SHA:-}" ] || return 0
-  [ -n "${T6_PR:-}" ] || { echo "T6_SHA and T6_PR are empty in $ENV_FILE"; return 1; }
-  sha=$(gh pr view "$T6_PR" -R thunderbird/thundermail-deploy --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
-  [ -n "$sha" ] || { echo "PR $T6_PR has no merge commit"; return 1; }
-  echo "T6_SHA from PR $T6_PR: $sha"
+  [ -n "$pr" ] || { echo "T6_SHA and T6_PR are empty in $ENV_FILE"; return 1; }
+  sha=$(gh pr view "$pr" -R thunderbird/thundermail-deploy --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
+  [ -n "$sha" ] || { echo "PR $pr has no merge commit"; return 1; }
+  if [ -n "${T6_PR:-}" ]; then echo "T6_SHA from PR $pr: $sha"; else echo "T6_SHA from PR $pr (T6_PR_DEFAULT of targets/$TARGET_ENV.sh): $sha"; fi
   T6_SHA=$sha
   setenv T6_SHA "$sha"
 }
@@ -69,6 +76,7 @@ not_older() {
   local fb="" file a b
   file=${FREIGHT_BEFORE:-$(find "$EVIDENCE_DIR" -maxdepth 1 -name 'freight-before-*.txt' -size +0 -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)}
   [ ! -s "$file" ] || fb=$(cat "$file")
+  if [ "$fb" = none ]; then echo "stage Freight before W5: none (the stage had no Freight history)"; return 0; fi
   if [ -z "$fb" ] || [ "$fb" = "$1" ]; then echo "stage Freight before W5: ${fb:-unknown}"; return 0; fi
   a=$(created "$1") && b=$(created "$fb") || return 1
   echo "stage Freight before W5: $fb ($b); T6 match: $1 ($a)"
@@ -89,7 +97,7 @@ job_started() { [ "$("${KS[@]}" -n thundermail get job stalwart-config-apply -o 
 
 promote() {
   if [ "$APPLY" = 0 ] && ! live promotion.yaml.tpl; then printf '  + %s\n' "$(shq "${KH[@]}" create -f "$PROMOTION")"; return 0; fi
-  sed "s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$FREIGHT/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION" || return 1
+  sed "s/__STAGE__/$KARGO_STAGE_CONFIGS/; s/__PROJECT__/$KARGO_PROJECT_CONFIGS/; s/__TS__/$(date -u +%s)/; s/__FREIGHT__/$FREIGHT/" "$MIG_DIR/promotion.yaml.tpl" > "$PROMOTION" || return 1
   sed 's/^/    /' "$PROMOTION"
   PROMOTE_AT=$(date -u +%FT%TZ)
   run "${KH[@]}" create -f "$PROMOTION" || return 1
@@ -181,10 +189,17 @@ readback() {
 }
 
 accounts_check() {
-  local out id cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
+  local out id ready cmd="printf 'user = \"%s:%s\"\\n' \"\$STALWART_JMAP_API_AUTH_USER\" \"\$STALWART_JMAP_API_AUTH_SECRET\" | curl -sk -m 20 -K - -w '\\n%{http_code}' \"\$STALWART_JMAP_API_URL/session\""
   printf '  + %s\n' "$(shq "${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd")"
   printf '  + a failure is PENDING (not a STOP) while %s has no put-accounts-bundle row for this cut\n' "$TIMING_TSV"
   [ "$APPLY" = 1 ] || return 0
+  ready=$("${KS[@]}" -n accounts get deploy accounts-web -o jsonpath='{.status.readyReplicas}') || return 1
+  if [ "${ready:-0}" = 0 ]; then
+    VALUE=no-ready-pod
+    printf 'PENDING  Accounts is not up yet: deploy/accounts-web has 0 ready replicas, so the Accounts -> Stalwart check runs after Accounts starts\n'
+    NEEDS=$((NEEDS + 1))
+    return 0
+  fi
   out=$("${KS[@]}" -n accounts exec deploy/accounts-web -- sh -c "$cmd") || return 1
   VALUE=$(tail -1 <<<"$out")
   id=$(sed '$d' <<<"$out" | jq -r '.primaryAccounts["urn:stalwart:jmap"] // empty' 2>/dev/null || true)

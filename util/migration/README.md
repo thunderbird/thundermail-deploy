@@ -1,24 +1,54 @@
 # Cutover tooling
 
-Scripts for the tb-stage cutover (platform-infrastructure milestone 1536). Every command
-in the in-window issues sources the env file (tmpfs, gone on reboot: rebuild it) first,
-then `util/migration/timing.sh`:
+Scripts for the tb-stage cutover (platform-infrastructure milestone 1536) and the tb-prod
+cutover (milestone 1719). Every shell script needs `TARGET_ENV` set to `tb-stage` or `tb-prod` and
+exits 64 without it. `targets/$TARGET_ENV.sh` holds the names for that environment (cluster,
+profiles, overlays, Argo apps, Kargo stages, zones, legacy secret paths and filters); ids, hosts
+and secrets are looked up at build time. A `REPLACE_ME_*` value (any case) is one a later change
+fills in; while one is left in `targets/$TARGET_ENV.sh` or `verify/$TARGET_ENV.env`, every `--apply` exits 64.
+Every script loads the env file itself at start (`$CUTOVER_ENV`; default on tb-prod
+`~/.local/state/talos/cutover-tb-prod.env` on disk, file 600 in a directory of 700, refused if group
+or others have any access; elsewhere `/dev/shm/talos/cutover-$TARGET_ENV.env` on tmpfs, gone on
+reboot: rebuild it), and its values win over
+the shell's; the builder is the exception. A shell command that reads a variable sources the file again first:
 
 ```bash
-set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.sh
+export TARGET_ENV=tb-prod
+set -a; . "$HOME/.local/state/talos/cutover-tb-prod.env"; set +a; . util/migration/timing.sh
 ```
 
 ## Conventions
 
-- `check-prereqs.sh [--for KEY]` prints HAVE/NEED per tool and credential and exits with the
-  NEED count (`--for T0` prints every row). It never prints a value.
-- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator.env`
-  (mode 600, or both scripts stop); the builder and check-prereqs load its non-empty values, and the environment wins.
+- `check-prereqs.sh [--for ID[,ID...]]` prints HAVE/NEED per tool and credential and exits with
+  the NEED count; without `--for` it prints every row. ID is a gate id (`go-W1` ... `go-rollback`,
+  `start`, `checks`, `presync`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
+  block per id. `start` holds only the rows that can pass before the first window step. It reads
+  values from the env file first, then the environment, and never prints a value.
+- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a call
+  other than `kubectl kustomize` has no `--kubeconfig`, when the value is empty, names a missing file or names the other environment's cluster,
+  or when a flag picks another cluster or credential (`--context`, `--cluster`, `--server`, `--user`,
+  `--token`, `--as`, the client certificate and TLS flags), so no script falls back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
+  cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
+  name is still read.
+- Operator values (`TEST_*`, `SPF_*_TXT`, `SUPPORT_CHANNEL`, `*_PR`, `ADMIN_MERGE`) live in `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`
+  (mode 600, or both scripts stop; tb-stage falls back to `cutover-operator.env`; a tb-prod file needs a `TARGET_ENV=tb-prod` line); the builder and check-prereqs load its non-empty values, and the environment wins.
 - `build-cutover-env.sh` writes the env file (mode 600, a `# source:` line above every
   variable, `NAME len=N` on stdout). Operator-supplied values (`TEST_*`, `SPF_*_TXT`, PR
   numbers) are read from the environment or carried over from the previous file; in-window
   appends (`FREEZE_SHA`, `FREIGHT`, ...) are carried over too. `--check` runs the read-only
-  connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV.
+  connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV; it
+  moves its own snapshots into `env-check/` so rollback never picks them. On tb-prod it prints
+  `WAIT` (not a failure) for rows whose object only exists in the window (runner pod, SSM tunnel,
+  Stalwart, the mail load balancer) and skips the tb-stage-only rows.
+- The tb-prod build writes `TMD_CHECKOUT` (the checkout it runs from), `WINDOW_SHA` (its `HEAD`;
+  `--rebuild` keeps the recorded value) and `STALWART_URL=http://localhost:18081`, as tb-stage
+  does; `LANE_PF_PORT` replaces the port. After a tooling fix is checked out in the window,
+  `build-cutover-env.sh --rebuild --move-window-sha` sets `WINDOW_SHA` to the new `HEAD`. Before the
+  mail load balancer exists `TARGET_NLB_DNS` is empty; `build-cutover-env.sh --rebuild` fills it
+  once it does. `TBPROD_AUTH_ALB` and `TBPROD_ACCOUNTS_ALB` come from the Ingress with a rule
+  for `AUTH_HOST` or `ACCOUNTS_HOST`.
+- The Cloudflare token is `CF_API_TOKEN_AGENT` from `CF_TOKEN_FILE` (`~/.prod-cloudflare.env` for
+  tb-prod, `~/.cloudflare.env` for tb-stage).
 - Restore scripts are dry-run by default and print what they would change; `--apply`
   performs the writes. `--dry-run` is accepted and is the default. Snapshot scripts always
   write their file under `$EVIDENCE_DIR` (or `$SECRET_DIR` when the content is sensitive)
@@ -29,7 +59,9 @@ set -a; . /dev/shm/talos/cutover-tb-stage.env; set +a; . util/migration/timing.s
 
 ## Runner pod
 
-`runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
+`runner-pod.sh` prints `runner-pod.yaml` for `TARGET_ENV` (label, `/work` size and the legacy
+Secret name from `targets/$TARGET_ENV.sh`); `runner-pod.sh --secret` writes that Secret under
+`$SECRET_DIR` and prints its path. `runner-pod.yaml` is a long-lived pod in `thundermail` carrying the Stalwart server
 security group through the existing `stalwart-config-applier` SecurityGroupPolicy label
 (not `app=stalwart`, so no Service selects it). It runs on `role: mail` nodes like Stalwart,
 as uid 70 with no capabilities. The `postgres` container writes `/secrets/.pgpass` (a
@@ -44,16 +76,46 @@ its host; the pod refuses to start unless the three legacy hosts are distinct:
 | `rehearsal-legacy-pg` key `accounts-host` | legacy Accounts | key `accounts` |
 | `rehearsal-legacy-pg` key `stalwart-host` | legacy Stalwart | key `stalwart` |
 
+On tb-prod, `RUNNER_LEGACY_PG_KEYS='keycloak accounts'` in `targets/tb-prod.sh` drops the
+legacy Stalwart line, and `runner-pod.sh` refuses a tb-prod key list that names `stalwart`. The
+Secret (still named by `LEGACY_PG_SECRET_NAME`) holds only the Keycloak and Accounts keys and
+hosts, and neither host may equal `STALWART_LEGACY_PG_HOST`. The pod wants two distinct legacy
+hosts and refuses to start when the mounted Secret has a `stalwart` key. `.pgpass` holds the
+target, Keycloak and Accounts lines. `/work` keeps its 20Gi default, since `RUNNER_WORK_SIZE` is
+unset. `--check` skips the legacy Stalwart database rows. On tb-prod W4 runs neither `task-queue`
+nor `db-dump-legacy` (they refuse if reached); its reset phase works on the cutover branch.
+
 The `python` container installs hash-pinned wheels as a non-root user and does not mount
 `/work`.
 
 `build-cutover-env.sh --check` runs `psql -Atc 'select 1'` against all four, which proves
 the keying for the real hosts.
 
+On tb-prod, `window/runner-start.sh` starts the runner. Without `--apply` it reads its gates and
+prints the commands `--apply` would run. The gates: 45 minutes of AWS session left, a
+SecurityGroupPolicy that gives `stalwart-config-applier` the groups of the `app=stalwart`
+policy, the key in Secret `stalwart-postgresql-admin-password`, ConfigMap `stalwart-config`
+naming `STALWART_TARGET_PG_HOST`, and no runner pod or Secret yet. `--apply` has
+`runner-pod.sh --secret` write the Secret file, creates the Secret from it with `kubectl create`
+(`kubectl apply` would copy the passwords into an annotation), deletes the file (also on exit or
+interrupt), creates the pod with `automountServiceAccountToken: false` and waits for Ready. It
+then checks the node role, the pod network interface, the service account and token, and logs
+in to the cutover branch, Keycloak and Accounts. `pg_isready` reaches legacy Stalwart, which gets
+no password line. On success it writes row `runner-start`. Only `start --apply` stages
+`remove --apply` as the restore that a STOP prints. `check` runs the checks again;
+`remove --apply` deletes the pod, the Secret and any Secret file left in `$SECRET_DIR`, and
+writes row `runner-removed`. The pod's `/work` goes with it, and so does
+`/work/target-before.dump`, the W4 restore point of `restore-target-db.sh`. When that file is
+there (or cannot be read), `remove` prints a `WARN` line with its size and time and needs
+`--apply --go '<operator words>'`, recorded as row `go-RUNNER`.
+
 ## Script notes
 
 - `snapshot-zone.sh ZONE` keeps `data` for SRV/TLSA/CAA and also records a DoH answer per
-  record as `zone-doh-before-<zone>-<ts>.txt`.
+  record as `zone-doh-before-<zone>-<ts>.txt`; when a lookup fails it prints
+  `doh capture partial: N of M names unread`.
+- `body-update.py --tick <gate> --evidence <file>` and `--close <PR URL>` edit issue bodies;
+  `--dry-run` prints the diff and the body size and writes nothing (`--help` has the formats).
 - `restore-zone.sh SNAPSHOT` creates missing records, updates changed ones and deletes
   records added since the snapshot; it never touches `_externaldns.*`, `*.dkim.*` or `*._domainkey.*`.
 - `restore-ecs.sh` restores desiredCount first, then min/max, then clears the suspension.
@@ -109,6 +171,12 @@ the keying for the real hosts.
   Appends the `p3-smtp` timing row. `TEST_MAILBOX` must be `TEST_USER`'s Keycloak `email`
   (Accounts sets it to the backup address); Keycloak sends the reset there, so a mismatch
   shows up as exit 4, not as an SMTP fault.
+- `TEST_MAILBOX_CHECK=manual` in the operator file means the operator reads `TEST_MAILBOX` by
+  hand in its web UI. The builder then writes `TEST_MAILBOX_CHECK` to the env file, still needs
+  `TEST_MAILBOX` and `TEST_USER`, and neither needs nor writes the three `TEST_MAILBOX_IMAP_*`
+  values. `check-prereqs.sh` prints a SKIP row for `test-mailbox-external` instead of an IMAP
+  login, and `post/p3-verify.sh` stops at once. Any other value stops the builder,
+  `check-prereqs.sh` (exit 64) and `p3-verify.sh`.
 - `snapshot-smtp.sh` prints `host`, `from`, `envelopeFrom` and `user` of the realm `smtpServer`.
 - `post/p2-redirects.sh [ZONE_ID]` (default `CF_ZONE_ID_TBPRO`, must be tb.pro) puts the
   two 301 rules (`accounts-stage.tb.pro/*` and `auth-stage.tb.pro/*` to the same path on the
@@ -119,7 +187,7 @@ the keying for the real hosts.
   `$EVIDENCE_DIR/tbpro-rules-before-*.json` and, with `--apply`, the records to
   `tbpro-p2-records-before-*.json`; it prints every call. Writes need `--apply`. It runs with the
   P2 token: `CF_API_TOKEN_AGENT` swapped for a tb.pro-only token with `expires_on`
-  (`check-prereqs.sh --for P2` checks both), revoked after `post/p2-verify.sh` passes.
+  (the `cf-token-agent-redirects` row of `check-prereqs.sh` checks both), revoked after `post/p2-verify.sh` passes.
   Rollback is `post/p2-redirects.sh --rollback [--apply]`: it unproxies the saved records first
   (restoring their TTL), then deletes every entrypoint rule whose ref starts with `p2_`. After a
   successful rollback it moves that cycle's records files to `tbpro-p2-rolled-back-<ts>/`.
@@ -129,11 +197,13 @@ the keying for the real hosts.
 ## Window scripts
 
 `window/w1.sh`, `t7.sh`, `t8.sh`, `w2-cut-legacy.sh`, `w3-blob-copy.sh`, `w4-migrate.sh`,
-`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default
-`/dev/shm/talos/cutover-tb-stage.env`, else `~/.local/state/talos/cutover-tb-stage.env`) itself, so values appended by an earlier step
+`w5-promote.sh`, `w6-verify.sh`, `w7.sh` (with `w7-verify.sh`) and `w8.sh` run one in-window step each. Each sources `$CUTOVER_ENV` (default on tb-prod
+`~/.local/state/talos/cutover-tb-prod.env`; elsewhere `/dev/shm/talos/cutover-$TARGET_ENV.env`, else
+`~/.local/state/talos/cutover-$TARGET_ENV.env`) itself, so values appended by an earlier step
 (`CUT_ECS_END`, `STALWART_ADMIN_ACCOUNT_ID`, `T6_SHA`, `FREIGHT`) reach the next one.
 
-- `--dry-run` (default) runs `check-prereqs.sh --for W<n>`, the snapshots and read-only checks,
+- `--dry-run` (default) runs `check-prereqs.sh --for <gate id>` (`GATE_ID`, else the script's
+  go row), the snapshots and read-only checks,
   and prints every write as the exact command; it never runs `kubectl exec`. Timing rows get a
   `dryrun-` prefix. `--apply` runs the writes.
 - W2 writes only with `--apply --go '<operator words>'`; W5 phase 1 (`--apply`) stops after
@@ -141,7 +211,8 @@ the keying for the real hosts.
   refuses a changed plan; W4 needs `--go` once a `drop-schema` row exists for the current cut.
   The go is recorded as a `go-W<n>` row in `$TIMING_TSV`.
 - Legacy credentials are sent only to a loopback `OLD_STALWART_URL` served by the operator's own
-  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator.
+  SSM tunnel, and the Stalwart credentials only to a `kubectl port-forward` owned by the operator
+  (on tb-prod, one started with `--kubeconfig $KUBECONFIG_TARGET`).
 - Output is logged to `$EVIDENCE_DIR/w<n>-*-<mode>-<ts>.log`. Any failed check or signal prints
   `STOP`, writes a `stop-W<n>` row, prints the pre-staged restore commands and exits 1. Nothing
   rolls back automatically. Exit 2 means a NEED item is listed.
@@ -217,11 +288,172 @@ the keying for the real hosts.
   `check` after the W3 blob-check (`blob-recheck` row) before it leaves recovery mode. Convert
   stops on `warning: (dropping|renaming) (User|Group)` lines that are not in
   `$SECRET_DIR/convert-dropped-baseline.txt` (the lines the T10 dry run accepted).
+- On tb-prod W4 has three phases, and `--apply` without one exits 64; the dry run without a
+  phase prints all three. `--phase read` (gate `go-W4-read`) dumps through `dump_legacy.py` (the
+  password stays in the environment, `DUMP_WORKERS` concurrent reads, default 8), then runs
+  `stubs`, `duplicates`, `convert`, `domains`, `retarget` and `queue-drain` last. `stubs` runs
+  `stub_drop.py` on the dump (both W4 paths, every environment): it drops each individual whose
+  name exactly one other principal holds as an alias and which holds nothing else (no address,
+  secret, description, quota, used quota, membership or permission, role `user` only), the empty
+  account the 0.15 OIDC directory leaves when a bearer login names an address another account
+  holds. The raw `principals.json` stays as dumped; `principals.kept.json` (a byte copy when
+  nothing matches) is what `duplicates`, `convert` and `domains` read, and
+  `stubs-dropped.json` (mode 600) holds the dropped ids and names. It prints
+  `stubs: dropped=<n> expected=<STUBS_EXPECTED> ids <ids>`, with `CHECK` after the expected count
+  when they differ (2 on tb-prod, 0 elsewhere), and never stops; any other duplicate still stops
+  `duplicates` as before. It reads every field as `convert` does (wrapped values, members by name
+  or id). The verify suite reads the ids through `DROPPED_STUBS` (`verify/tb-prod.env` and
+  `verify/tb-stage.env`) and leaves those accounts out of every compare. `domains` runs
+  `domain_fix.py` on the export. It drops each Domain that Stalwart 0.16 refuses, with the DKIM
+  signatures that point at it: a name no public suffix rule matches (`domain-suffixes.txt`, the
+  rules of the `psl` crate 2.1.241 that Stalwart 0.16.27 is built with, in ASCII form, plus the
+  reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
+  (compared after NFKC and punycode, as 0.16 reads them). It prints one
+  `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does an address of `principals.json` on a dropped Domain. A catch-all there (`@<domain>`, which `convert` leaves out and W5 puts back) is a `warning:` line instead: `apply_unmigrated.py --dropped-domains` (W5 on tb-prod) skips it and prints the count. `domain_fix.py --dropped-list` writes the list that `verify/02_directory.py` reads (`DROPPED_DOMAINS`). Names are compared in the punycode form 0.16 stores (`shapes.norm_domain`).
+  `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
+  `class Domain:refused-by-0.16` lines, and the names convert drops itself as
+  `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
+  `w4-export` and `w4-read-done` rows only; the `w4-export` row holds the sha256 of
+  `export.json`, `principals.kept.json` and `stubs-dropped.json`, and an export is reused or
+  reset on only when all three files still match it. A rerun after a `queue-drain` stop reads the queue
+  only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
+  without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`
+  row, when a `start-legacy-stalwart` row follows the `w4-export` row (the export is stale, and
+  the next `--phase read --apply` dumps again without `--go`), or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
+  `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
+  row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
+  `STALWART_SOURCE_PG_*` of the env file, created at the `parent_lsn` the reset returned (row
+  `reset-lsn`), so a `production` that moves between the two calls does not stop a good reset;
+  the reset proof fails when `parent_lsn` did not change. Neon resets a role password only on a
+  branch with a read-write endpoint, so the branch is created with one, the password is reset, a
+  read-only endpoint is added and the read-write endpoint is deleted. It then checks that both branches are
+  `ready`, later than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
+  credentials log in on their branch, the source branch refuses a write as read-only, and the
+  production endpoint answers `password authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
+  equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
+  boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
+  recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
+  applies the export inside the cluster (below). The reset writes a `reset-export` row with the
+  same three digests, and the boot (a resume too, and again right before the export is sent)
+  applies the reset's export rule and refuses unless the files still match that row. A second reset needs `--go`. `--phase boot` resumes an expired wait
+  without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
+  restore or blob step.
+- On tb-prod the apply runs in a one-shot pod next to Stalwart, never through a port-forward from
+  the workstation: the CLI sends 500 creates per request with a fixed 60 s timeout, and from
+  outside the region every request timed out. `apply-pod.yaml` holds `stalwart-cli` 1.0.13 pinned
+  by digest (an index with linux/amd64 and linux/arm64), the label
+  `app.kubernetes.io/name: stalwart-config-applier`, no service account token, a read-only root,
+  uid 65532, a 3600 s deadline, and the recovery admin from Secret `stalwart-recovery-admin`
+  (keys `STALWART_USER`, `STALWART_PASSWORD`) by reference, as the settings Job has it. W4 creates
+  it with the manifest on stdin and `STALWART_URL=http://<pod IP of the one Ready recovery
+  pod>:8080`, sends `$SECRET_DIR/export.json` through `kubectl attach -i` (stdin; the CLI runs
+  `apply --stdin`), waits at most `APPLY_POD_WAIT` (1800 s) from the send, attach included, for
+  the pod to end (on a timeout or a pod that is not Ready in 300 s it saves `kubectl describe pod`
+  to `$EVIDENCE_DIR/apply-pod-<TS>.txt` and the log first), writes the timestamped
+  log to `$SECRET_DIR/apply.log` and a copy with addresses masked to
+  `$EVIDENCE_DIR/apply-<TS>.log`, prints `apply: pod/<name> exit=<n> errors=<n> requests=<n>
+  longest request <s>s` from the CLI's `--debug` request lines (`apply_requests.py`), and
+  deletes the pod, also on a failure or an interrupt. No Service changes. The reads after it
+  (admin account id, account ids) run from the workstation through the checked port-forward,
+  which the step opens after the apply. The path: the
+  SecurityGroupPolicy `stalwart-config-applier` (tb-prod settings directory, PR 195) gives the
+  pod the Stalwart server security group, which the Stalwart pods carry too (`stalwart-server`),
+  and that group admits TCP 8080 from itself (rule `stalwart_mgmt` in platform-infrastructure
+  `pulumi/modules/thundermail_deploy.py`). The repo holds no NetworkPolicy. A failed batch stops
+  that object type and leaves the earlier batches committed, so a second apply would collide:
+  the `apply-start` row is written once the pod is Ready and its log shows `status=200` for
+  `GET /api/schema/<hash>`, the path 0.16 redirects `/api/schema` to (the CLI reached Stalwart; `APPLY_SCHEMA_WAIT`, default 90 s, else no row and
+  nothing sent), just before the export is sent, and an `apply-start` row after the pre-delete
+  with no `export-applied` row makes a rerun refuse (and `window/gate.sh merge-recovery` wait).
+  When the attach fails and the pod log has no `Plan:` line, W4 stops the pod
+  (`activeDeadlineSeconds` 1), reads its final log, and only when that read works and still has
+  no `Plan:` line deletes the pod and writes an `apply-unsent` row that lets the rerun send again.
+  An unreadable log keeps the rerun blocked. On tb-prod `check-prereqs.sh` asks for
+  `create pods/attach`, `get pods/log` and `patch pods` in `thundermail`. The run also fails when the CLI's `Plan:` counts per
+  operation type differ from the lines of `export.json` (a cut stdin stream), and
+  the retry is the revert of the recovery-mode PR and `--phase reset --apply --go` (about 20 to 25
+  minutes).
+- `window/legacy-stalwart.sh restart|stop|start|read [--dry-run | --apply]` (tb-prod only, dry run
+  by default) sends one SSM Run Command (`AWS-RunShellScript`) to the nodes of
+  `LEGACY_STALWART_NODE_IDS`, after it checks that there are six distinct ids, an `mzla-legacy`
+  session, and that each node is `running`, `Online` in SSM, named `mailstrom-prod-stalwart-*` and
+  tagged `postboot.stalwart.node_services`. `restart` (W 2.3) runs `systemctl restart thundermail`
+  on the four mail nodes and refuses after a `stop-legacy-stalwart` row of this cut. `stop` (W 4.3)
+  runs `systemctl disable --now thundermail` on all six and refuses unless `window/gate.sh
+  stop-legacy` passes. `start` (Rollback) writes a `start-legacy-stalwart` row, which voids an
+  earlier stop row for the W4 reset, then runs `systemctl enable --now thundermail && sleep 5 &&
+  systemctl is-active thundermail` and passes only when every node prints `active`. It also sends
+  to the reachable nodes when some are not `running` or not `Online`, then exits 1 naming the rest;
+  the other modes refuse unless all six are reachable. `read` (W 4.3 after the stop, W 6.4,
+  Rollback) asks for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
+  `node <name> <id> <Status> rc=<code> <active> <enabled>` line each and a `summary:`, and writes
+  the `stop-legacy-stalwart` row only when `window/gate.sh stop-legacy` passes and all six report
+  `inactive` (or `failed`) and `disabled`. The reset phase and `blob_compare.py` read that row.
+  Exit codes: 0 done (for `read`: all six stopped, or all six `active` and `enabled`), 1 `STOP`
+  (a node failed, did not answer within `LEGACY_SSM_WAIT`, or `start` could not reach a node), 2
+  `NEED` (nothing sent), 3 `read` found mixed states, 64 usage.
+- On tb-prod a step that fails writes no timing row, so every row a gate reads means a pass:
+  `queue-drain` (value 0), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
+  `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
+  A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
+  verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)
+  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` 0 row before a
+  `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
+  failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
+  `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
+  `verify-compare` wants both rows at 0 and no later `stop-W6`.
+- On tb-prod `$SECRET_DIR` is on disk, not tmpfs: `~/.local/state/talos/cutover-tb-prod-secret/attempt-<n>`
+  (mode 700, files 600 under umask 077), so a reboot loses none of `export.json`,
+  `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
+  `duplicates.txt`, `source-branch.env` or `apply.log`, and `--rebuild` finds them where they are
+  (it takes `STALWART_SOURCE_PG_*` from `source-branch.env`). Every script refuses a secret
+  directory, or a file in it, that is a symlink, not the operator's, or open to group or others.
+  W8 prints the delete for after #1577 signs off: `rm -rf ~/.local/state/talos/cutover-tb-prod-secret <env file>`.
+- `verify/02_directory.py` reads `DROPPED_DOMAINS` (`$SECRET_DIR/domains-dropped.json`, written by
+  `domain_fix.py --dropped-list`): it leaves exactly those Domains out of the source set, prints
+  their count, and compares the DkimSignature count of tb-prod with the export after the drop
+  (fewer is a failure, more a warning on the expected list).
+- On tb-prod `window/w5-promote.sh` takes `T6_SHA` from the merge commit of PR 195
+  (`T6_PR_DEFAULT` in `targets/tb-prod.sh`) when the env file has neither `T6_SHA` nor `T6_PR`.
+- `window/freight-for.sh <commit on main>` prints the newest Freight of `KARGO_WAREHOUSE_CONFIGS`
+  whose preview commit holds the settings trees of that commit (`Freight <name> (preview commit
+  <sha>) matches <commit>`), the same match `w5-promote.sh` uses; the Warehouse follows the
+  preview branch, so a merge commit on `main` is never a Freight commit itself.
+- `gate-keycloak-version.sh --pull[=IMAGE]` runs the image once before the window and prints
+  `image <ref> cached: Keycloak <version>`; the gate prints the podman error when the image gives
+  no version.
+- `blob_compare.py wait` and `compare` (tb-prod, W 4.6) need the `stop-legacy-stalwart` row after
+  the last `cut-ecs` row. `wait --apply` polls rule `tb-prod-cutover` until both pending metrics
+  read 0 three times after the stop and the failed operations since `REPL_FAILED_SINCE` sum to 0,
+  then writes a `blob-replication-wait` row. `compare --apply` without that row runs the same
+  wait first (same `--timeout` and `--interval`, the row written only on a pass) and compares
+  only after a pass; a timeout stops with exit 1, no row and no copy. `compare` lists both buckets
+  in parallel by key range (current versions; a delete marker or an absent key in tb-prod is
+  missing), compares size and ETag, and with `--apply` copies each difference from legacy and
+  writes a `blob-compare left N` row. It deletes nothing. The blobs `STALWART_WEBADMIN`,
+  `STALWART_SPAM_TRAIN_DATA.lz4` and `STALWART_SPAM_CLASSIFIER_MODEL.lz4` must match by checksum,
+  or the run stops; Stalwart stores them under the base32 of the blob key in its own alphabet
+  (`knkectcxifjfix7xivbecrcnjfha` and so on), which is what the compare looks up and prints beside
+  the name. `--workers` defaults to 48 (one `aws` process per page, PR 204: a review measured 16
+  minutes for the dry run and 9 for the relist of `--apply` at 48). Listings stay under
+  `$EVIDENCE_DIR/blob-compare`, copies in transit under `$SECRET_DIR`.
+- The listing does not start the aws CLI per page. Each shard keeps one HTTPS connection to
+  `<bucket>.s3.eu-central-1.amazonaws.com` and signs `ListObjectVersions` (SigV4) with credentials
+  from `aws configure export-credentials`, fetched once per read-only profile and again when they
+  expire within 5 minutes. Copies still use the CLI. After the listing it prints
+  `listed <side> pages=<n> versions=<n> in <s>s (<w> workers, one connection per shard)` for each
+  side. A page on a kept-alive connection is estimated, not measured, at 0.3 to 0.6 s (the CLI took
+  1.7 to 1.8 s), so the about 21,800 pages of both buckets at 16 workers take about 7 to 14
+  minutes; `## Done when` step 8 of the Tooling issue measures it. `BLOB_S3_ENDPOINT` is for the
+  tests only (`BLOB_TEST=1` and a loopback `http://` address).
+- `setenv`, `setenv_secret` and the env file edits of W4 hold `flock` on `$ENV_FILE.lock`;
+  `check-prereqs.sh` reads the env file under the same lock, shared.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
   `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
   start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password
   created in the Accounts UI from `TEST_SENDER_APP_PASSWORD` (or `TEST_USER_APP_PASSWORD`) in `$OPERATOR_ENV` (default
-  `~/.local/state/talos/cutover-operator.env`, mode 600), else from stdin, never from an argument.
+  `~/.local/state/talos/cutover-operator-$TARGET_ENV.env`, mode 600), else from stdin, never from an argument.
   It stores the value (appends `TEST_SENDER_APP_PASSWORD`) only after a JMAP session on 443, an
   IMAP LOGIN on 993 and an SMTP AUTH on 587 all succeed, and names the ports that failed. `build-cutover-env.sh` carries
   `TEST_SENDER_APP_PASSWORD` only from the previous cutover env file, never from the operator file,

@@ -1,14 +1,16 @@
 umask 077
 MIG_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(cd "$MIG_DIR/../.." && pwd)
+. "$MIG_DIR/target.sh" || return 64
+[ "${CUTOVER_ENV_LOADED:-}" = 1 ] || [ "${BUILDING_ENV:-}" = 1 ] || load_cutover_env
 TS=${TS:-$(date -u +%Y%m%dT%H%M%SZ)}
-EVIDENCE_DIR=${EVIDENCE_DIR:-$HOME/.local/state/talos/cutover-tb-stage}
-SECRET_DIR=${SECRET_DIR:-/dev/shm/talos/cutover-tb-stage/secret-artifacts}
-AWS_REGION=${AWS_REGION:-eu-central-1}
-LEGACY_AWS_PROFILE=${LEGACY_AWS_PROFILE:-mzla-legacy}
-STAGE_AWS_PROFILE=${STAGE_AWS_PROFILE:-mzla-tb-stage}
+[ "$TARGET_ENV" != tb-prod ] || CUTOVER_ATTEMPT=${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}
+EVIDENCE_DIR=${EVIDENCE_DIR:-$(evidence_default)}
+SECRET_DIR=${SECRET_DIR:-$(secret_default)}
+[ "$TARGET_ENV" != tb-prod ] || secret_dir_ok "$SECRET_DIR" || { echo "refusing: $SECRET_DIR, or a file in it, is a symlink, not owned by $(id -un), or open to group or others (want the directory 700 and its files 600)" >&2; exit 1; }
+AWS_REGION=${AWS_REGION:-$TARGET_REGION}
+LEGACY_AWS_PROFILE=${LEGACY_AWS_PROFILE:-$DEF_LEGACY_AWS_PROFILE}
 CF_API=https://api.cloudflare.com/client/v4
-. "$MIG_DIR/spf-decided.sh"
 APPLY=0
 ARGS=()
 for a in "$@"; do
@@ -19,16 +21,24 @@ for a in "$@"; do
   esac
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
-mkdir -p "$EVIDENCE_DIR"
+[ "$APPLY" != 1 ] || no_placeholders || exit 64
+[ "${BUILDING_ENV:-}" = 1 ] || mkdir -p "$EVIDENCE_DIR"
 
 die() { echo "$*" >&2; exit 1; }
-need() { local v; for v in "$@"; do [ -n "${!v:-}" ] || die "missing $v in the environment: source the cutover env file first"; done; }
+legacy_stalwart_pg() { [ "$TARGET_ENV" != tb-prod ] || return 1; case " ${RUNNER_LEGACY_PG_KEYS:-stalwart keycloak accounts} " in *" stalwart "*) return 0 ;; esac; return 1; }
+need_hint() {
+  case $1 in
+    STALWART_URL) echo "build-cutover-env.sh writes http://localhost:18081 there; LANE_PF_PORT picks another local port" ;;
+    TARGET_NLB_DNS|TARGET_NLB_IPS) echo "it stays empty until the mail load balancer exists; then run build-cutover-env.sh --rebuild" ;;
+  esac
+}
+need() { local v h; for v in "$@"; do [ -n "${!v:-}" ] || { h=$(need_hint "$v"); die "missing $v: not in ${ENV_FILE:-the cutover env file} or the environment; ${h:-run build-cutover-env.sh}"; }; done; }
 mode() { [ "$APPLY" = 1 ] && echo apply || echo dry-run; }
-kstage() { need KUBECONFIG_STAGE; kubectl --kubeconfig "$KUBECONFIG_STAGE" "$@"; }
+ktarget() { need KUBECONFIG_TARGET; kubectl --kubeconfig "$KUBECONFIG_TARGET" "$@"; }
 khub() { need KUBECONFIG_HUB; kubectl --kubeconfig "$KUBECONFIG_HUB" "$@"; }
-pod() { kstage -n thundermail exec -i runner -c postgres -- "$@"; }
+pod() { ktarget -n thundermail exec -i runner -c postgres -- "$@"; }
 aws_legacy() { aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" "$@"; }
-aws_stage() { aws --profile "$STAGE_AWS_PROFILE" --region "$AWS_REGION" "$@"; }
+aws_target() { aws --profile "$TARGET_AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 cf_api() { need CF_API_TOKEN_AGENT; curl -sS -m 60 -K <(printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$CF_API_TOKEN_AGENT") "$@"; }
 legacy_loopback() {
   local hp=${OLD_STALWART_URL#*://} l
@@ -39,16 +49,11 @@ legacy_loopback() {
   ! grep -vq 'users:(("session-manager"' <<<"$l" || { echo "listener on :${hp##*:} is not the SSM tunnel of $(id -un): credentials not sent"; return 1; }
   echo "OLD_STALWART_URL is loopback through the SSM tunnel of $(id -un)"
 }
-env_path_ok() {
-  local f=$1 d
-  d=$(dirname "$1")
-  [ ! -L "$d" ] && [ -O "$d" ] && [ -z "$(find "$d" -maxdepth 0 -perm /022)" ] || return 1
-  [ ! -e "$f" ] || { [ ! -L "$f" ] && [ -O "$f" ] && [ -z "$(find "$f" -maxdepth 0 -perm /022)" ]; }
-}
 load_operator_env() {
   local f=$1 name val
   [ -e "$f" ] || return 0
   [ "$(stat -c %a "$f")" = 600 ] || { echo "$f must be mode 600" >&2; exit 1; }
+  env_target_ok "$f" || exit 64
   while IFS= read -r name; do
     [ -z "${!name:-}" ] || continue
     val=$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${!name:-}")
@@ -57,7 +62,7 @@ load_operator_env() {
 }
 shared_zone_id() {
   local tok
-  tok=$(aws_stage secretsmanager get-secret-value --secret-id mzla/tb-stage/cloudflare-external-dns --query SecretString --output text 2>/dev/null | jq -r '.apiToken // empty') || return 1
+  tok=$(aws_target secretsmanager get-secret-value --secret-id "$CF_EXTERNAL_DNS_SECRET" --query SecretString --output text 2>/dev/null | jq -r '.apiToken // empty') || return 1
   [ -n "$tok" ] || return 1
   curl -sS -m 30 -K <(printf 'header = "Authorization: Bearer %s"\n' "$tok") "$CF_API/zones?name=$1" | jq -re '.result[0].id // empty'
 }
