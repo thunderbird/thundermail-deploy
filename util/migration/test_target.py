@@ -1047,6 +1047,23 @@ class Placeholders(Sandbox):
         for name in ('FREEZE_PR', 'T7_PR', 'T7_REVERT_PR', 'T8_PR', 'T8_REVERT_PR'):
             self.assertNotRegex(text, r'(?m)^%s=' % name)
 
+    def test_no_placeholder_is_left_on_tb_prod(self):
+        for rel in ('targets/tb-prod.sh', 'verify/tb-prod.env'):
+            self.assertNotIn('replace_me', (HERE / rel).read_text().lower(), rel)
+        rc, out = self.run_sh(
+            ['-c', 'set -- --apply\n. %s/lib.sh\necho reached\n' % HERE], TARGET_ENV='tb-prod'
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('refusing', out)
+        self.assertIn('reached', out)
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W1'], TARGET_ENV='tb-prod'
+        )
+        self.assertRegex(
+            out,
+            r'(?m)^HAVE  placeholders +no REPLACE_ME value in targets/tb-prod.sh or verify/tb-prod.env$',
+        )
+
     def test_every_apply_refuses_while_one_remains(self):
         script = 'set -- --apply\n. %s/lib.sh\necho reached\n'
         mig = with_placeholder(HERE, self.t / 'mig-ph', 'LEGACY_PG_SECRET_NAME')
