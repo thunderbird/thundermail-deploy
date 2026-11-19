@@ -299,7 +299,8 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   `w4-export` and `w4-read-done` rows only. A rerun after a `queue-drain` stop reads the queue
   only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
   without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`
-  row, or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
+  row, when a `start-legacy-stalwart` row follows the `w4-export` row (the export is stale, and
+  the next `--phase read --apply` dumps again without `--go`), or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
   `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
   `STALWART_SOURCE_PG_*` of the env file, created at the `parent_lsn` the reset returned (row
@@ -351,13 +352,25 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   operation type differ from the lines of `export.json` (a cut stdin stream), and
   the retry is the revert of the recovery-mode PR and `--phase reset --apply --go` (about 20 to 25
   minutes).
-- `window/legacy-stalwart.sh read --apply` (W 4.3, after the stop) refuses unless
-  `window/gate.sh stop-legacy` passes, asks the six nodes of `LEGACY_STALWART_NODE_IDS` through SSM
-  Run Command for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
-  `node <id> thundermail=<state> enabled=<state>` line each, and writes the
-  `stop-legacy-stalwart` row only when all six report `inactive` (or `failed`) and `disabled`.
-  The reset phase and `blob_compare.py` read that row. The stop, start and restart modes are not
-  in this script.
+- `window/legacy-stalwart.sh restart|stop|start|read [--dry-run | --apply]` (tb-prod only, dry run
+  by default) sends one SSM Run Command (`AWS-RunShellScript`) to the nodes of
+  `LEGACY_STALWART_NODE_IDS`, after it checks that there are six distinct ids, an `mzla-legacy`
+  session, and that each node is `running`, `Online` in SSM, named `mailstrom-prod-stalwart-*` and
+  tagged `postboot.stalwart.node_services`. `restart` (W 2.3) runs `systemctl restart thundermail`
+  on the four mail nodes and refuses after a `stop-legacy-stalwart` row of this cut. `stop` (W 4.3)
+  runs `systemctl disable --now thundermail` on all six and refuses unless `window/gate.sh
+  stop-legacy` passes. `start` (Rollback) writes a `start-legacy-stalwart` row, which voids an
+  earlier stop row for the W4 reset, then runs `systemctl enable --now thundermail && sleep 5 &&
+  systemctl is-active thundermail` and passes only when every node prints `active`. It also sends
+  to the reachable nodes when some are not `running` or not `Online`, then exits 1 naming the rest;
+  the other modes refuse unless all six are reachable. `read` (W 4.3 after the stop, W 6.4,
+  Rollback) asks for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
+  `node <name> <id> <Status> rc=<code> <active> <enabled>` line each and a `summary:`, and writes
+  the `stop-legacy-stalwart` row only when `window/gate.sh stop-legacy` passes and all six report
+  `inactive` (or `failed`) and `disabled`. The reset phase and `blob_compare.py` read that row.
+  Exit codes: 0 done (for `read`: all six stopped, or all six `active` and `enabled`), 1 `STOP`
+  (a node failed, did not answer within `LEGACY_SSM_WAIT`, or `start` could not reach a node), 2
+  `NEED` (nothing sent), 3 `read` found mixed states, 64 usage.
 - On tb-prod a step that fails writes no timing row, so every row a gate reads means a pass:
   `queue-drain` (value 0), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
   `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
