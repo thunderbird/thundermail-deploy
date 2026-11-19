@@ -16,7 +16,7 @@ while [ $# -gt 0 ]; do
 done
 W=$(basename "$0" .sh)
 KEY=$(tr '[:lower:]' '[:upper:]' <<<"${W%%-*}")
-SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
+SECRET_NAMES="STALWART_TARGET_PG_PASSWORD STALWART_SOURCE_PG_PASSWORD STALWART_PASSWORD OLD_STALWART_PASSWORD STALWART_LEGACY_PG_PASSWORD ACCOUNTS_LEGACY_PG_PASSWORD KC_LEGACY_PG_PASSWORD KC_LEGACY_ADMIN_CLIENT_SECRET CF_API_TOKEN_AGENT PADDLE_API_KEY TEST_MAILBOX_IMAP_PASSWORD TEST_SENDER_APP_PASSWORD"
 KS=(kubectl --kubeconfig "${KUBECONFIG_TARGET:-}")
 KH=(kubectl --kubeconfig "${KUBECONFIG_HUB:-}")
 TMD_URL=https://github.com/thunderbird/thundermail-deploy.git
@@ -149,12 +149,20 @@ pending() {
   done
 }
 
+env_locked() {
+  local rc=0
+  command -v flock >/dev/null 2>&1 || { "$@"; return; }
+  { flock -w 60 9 || { echo "the env file lock $ENV_FILE.lock is held by another writer for 60 s"; return 1; }; "$@" || rc=$?; } 9>>"$ENV_FILE.lock" || { echo "cannot open the env file lock $ENV_FILE.lock"; return 1; }
+  return "$rc"
+}
+env_append() { printf "%s='%s'\n" "$1" "$2" >> "$ENV_FILE"; }
+
 setenv() {
   local q
   printf '  + append %s=%s to %s\n' "$1" "$2" "$ENV_FILE"
   [ "$APPLY" = 1 ] || return 0
   q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
-  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE" || return 1
+  env_locked env_append "$1" "$q" || return 1
   export "$1=$2"
 }
 
@@ -163,7 +171,7 @@ setenv_secret() {
   printf '  + append %s (len=%s) to %s\n' "$1" "${#2}" "$ENV_FILE"
   [ "$APPLY" = 1 ] || return 0
   q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
-  printf "%s='%s'\n" "$1" "$q" >> "$ENV_FILE" || return 1
+  env_locked env_append "$1" "$q" || return 1
   export "$1=$2"
 }
 

@@ -80,8 +80,8 @@ Secret (still named by `LEGACY_PG_SECRET_NAME`) holds only the Keycloak and Acco
 hosts, and neither host may equal `STALWART_LEGACY_PG_HOST`. The pod wants two distinct legacy
 hosts and refuses to start when the mounted Secret has a `stalwart` key. `.pgpass` holds the
 target, Keycloak and Accounts lines. `/work` keeps its 20Gi default, since `RUNNER_WORK_SIZE` is
-unset. `--check` skips the legacy Stalwart database rows, and the W4 steps `task-queue` and
-`db-dump-legacy` refuse.
+unset. `--check` skips the legacy Stalwart database rows. On tb-prod W4 runs neither `task-queue`
+nor `db-dump-legacy` (they refuse if reached); its reset phase works on the cutover branch.
 
 The `python` container installs hash-pinned wheels as a non-root user and does not mount
 `/work`.
@@ -261,6 +261,33 @@ the keying for the real hosts.
   `check` after the W3 blob-check (`blob-recheck` row) before it leaves recovery mode. Convert
   stops on `warning: (dropping|renaming) (User|Group)` lines that are not in
   `$SECRET_DIR/convert-dropped-baseline.txt` (the lines the T10 dry run accepted).
+- On tb-prod W4 has three phases, and `--apply` without one exits 64; the dry run without a
+  phase prints all three. `--phase read` (gate `go-W4-read`) dumps through `dump_legacy.py` (the
+  password stays in the environment, `DUMP_WORKERS` concurrent reads, default 8), then runs
+  `duplicates`, `convert`, `retarget` and `queue-drain` last. It writes `$SECRET_DIR` and the
+  `w4-export` and `w4-read-done` rows only. A rerun after a `queue-drain` stop reads the queue
+  only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
+  without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`
+  row, or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
+  `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
+  row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
+  `STALWART_SOURCE_PG_*` of the env file: Neon resets a role password only on a branch with a
+  read-write endpoint, so the branch is created with one, the password is reset, a read-only
+  endpoint is added and the read-write endpoint is deleted. It then checks that both branches are `ready`, later
+  than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
+  credentials log in on their branch, the source branch refuses a write as read-only, and the
+  production endpoint answers `password authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
+  equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
+  boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
+  recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
+  applies the export. A second reset needs `--go`. `--phase boot` resumes an expired wait
+  without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
+  restore or blob step.
+- W 4.3 records the stop of legacy Stalwart, once no process is left on the six nodes, with
+  `t=$(date -u +%FT%TZ); printf 'stop-legacy-stalwart\t%s\t%s\tnodes\t6\n' "$t" "$t" >> "$TIMING_TSV"`;
+  the reset phase and `blob_compare.py` read that row.
+- `setenv`, `setenv_secret` and the env file edits of W4 hold `flock` on `$ENV_FILE.lock`;
+  `check-prereqs.sh` reads the env file under the same lock, shared.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
   `queue.authenticated-message-queued` (outbound) in the Stalwart logs since the `dns-cutover`
   start for a rollback decision. `window/test-sender-password.sh --apply` reads the app password

@@ -2,7 +2,7 @@
 set -uo pipefail
 umask 077
 
-IDS="go-W1 go-W2 go-outbound-block go-T7 go-W4 go-T8 go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 go-V2 go-rollback start checks presync backups verify auth-dns pre-cut"
+IDS="go-W1 go-W2 go-outbound-block go-T7 go-W4 go-W4-read go-W4-reset go-T8 go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 go-V2 go-rollback start checks presync backups verify auth-dns pre-cut"
 usage() {
   cat <<USAGE
 usage: TARGET_ENV=<env> check-prereqs.sh [--for ID[,ID...]]...
@@ -51,7 +51,16 @@ sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
 from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//; s/'\\\\''/'/g"; }
-ev() { local v; v=$(from_file "$ENV_FILE" "$1"); printf '%s' "${v:-${!1:-}}"; }
+ev() {
+  local v rc=0
+  if [ -d "$(dirname "$ENV_FILE")" ] && command -v flock >/dev/null 2>&1; then
+    v=$( { flock -s -w 60 9 || exit 3; from_file "$ENV_FILE" "$1"; } 9>>"$ENV_FILE.lock" 2>/dev/null ) || rc=$?
+    [ "$rc" = 0 ] || { echo "no shared lock on $ENV_FILE.lock: $1 not read" >&2; return 1; }
+  else
+    v=$(from_file "$ENV_FILE" "$1")
+  fi
+  printf '%s' "${v:-${!1:-}}"
+}
 envfile_has() { [ -n "$(ev "$1")" ]; }
 load_operator_env() {
   local f=$1 name val
@@ -288,7 +297,7 @@ skip() {
 }
 
 R1="checks presync"
-LEG="$R1 start backups go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W4 auth-dns go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 verify go-V2 go-rollback"
+LEG="$R1 start backups go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W4 go-W4-read auth-dns go-W5 go-predns go-mx-flip go-access go-open go-W8 go-P1 verify go-V2 go-rollback"
 HUB="$R1 start go-W1 go-W2 go-outbound-block pre-cut go-T7 go-T8 go-W5 go-predns go-access go-open go-W8 go-P1 verify go-rollback"
 rows() {
   [ "$TARGET_ENV" != tb-prod ] || [ -z "$FOR" ] || row "ALL" checkout c_checkout
@@ -300,17 +309,17 @@ rows() {
   row "ALL" "kube-$TARGET_ENV" c_kube_target
   row "$HUB" kube-hub c_kube_hub
   row "$R1" kube-tb-dev c_kube_dev
-  row "$R1 start backups go-T7 go-T8 go-W4 auth-dns go-V2 go-rollback" neon-api-key+neonctl c_neon
-  row "checks go-open" cf-token-shared-external-dns c_cf_shared
+  row "$R1 start backups go-T7 go-T8 go-W4 go-W4-reset auth-dns go-V2 go-rollback" neon-api-key+neonctl c_neon
+  [ "$TARGET_ENV" = tb-prod ] || row "checks go-open" cf-token-shared-external-dns c_cf_shared
   row "$R1 start backups auth-dns go-predns go-mx-flip go-access go-open go-W8 verify go-V2 go-rollback" cf-token-agent c_cf_agent
   row "go-access go-open go-W8 go-rollback" cf-token-agent-redirects c_cf_agent_p2
   row "go-T7 go-V2 go-rollback" "keycloak-admin-$TARGET_ENV" c_kc_admin_target
   row "start backups go-rollback" keycloak-admin-legacy c_kc_admin_legacy
-  row "$R1 go-W2 go-W4 go-mx-flip go-P1 go-rollback" stalwart-admin-legacy c_stalwart_legacy
-  row "start go-W4 go-W5 go-predns go-open" stalwart-recovery-admin c_stalwart_recovery
-  row "$R1 start go-W4" stalwart-target-db-owner c_target_db
+  row "$R1 go-W2 go-W4 go-W4-read go-mx-flip go-P1 go-rollback" stalwart-admin-legacy c_stalwart_legacy
+  row "start go-W4 go-W4-reset go-W5 go-predns go-open" stalwart-recovery-admin c_stalwart_recovery
+  row "$R1 start go-W4 go-W4-reset" stalwart-target-db-owner c_target_db
   row "$R1 start backups go-T7 go-T8 go-W4" legacy-db-passwords c_legacy_db
-  row "start go-W4" legacy-stalwart-pg-secret c_legacy_stalwart_pg
+  [ "$TARGET_ENV" = tb-prod ] || row "start go-W4" legacy-stalwart-pg-secret c_legacy_stalwart_pg
   row "backups" legacy-aws-reads c_aws_reads "$LEGACY" "ecs list-clusters" "logs describe-log-groups" "cloudwatch describe-alarms" "ec2 describe-instances"
   row "backups" "$TARGET_ENV-aws-reads" c_aws_reads "$TARGET_AWS_PROFILE" "ec2 describe-instances"
   row "go-T8 go-predns" accounts-secret-bundle c_accounts_bundle
@@ -338,12 +347,12 @@ rows() {
   skip "backups" log-export-store "to fill: the log export store row of platform-infrastructure#1722"
   row "$R1 start backups go-outbound-block pre-cut go-W4" tool-rclone c_tool rclone
   row "$R1 start backups go-W4 go-predns go-P1" tool-podman c_tool podman
-  row "$R1 start go-W2 go-outbound-block go-W4" tool-session-manager-plugin c_tool session-manager-plugin
+  row "$R1 start go-W2 go-outbound-block go-W4 go-W4-read" tool-session-manager-plugin c_tool session-manager-plugin
   row "ALL" tool-jq c_tool jq
   row "ALL" tool-yq c_tool yq
-  row "$R1 start go-W4 go-W5 go-predns" tool-stalwart-cli c_tool stalwart-cli
+  row "$R1 start go-W4 go-W4-reset go-W5 go-predns" tool-stalwart-cli c_tool stalwart-cli
   row "$R1 start go-predns go-mx-flip go-access go-open" tool-swaks c_tool swaks
-  row "$R1 start backups go-W4 go-W5 go-predns go-P1" python-venv c_venv
+  row "$R1 start backups go-W4 go-W4-read go-W4-reset go-W5 go-predns go-P1" python-venv c_venv
 }
 
 printf '%-4s  %-28s  %s\n' STATUS ITEM DETAIL

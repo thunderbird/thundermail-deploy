@@ -28,7 +28,7 @@ for rule in json.load(open(os.environ['FAKE_RULES'])):
 sys.exit(1)
 """
 GATE_IDS = (
-    'go-W1 go-W2 go-outbound-block go-T7 go-W4 go-T8 go-W5 go-predns go-mx-flip go-access go-open '
+    'go-W1 go-W2 go-outbound-block go-T7 go-W4 go-W4-read go-W4-reset go-T8 go-W5 go-predns go-mx-flip go-access go-open '
     'go-W8 go-P1 go-V2 go-rollback start checks presync backups verify auth-dns pre-cut'
 ).split()
 MAIN_STAGE_BUILD = (
@@ -789,8 +789,10 @@ class Prereqs(Sandbox):
 
     def test_go_w4_has_the_verify_source_side(self):
         _, out = self.prereqs('--for', 'go-W4', env='tb-prod')
-        self.assertRegex(out, r'(?m)^(HAVE|NEED)  legacy-stalwart-pg-secret ')
+        self.assertNotRegex(out, r'(?m)^(HAVE|NEED)  legacy-stalwart-pg-secret ')
         self.assertRegex(out, r'(?m)^(HAVE|NEED)  tool-podman ')
+        _, out = self.prereqs('--for', 'go-W4', env='tb-stage')
+        self.assertRegex(out, r'(?m)^(HAVE|NEED)  legacy-stalwart-pg-secret ')
 
     def rows(self, out):
         return re.findall(r'(?m)^(?:HAVE|NEED|SKIP)  (\S+)', out)
@@ -901,7 +903,7 @@ class GateIds(Sandbox):
         't7.sh': ['go-T7'],
         't8.sh': ['go-T8'],
         'w3-blob-copy.sh': ['go-W4', 'presync', 'backups', 'pre-cut'],
-        'w4-migrate.sh': ['go-W4'],
+        'w4-migrate.sh': ['go-W4', 'go-W4-read', 'go-W4-reset'],
         'w5-promote.sh': ['go-W5'],
         'w6-verify.sh': ['go-predns', 'go-P1'],
         'w7.sh': ['go-open'],

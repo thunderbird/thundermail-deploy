@@ -411,7 +411,7 @@ class W4Recovery(Data):
         self.assertNotIn('STALWART_RECOVERY_MODE-', text)
         out = self.w4(
             'TM_RECOVERY_PR=42\nRECOVERY_PR="thundermail-deploy PR 42"\n'
-            + re.search(r"(?ms)^printf '%s\\n' \\\n.*?> \"\$RESTORE\"$", text).group(0)
+            + re.search(r'(?ms)^if \[ "\$TARGET_ENV" = tb-prod \]; then\n  printf .*?^fi$', text).group(0)
             + '\ncat "$RESTORE"'
         )
         self.assertNotIn('kubectl scale', out)
