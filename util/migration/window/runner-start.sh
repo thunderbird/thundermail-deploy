@@ -148,11 +148,13 @@ dump_gate() {
 }
 
 remove() {
+  local p s
   run "${K[@]}" delete pod runner --ignore-not-found --wait=true --timeout=120s || return 1
   run "${K[@]}" delete secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found || return 1
   [ ! -d "$SECRET_DIR" ] || run find "$SECRET_DIR" -maxdepth 1 -name "$LEGACY_PG_SECRET_NAME-*.yaml" -delete || return 1
   [ "$APPLY" = 1 ] || return 0
-  [ -z "$(rd "${K[@]}" get pod runner --ignore-not-found -o name)" ] && [ -z "$(rd "${K[@]}" get secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found -o name)" ] || { fail "runner pod or Secret $LEGACY_PG_SECRET_NAME still there"; return 0; }
+  p=$(rd "${K[@]}" get pod runner --ignore-not-found -o name) && s=$(rd "${K[@]}" get secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found -o name) || { fail "runner pod or Secret $LEGACY_PG_SECRET_NAME not readable after the delete"; return 0; }
+  [ -z "$p" ] && [ -z "$s" ] || { fail "runner pod or Secret $LEGACY_PG_SECRET_NAME still there"; return 0; }
   pass "runner pod and Secret $LEGACY_PG_SECRET_NAME gone"
 }
 

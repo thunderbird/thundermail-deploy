@@ -33,6 +33,9 @@ elif verb == 'get' and rest[:2] == ['secret', 'stalwart-postgresql-admin-passwor
     out = 'yes' if st.get('target_key', True) else ''
 elif verb == 'get' and rest[:2] == ['configmap', 'stalwart-config']:
     out = json.dumps({{'host': st.get('cm_host', 'ep-cut-pooler.example.test')}})
+elif verb == 'get' and '--ignore-not-found' in rest and st.get('reads_fail') in (rest[0], 'all'):
+    sys.stderr.write('Unable to connect to the server: dial tcp: i/o timeout\n')
+    rc = 1
 elif verb == 'get' and rest[:2] == ['pod', 'runner'] and '--ignore-not-found' in rest:
     out = 'pod/runner' if st.get('pod') else ''
 elif verb == 'get' and rest[0] == 'secret' and '--ignore-not-found' in rest:
@@ -73,6 +76,8 @@ elif verb == 'create':
 elif verb == 'wait':
     rc = 0 if st.get('pod') else 1
 elif verb == 'delete':
+    if st.get('fail_after_delete'):
+        st['reads_fail'] = st['fail_after_delete']
     if not st.get('sticky'):
         st['pod' if rest[0] == 'pod' else 'secret'] = False
 elif verb == 'exec':
@@ -496,6 +501,18 @@ class RunnerStart(unittest.TestCase):
                 self.assertRegex(out, r'(?m)^HAVE  no ')
                 self.assertEqual(self.rows(), ['runner-removed'])
                 self.assertFalse(self.secret_dir.exists())
+
+    def test_remove_does_not_pass_on_a_failed_read_back(self):
+        for kind in ('pod', 'secret'):
+            with self.subTest(kind):
+                self.state(sgps=SGPS, secret=True, fail_after_delete=kind)
+                (self.ev / 'timing.tsv').unlink(missing_ok=True)
+                rc, out = self.run_tool('remove', '--apply')
+                self.assertEqual(rc, 1, out)
+                self.assertIn('FAIL  runner pod or Secret legacy-pg not readable after the delete', out)
+                self.assertNotIn('PASS  runner pod and Secret', out)
+                self.assertNotIn('runner-removed', self.rows())
+                self.assertIn('stop-RUNNER', self.rows())
 
     def test_usage(self):
         rc, out = self.run_tool('stop')
