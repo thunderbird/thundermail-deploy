@@ -356,7 +356,7 @@ check() {
   chk operator-values operator_values
   chk dirs-and-kubeconfigs dirs
   in_window runner-pod "the runner pod starts in the window" runner
-  for h in STALWART_LEGACY_PG_HOST:STALWART_LEGACY_PG_USER:STALWART_LEGACY_PG_DB STALWART_TARGET_PG_HOST:STALWART_TARGET_PG_USER:STALWART_TARGET_PG_DB KC_LEGACY_PG_HOST:KC_LEGACY_PG_USER:KC_LEGACY_PG_DB ACCOUNTS_LEGACY_PG_HOST:ACCOUNTS_LEGACY_PG_USER:ACCOUNTS_LEGACY_PG_NAME; do
+  for h in $(! legacy_stalwart_pg || echo STALWART_LEGACY_PG_HOST:STALWART_LEGACY_PG_USER:STALWART_LEGACY_PG_DB) STALWART_TARGET_PG_HOST:STALWART_TARGET_PG_USER:STALWART_TARGET_PG_DB KC_LEGACY_PG_HOST:KC_LEGACY_PG_USER:KC_LEGACY_PG_DB ACCOUNTS_LEGACY_PG_HOST:ACCOUNTS_LEGACY_PG_USER:ACCOUNTS_LEGACY_PG_NAME; do
     IFS=: read -r hv uv dv <<<"$h"
     in_window "pg_isready-${hv%_PG_HOST}" "runs in the runner pod, which starts in the window" pod pg_isready -h "${!hv}"
     in_window "psql-select1-${hv%_PG_HOST}" "runs in the runner pod, which starts in the window" pod psql -h "${!hv}" -U "${!uv}" -d "${!dv}" -Atc 'select 1'

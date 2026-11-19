@@ -37,6 +37,11 @@ recovery_state() {
 schema_ok() { [ "$(bash "$MIG_DIR/schema-version.sh" 2>/dev/null)" = 00000006 ]; }
 blob_ok() { awk -F'\t' '$1 == "cut-ecs" {c = NR} $1 == "snap-blobs" {s = NR; v = ""} $1 == "stop-W3" {v = ""} $1 == "blob-check" && $4 == "differences" {v = $5; b = NR} END {exit !(c > 0 && s > c && b > s && v == "0")}' "$TIMING_TSV"; }
 show_to() { local f=$1; shift; printf '  + %s >> %s\n' "$(shq "$@")" "$f"; }
+no_legacy_db() {
+  legacy_stalwart_pg && return 1
+  printf '%s%s reads the legacy Stalwart database: refused on %s, whose runner holds no credential for it (the cutover branch replaces this step)\n' "$([ "$APPLY" = 1 ] || echo 'NEED  ')" "$1" "$TARGET_ENV"
+  [ "$APPLY" = 1 ] || NEEDS=$((NEEDS + 1))
+}
 
 retake() {
   [ -z "$(after_cut drop-schema)" ] || { echo "target-before.dump is $1 but DROP SCHEMA already ran for this cut: a new dump would replace the pre-migration restore point"; return 1; }
@@ -56,6 +61,7 @@ preflight() {
   if runner_up; then
     local who h u d err
     for who in STALWART_LEGACY STALWART_TARGET; do
+      if [ "$who" = STALWART_LEGACY ] && ! legacy_stalwart_pg; then echo "psql select 1 on $who: skipped, the $TARGET_ENV runner holds no legacy Stalwart credential"; continue; fi
       h=${who}_PG_HOST u=${who}_PG_USER d=${who}_PG_DB
       if err=$("${POD[@]}" psql -h "${!h}" -U "${!u}" -d "${!d}" -Atc 'select 1' 2>&1 >/dev/null); then
         echo "psql select 1 on $who (${!h}): ok"
@@ -94,6 +100,7 @@ preflight() {
 
 task_queue() {
   local q="select count(*) from f"
+  if no_legacy_db task-queue; then [ "$APPLY" = 0 ]; return; fi
   printf '  + %s\n' "$(shq "${POD[@]}" psql -h "$STALWART_LEGACY_PG_HOST" -U "$STALWART_LEGACY_PG_USER" -d "$STALWART_LEGACY_PG_DB" -Atc "$q")"
   [ "$APPLY" = 1 ] || { echo "  wait up to 600s for 0 pending index tasks (table f), else stop"; return 0; }
   until_ok 600 tasks_empty || { echo "legacy task queue f still holds $VALUE task(s) after 600s; migrate_v0_16 drops them"; return 1; }
@@ -202,6 +209,7 @@ retarget() {
 }
 
 dump_legacy() {
+  if no_legacy_db db-dump-legacy; then [ "$APPLY" = 0 ]; return; fi
   run "${POD[@]}" pg_dump -Fc --no-owner -h "$STALWART_LEGACY_PG_HOST" -U "$STALWART_LEGACY_PG_USER" -d "$STALWART_LEGACY_PG_DB" -f /work/legacy.dump || return 1
   if [ "$APPLY" = 0 ]; then
     printf '  + %s\n' "$(shq "${POD[@]}" stat -c %s /work/legacy.dump)"

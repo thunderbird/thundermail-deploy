@@ -194,13 +194,13 @@ class Data(Harness):
     def kube(self, deploys, pod_lists):
         (self.t / 'kube.json').write_text(json.dumps({'deploy': deploys, 'pods': pod_lists}))
 
-    def w4(self, body, setup=''):
+    def w4(self, body, setup='', target='tb-stage'):
         text = (self.MIG / 'window' / 'w4-migrate.sh').read_text()
         top = re.findall(r'(?m)^(?:NS|S|POD|RECOVERY_[A-Z]+|REVERT)=.*$', text)
         head = '\n'.join(top) + '\nPY=%s\nSTATE=""\n' % sys.executable
         for k, v in self.ENV.items():
             head += 'export %s=%s\n' % (k, v)
-        return self.fn('w4-migrate.sh', body, setup=head + setup, env=self.env())
+        return self.fn('w4-migrate.sh', body, setup=head + setup, env=self.env(TARGET_ENV=target))
 
 
 class W3Delta(Data):
@@ -468,6 +468,39 @@ class W4Duplicates(Data):
         out = self.w4('step duplicates duplicates duplicates')
         self.assertIn("dup_check.py exit 1: user '<value>' has no id; full text in", out)
         self.assertNotIn('noid@', out)
+
+
+class W4LegacyDb(Data):
+    BODY = (
+        'export STALWART_LEGACY_PG_HOST=legacy.example.test STALWART_LEGACY_PG_USER=u '
+        'STALWART_LEGACY_PG_DB=d\n'
+        'task_queue; echo "rc=$?"; dump_legacy; echo "rc=$?"; echo "needs=$NEEDS"'
+    )
+    REFUSED = (
+        '%sreads the legacy Stalwart database: refused on tb-prod, whose runner holds no '
+        'credential for it (the cutover branch replaces this step)'
+    )
+
+    def test_prod_apply_refuses_both_legacy_steps(self):
+        out = self.w4(self.BODY, target='tb-prod')
+        self.assertIn(self.REFUSED % 'task-queue ' + '\nrc=1\n', out)
+        self.assertIn(self.REFUSED % 'db-dump-legacy ' + '\nrc=1\n', out)
+        self.assertIn('needs=0', out)
+        self.assertEqual(self.calls('kubectl'), [])
+        self.assertNotIn('legacy.example.test', out)
+
+    def test_prod_dry_run_lists_them_as_need(self):
+        out = self.w4('APPLY=0\n' + self.BODY, target='tb-prod')
+        self.assertIn('NEED  ' + self.REFUSED % 'task-queue ' + '\nrc=0\n', out)
+        self.assertIn('NEED  ' + self.REFUSED % 'db-dump-legacy ' + '\nrc=0\n', out)
+        self.assertIn('needs=2', out)
+
+    def test_stage_dry_run_still_prints_the_legacy_commands(self):
+        out = self.w4('APPLY=0\n' + self.BODY)
+        self.assertNotIn('refused', out)
+        self.assertIn('psql -h legacy.example.test -U u -d d -Atc', out)
+        self.assertIn('pg_dump -Fc --no-owner -h legacy.example.test', out)
+        self.assertIn('needs=0', out)
 
 
 if __name__ == '__main__':

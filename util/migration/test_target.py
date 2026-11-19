@@ -287,7 +287,7 @@ class Builder(Sandbox):
         self.assertNotEqual(rc, 0)
         for name in (
             'runner-pod',
-            'pg_isready-STALWART_LEGACY',
+            'pg_isready-STALWART_TARGET',
             'psql-select1-ACCOUNTS_LEGACY',
             'legacy-url-loopback',
             'stalwart-legacy-healthz',
@@ -299,7 +299,14 @@ class Builder(Sandbox):
         ):
             self.assertRegex(out, r'(?m)^WAIT  %s +\S' % re.escape(name))
             self.assertNotRegex(out, r'(?m)^(PASS|FAIL)  %s ' % re.escape(name))
-        for name in ('spf-final-txt', 't7-prs', 't8-prs', 'restore-replicas-dry-run'):
+        for name in (
+            'spf-final-txt',
+            't7-prs',
+            't8-prs',
+            'restore-replicas-dry-run',
+            'pg_isready-STALWART_LEGACY',
+            'psql-select1-STALWART_LEGACY',
+        ):
             self.assertNotRegex(out, r'(?m)^\S+  %s ' % re.escape(name))
         self.assertRegex(out, r'(?m)^FAIL  operator-values +empty: TEST_MAILBOX ')
         self.assertNotIn('FREEZE_PR', out)
@@ -880,9 +887,8 @@ class Runner(Sandbox):
         shutil.copytree(HERE, defs, ignore=shutil.ignore_patterns('__pycache__'))
         p = defs / 'targets' / 'tb-prod.sh'
         p.write_text(
-            p.read_text()
-            .replace('REPLACE_ME_RUNNER_WORK_SIZE', '64Gi')
-            .replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
+            p.read_text().replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
+            + 'RUNNER_WORK_SIZE=64Gi\n'
         )
         rc, out = self.run_sh([str(defs / 'runner-pod.sh')], TARGET_ENV='tb-prod')
         self.assertEqual(rc, 0, out)
@@ -1068,7 +1074,7 @@ class Placeholders(Sandbox):
             KUBECONFIG_DEV=str(self.t / 'kc-dev'),
         )
         self.assertNotEqual(rc, 0)
-        for name in ('RUNNER_WORK_SIZE', 'E2E_USER_SECRET'):
+        for name in ('LEGACY_PG_SECRET_NAME', 'E2E_USER_SECRET'):
             self.assertRegex(out, r'(?m)^%s +NEED \(placeholder' % re.escape(name))
         mig = filled(HERE, self.t / 'mig-verify', 'SOURCE_PG_SECRET_ID', 'REPLACE_ME_X')
         rc, out = self.run_sh(
@@ -1084,6 +1090,9 @@ class Placeholders(Sandbox):
         for name in ('RUNNER_SGP_LABEL', 'RUNNER_WORK_SIZE', 'LEGACY_PG_SECRET_NAME'):
             with self.subTest(name=name):
                 mig = filled(HERE, self.t / ('mig-' + name), name, 'replace_me_x')
+                p = mig / 'targets' / 'tb-prod.sh'
+                if '\n%s=' % name not in p.read_text():
+                    p.write_text(p.read_text() + '%s=replace_me_x\n' % name)
                 rc, out = self.run_sh([str(mig / 'runner-pod.sh')], TARGET_ENV='tb-prod')
                 self.assertEqual(rc, 1, out)
                 self.assertIn(name, out)
