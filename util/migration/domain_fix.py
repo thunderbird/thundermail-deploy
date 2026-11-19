@@ -20,15 +20,22 @@ def refs(value, cid):
     return 1 if value == '#' + cid else 0
 
 
-def addresses(value):
-    if isinstance(value, dict):
-        for v in value.values():
-            yield from addresses(v)
-    elif isinstance(value, list):
-        for v in value:
-            yield from addresses(v)
-    elif isinstance(value, str) and '@' in value:
-        yield value
+ADDRESS_FIELDS = ('name', 'emails')
+
+
+def addresses(principal):
+    def walk(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                yield from walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                yield from walk(v)
+        elif isinstance(value, str) and '@' in value:
+            yield value
+
+    for field in ADDRESS_FIELDS:
+        yield from walk(principal.get(field))
 
 
 def main(argv=None):

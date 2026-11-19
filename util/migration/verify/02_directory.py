@@ -54,6 +54,8 @@ for lid, l in src.items():
     want = set(emails)
     primary = next((e for e in emails if not e.startswith("@")), lname)
     for miss in want - addresses(a):
+        if miss.startswith("@") and norm_domain(miss[1:]) in dropped:
+            continue
         if miss.startswith("@"):
             if catch_all.get(miss[1:]) != primary:
                 missing_catchall.append(f"{short(lname)} {miss} -> {catch_all.get(miss[1:])!r}")

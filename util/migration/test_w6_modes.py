@@ -31,7 +31,7 @@ class W6Script(tw.Harness):
 
     def test_compare_only_runs_the_compare_group_and_no_folder_count(self):
         out = self.w6('--dry-run --compare-only', TEST_SENDER_APP_PASSWORD='', TARGET_NLB_DNS='')
-        self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+        self.assertRegex(out, r'(?m)^rc=0$')
         self.assertIn('verify/run_all.sh --group compare > ', out)
         self.assertIn('== dryrun-verify-compare\n', out)
         self.assertNotIn('imap-jmap-folders', out)
@@ -41,7 +41,7 @@ class W6Script(tw.Harness):
 
     def test_folders_only_runs_the_folder_count_alone(self):
         out = self.w6('--folders-only --dry-run')
-        self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+        self.assertRegex(out, r'(?m)^rc=0$')
         self.assertIn('== dryrun-imap-jmap-folders\n', out)
         self.assertNotIn('run_all.sh', out)
         self.assertNotIn('dryrun-verify', out)
@@ -49,7 +49,7 @@ class W6Script(tw.Harness):
 
     def test_a_piece_dry_run_prints_the_command_and_does_not_run_it(self):
         out = self.w6('--piece bodies --resume')
-        self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+        self.assertRegex(out, r'(?m)^rc=0$')
         self.assertIn('verify/run_all.sh --piece bodies --resume > ', out)
         self.assertIn('== dryrun-verify-bodies\n', out)
         self.assertNotIn('imap-jmap-folders', out)

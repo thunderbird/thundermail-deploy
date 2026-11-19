@@ -458,9 +458,27 @@ class BootPhase(Prod):
     def test_an_applied_export_is_not_applied_again_on_resume(self):
         a = ['export-applied', '2026-11-19T05:30:00Z', '2026-11-19T05:30:00Z', 'errors', '0']
         self.rows([CUT, self.PRE, a])
-        out = self.w4('apply_export() { echo APPLIED; }\nprod_apply; echo "rc=$?"')
+        out = self.w4(
+            'apply_export() { echo APPLIED; }; port_forward() { echo PF-OK; }\nprod_apply; echo "rc=$?"'
+        )
         self.assertIn('the export is already applied after this pre-delete', out)
         self.assertNotIn('APPLIED', out)
+        self.assertIn('PF-OK\nrc=0', out)
+
+    def test_a_reset_that_was_sent_and_did_not_finish_is_not_resumed(self):
+        r = ['reset', '2026-11-19T05:00:00Z', '2026-11-19T05:00:00Z', 'last_reset_at', 'x']
+        g = ['guard', '2026-11-19T05:05:00Z', '2026-11-19T05:05:00Z', 'result', 'pass']
+        sent = ['reset-sent', '2026-11-19T05:40:00Z', '2026-11-19T05:40:00Z', 'branch', 'b']
+        self.rows([CUT, sent[:1] + ['2026-11-19T04:59:00Z'] * 2 + sent[3:], r, g, self.PRE])
+        self.assertIn('resuming after the pre-delete', self.w4('boot_resume'))
+        self.rows([CUT, r, g, self.PRE, sent])
+        out = self.w4('boot_resume; echo "rc=$?"')
+        self.assertIn('the last reset was sent (2026-11-19T05:40:00Z) and did not finish', out)
+        self.assertIn('rc=1', out)
+        self.nb({'reset_at': '2026-11-19T05:00:00Z', 'reset_rc': 1})
+        self.rows([CUT])
+        self.w4('APPLY_ARG=(--apply); STOP_AT=x\nneon_reset; echo "rc=$?"')
+        self.assertEqual([x[0] for x in self.timing()][-1], 'reset-sent')
 
 
 class Script(Prod):
