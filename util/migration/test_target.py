@@ -623,6 +623,30 @@ class KubeconfigGuard(Sandbox):
         self.assertRegex(out, r'(?m)^NEED  kube-tb-prod ')
         self.assertNotIn('auth can-i', self.log())
 
+    def test_prod_target_rbac_covers_the_apply_pod_attach_and_log(self):
+        self.rules(
+            [
+                {'tool': 'kubectl', 'match': '--subresource=attach', 'out': 'no\n'},
+                {'tool': 'kubectl', 'match': 'auth can-i', 'out': 'yes\n'},
+            ]
+        )
+        work = self.t / 'work'
+        work.mkdir()
+        (work / 'kc-prod').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
+        (work / 'kc-stage').write_text(kubeconfig('kc-stage', 'mzla-eks-tb-stage01'))
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W4'], TARGET_ENV='tb-prod', WORK_DIR=str(work)
+        )
+        self.assertRegex(out, r'(?m)^NEED  kube-tb-prod +can-i no: create:pods/attach@thundermail$')
+        self.assertIn('auth can-i get pods -n thundermail --subresource=log', self.log())
+        (self.t / 'fake.log').unlink()
+        rc, out = self.run_sh(
+            [str(HERE / 'check-prereqs.sh'), '--for', 'go-W4'], TARGET_ENV='tb-stage', WORK_DIR=str(work)
+        )
+        self.assertIn('auth can-i', self.log())
+        self.assertNotIn('--subresource=attach', self.log())
+        self.assertNotIn('--subresource=log', self.log().replace('get pods -n accounts --subresource=log', ''))
+
     def test_the_stage_kubeconfig_name_still_works(self):
         rc, out = self.guard(
             'kubectl --kubeconfig "$KUBECONFIG_TARGET" get pods',
