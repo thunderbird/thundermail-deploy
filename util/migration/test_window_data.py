@@ -216,7 +216,7 @@ class W3Delta(Data):
     def test_apply_copies_the_delta_by_checksum_into_the_presynced_bucket(self):
         self.presync()
         out = self.w3('--apply', '--delta')
-        self.assertTrue(out.rstrip().endswith('rc=0'), out[-2000:])
+        self.assertRegex(out, r'(?m)^rc=0$')
         self.assertIn('rclone check exit=0 differences=0 missing=0 differ=0 errors=0', out)
         self.assertIn('W3 apply: done', out)
         self.assertNotIn('target bucket is not empty', out)
@@ -246,7 +246,7 @@ class W3Delta(Data):
         self.presync()
         self.w3('--apply', '--delta')
         out = self.w3('--apply', '--delta')
-        self.assertTrue(out.rstrip().endswith('rc=0'), out[-2000:])
+        self.assertRegex(out, r'(?m)^rc=0$')
         self.assertIn('restore already staged for this cut', out)
         self.assertEqual(
             [r[4] for r in self.rows() if r[:1] == ['blob-copy'] and r[3] == 'objects'], ['3', '0']
@@ -260,13 +260,13 @@ class W3Delta(Data):
         (self.t / 'ev' / 'timing.tsv').write_text('restore-W3\ta\tb\tfile\tx\n')
         out = self.w3('--apply', '--delta')
         self.assertIn('delta mode does not run on top of it', out)
-        self.assertTrue(out.rstrip().endswith('rc=1'), out[-2000:])
+        self.assertRegex(out, r'(?m)^rc=1$')
         self.assertEqual(self.calls('rclone')[2:], [])
 
     def test_dry_run_lists_no_objects(self):
         self.presync()
         out = self.w3('--dry-run', '--delta')
-        self.assertTrue(out.rstrip().endswith('rc=0'), out[-2000:])
+        self.assertRegex(out, r'(?m)^rc=0$')
         self.assertEqual(self.listings(), [])
         self.assertEqual([c.split()[1] for c in self.calls('rclone')], ['lsd', 'lsd'])
         self.assertRegex(out, r'\+ rclone copy leg:legacy-b tgt:target-b --checksum ')
@@ -277,7 +277,7 @@ class W3Delta(Data):
         self.presync()
         out = self.w3('--apply', '--delta', check_error=True)
         self.assertIn('STOP W3 (apply): blob-check failed', out)
-        self.assertTrue(out.rstrip().endswith('rc=1'), out[-2000:])
+        self.assertRegex(out, r'(?m)^rc=1$')
         self.assertIn('rclone check exit=1 differences=0 missing=0 differ=0 errors=1', out)
         rows = [r[4] for r in self.rows() if r[0] == 'blob-check']
         self.assertEqual(rows, ['errors-exit-1'])
