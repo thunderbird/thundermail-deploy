@@ -979,6 +979,20 @@ class Hold25(Base):
             p.stdout.index('passed their estimated bound'), p.stdout.index('authorize-')
         )
 
+    def test_release_port25_waits_longer_when_rerun_with_a_higher_domain_bound(self):
+        self.held_for_release()
+        self.clock.write_text('1400')
+        p = self.run_tool(
+            'hold25.sh',
+            'release-port25',
+            '--apply',
+            '--go',
+            'go 7.5',
+            QUEUE_DOMAIN_ATTEMPT_SECONDS='2720',
+        )
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertGreaterEqual(sum(self.state().get('sleeps', [])), 1300)
+
     def test_release_port25_closes_port_25_when_the_read_after_opening_fails(self):
         for n, after in enumerate(({'jmap_down': True}, {'query_cap': 1})):
             with self.subTest(after=after):

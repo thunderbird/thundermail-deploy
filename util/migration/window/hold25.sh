@@ -186,15 +186,16 @@ plan() {
        | ($tw + $dd * $p) as $cur
        | (if $umin != null and $umin + $lock <= $tw then $cur else 0 end) as $part
        | ([.rem[].d] | unique | length) as $all
+       | (([$all, 1] | max) * ([$p - ($k.p // 1360), 0] | max)) as $ext
        | . + (if .held and ($k.pending // false) then {held: false, safe: ($tw + ([$all, 1] | max) * $p), floor: ($tw + ([$all, 1] | max) * $p), again: false}
-              elif .held then {safe: .enc, again: false}
-              elif $known then {safe: ([$k.floor, $cur] | max), floor: ([$k.floor, $part] | max), again: true}
+              elif .held then {safe: (.enc + $ext), again: false}
+              elif $known then {safe: ([$k.floor + $ext, $cur] | max), floor: ([$k.floor + $ext, $part] | max), again: true}
               else {safe: ([$cur, $tw + .att * $p] | max), floor: ([$tw + .att * $p, $part] | max), again: ($k != null)} end)] as $m
     | [$m[] | select(.created <= $cut) | .safe - $t | select(. > 0)] as $w
     | {t: $t, tw: $tw, writes: ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): (.safe + $hold)}] | add // {}),
        alld: ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): ([.rem[].d] | unique | length)}] | add // {}),
-       pending: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts, pending: true}}] | add // {})),
-       mem: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts}}] | add // {})),
+       pending: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts, p: $p, pending: true}}] | add // {})),
+       mem: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts, p: $p}}] | add // {})),
        again: [$m[] | select(.again) | .id], old: ([$m[] | select(.created <= $cut)] | length),
        late: ([$m[] | select(.created > $cut)] | length), tohold: ([$m[] | select((.held | not) and .created <= $cut)] | length),
        waiting: ($w | length), longest: ($w | max // 0),
