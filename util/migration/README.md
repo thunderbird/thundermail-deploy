@@ -22,8 +22,8 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   `start`, `checks`, `presync`, `backups`, `verify`, `auth-dns`, `pre-cut`); a list prints one
   block per id. `start` holds only the rows that can pass before the first window step. It reads
   values from the env file first, then the environment, and never prints a value.
-- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a
-  `--kubeconfig` value is empty, names a missing file or names the other environment's cluster,
+- `kubectl` is a shell function after any script sources `target.sh`: it exits 64 when a call
+  other than `kubectl kustomize` has no `--kubeconfig`, when the value is empty, names a missing file or names the other environment's cluster,
   or when a flag picks another cluster or credential (`--context`, `--cluster`, `--server`, `--user`,
   `--token`, `--as`, the client certificate and TLS flags), so no script falls back to the current context. On tb-prod the current-context of `KUBECONFIG_TARGET` must be
   cluster `mzla-eks-tb-prod01`. `KUBECONFIG_TARGET` replaces `KUBECONFIG_STAGE`; with `TARGET_ENV=tb-stage` the old
@@ -37,11 +37,14 @@ set -a; . "/dev/shm/talos/cutover-$TARGET_ENV.env"; set +a; . util/migration/tim
   connectivity and snapshot/restore dry-run table and appends an `env-check` row to the TSV; it
   moves its own snapshots into `env-check/` so rollback never picks them. On tb-prod it prints
   `WAIT` (not a failure) for rows whose object only exists in the window (runner pod, SSM tunnel,
-  Stalwart, the mail load balancer, the Kargo configs stage) and skips the tb-stage-only rows.
+  Stalwart, the mail load balancer) and skips the tb-stage-only rows.
 - The tb-prod build writes `TMD_CHECKOUT` (the checkout it runs from), `WINDOW_SHA` (its `HEAD`;
   `--rebuild` keeps the recorded value) and `STALWART_URL=http://localhost:18081`, as tb-stage
-  does; `LANE_PF_PORT` replaces the port. The env file is built before the mail load balancer
-  exists, so `TARGET_NLB_DNS` is empty until `build-cutover-env.sh --rebuild` runs after it does.
+  does; `LANE_PF_PORT` replaces the port. After a tooling fix is checked out in the window,
+  `build-cutover-env.sh --rebuild --move-window-sha` sets `WINDOW_SHA` to the new `HEAD`. Before the
+  mail load balancer exists `TARGET_NLB_DNS` is empty; `build-cutover-env.sh --rebuild` fills it
+  once it does. `TBPROD_AUTH_ALB` and `TBPROD_ACCOUNTS_ALB` come from the Ingress with a rule
+  for `AUTH_HOST` or `ACCOUNTS_HOST`.
 - The Cloudflare token is `CF_API_TOKEN_AGENT` from `CF_TOKEN_FILE` (`~/.prod-cloudflare.env` for
   tb-prod, `~/.cloudflare.env` for tb-stage).
 - Restore scripts are dry-run by default and print what they would change; `--apply`

@@ -575,7 +575,7 @@ class RestartProbe(Harness):
             },
         ]
         setup = (
-            'kubectl port-forward svc/stalwart-mgmt 18080:1 >/dev/null 2>&1 &\n'
+            'kubectl --kubeconfig /dev/null port-forward svc/stalwart-mgmt 18080:1 >/dev/null 2>&1 &\n'
             'until [ -n "$(listener 18080)" ]; do sleep 0.1; done\n'
             'STALWART_URL=http://127.0.0.1:18080 PF_OK=1 PF=""'
         )
