@@ -153,8 +153,8 @@ def main(argv=None):
     for line in lines + catch_alls:
         print(line)
     print(
-        'domains checked=%d dropped=%d invalid=%d idna_pairs=%d dkim_dropped=%d'
-        % (len(records), len(drop), len(bad), len(dups), gone)
+        'domains checked=%d dropped=%d invalid=%d idna_pairs=%d dkim_dropped=%d catch_alls=%d'
+        % (len(records), len(drop), len(bad), len(dups), gone, len(catch_alls))
     )
     return 0
 

@@ -105,7 +105,7 @@ class DomainFix(unittest.TestCase):
                 "warning: dropping DkimSignature create-13: its domain '%s' is dropped" % BAD,
                 "warning: dropping Domain '%s': Stalwart 0.16 refuses it "
                 '(no public suffix rule matches it)' % BAD,
-                'domains checked=4 dropped=3 invalid=1 idna_pairs=1 dkim_dropped=5',
+                'domains checked=4 dropped=3 invalid=1 idna_pairs=1 dkim_dropped=5 catch_alls=0',
             ],
         )
 
@@ -216,14 +216,14 @@ class DupCheckDomains(unittest.TestCase):
 
 
 class W4DomainsGate(Prod):
-    def gate(self, baseline):
+    def gate(self, baseline, principals='[]'):
         (self.t / 'secret').mkdir(exist_ok=True, mode=0o700)
         (self.t / 'secret' / 'export.json').write_text(
             ''.join(
                 json.dumps(op, ensure_ascii=False) + '\n' for op in export(alias_domain='#create-1')
             )
         )
-        (self.t / 'secret' / 'principals.json').write_text('[]')
+        (self.t / 'secret' / 'principals.json').write_text(principals)
         if baseline is not None:
             (self.t / 'secret' / 'convert-dropped-baseline.txt').write_text(baseline)
         return self.w4(
@@ -233,13 +233,33 @@ class W4DomainsGate(Prod):
 
     def test_the_gate_counts_the_drops_and_goes_on(self):
         out = self.gate(None)
-        self.assertIn('domains checked=4 dropped=3 invalid=1 idna_pairs=1 dkim_dropped=5', out)
-        self.assertIn('domains: 8 warning line(s), one per dropped Domain and DkimSignature', out)
+        self.assertIn('domains checked=4 dropped=3 invalid=1 idna_pairs=1 dkim_dropped=5 catch_alls=0', out)
+        self.assertIn(
+            'domains: 8 warning line(s), one per dropped Domain and DkimSignature; '
+            '0 catch-all(s) not restored',
+            out,
+        )
         self.assertIn('rc=0 VALUE=8', out)
         self.assertNotIn(UNI, out)
         self.assertNotIn(BAD, out)
         listed = json.loads((self.t / 'secret' / 'domains-dropped.json').read_text())
         self.assertEqual(listed, {'domains': sorted([BAD, PUNY, UNI]), 'dkim_dropped': 5, 'dkim_kept': 1})
+
+    def test_a_catch_all_on_a_dropped_domain_has_its_own_count(self):
+        principals = [
+            {'id': 1, 'type': 'individual', 'name': 'u', 'emails': ['u@a.example.com']},
+            {'id': 7, 'type': 'individual', 'name': 'v', 'emails': ['v@a.example.com', '@' + BAD]},
+        ]
+        out = self.gate(None, json.dumps(principals))
+        self.assertIn('rc=0 VALUE=8', out)
+        self.assertIn('dkim_dropped=5 catch_alls=1', out)
+        self.assertIn(
+            'domains: 8 warning line(s), one per dropped Domain and DkimSignature; '
+            '1 catch-all(s) not restored',
+            out,
+        )
+        fixed = (self.t / 'secret' / 'domain-fixed.txt').read_text()
+        self.assertIn('warning: not restoring the catch-all of legacy principal 7', fixed)
 
 
 if __name__ == '__main__':
