@@ -755,6 +755,22 @@ class Hold25(Base):
         )
         self.assertGreater(self.due('17'), self.fake_now() + 23 * 3600)
 
+    def test_release_port25_handles_a_queue_larger_than_one_argument(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        now = time.time()
+        q = {}
+        for n in range(2500):
+            m = msg(now + 22 * 3600)
+            m['padding'] = 'x' * 1500
+            q['%05d' % n] = m
+        self.edit(pods=['stalwart-a'], queue=q)
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout[-2000:] + p.stderr[-2000:])
+        self.assertIn('drain: queued before the drain: 2500 remote, 0 still waiting', p.stdout)
+        self.assertIn('read back: queue: total=2500 remote=2500 held=2500 not_held=0', p.stdout)
+        self.assertEqual(self.egress(), {('-1', -1, -1)})
+
     def test_release_port25_keeps_port_25_closed_when_the_drain_runs_out(self):
         self.held_for_release()
         self.in_flight('11', 200)

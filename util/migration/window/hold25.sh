@@ -134,12 +134,12 @@ read_queue() {
   while :; do
     page=$(call x:QueuedMessage/query "$(jq -cn --argjson p "$(jq length <<<"$qids")" '{position: $p, limit: 500}')" | jq -c '.ids') || return 1
     [ "$(jq length <<<"$page")" -gt 0 ] || break
-    qids=$(jq -c --argjson p "$page" '. + $p' <<<"$qids")
+    qids=$(printf '%s\n%s\n' "$qids" "$page" | jq -cs '.[0] + .[1]') || return 1
     [ "$(jq length <<<"$page")" = 500 ] || break
   done
   for ((i = 0; i < $(jq length <<<"$qids"); i += 100)); do
     page=$(call x:QueuedMessage/get "$(jq -c --argjson i "$i" '{ids: .[$i:$i + 100]}' <<<"$qids")" | jq -c '.list') || return 1
-    list=$(jq -c --argjson l "$page" '. + $l' <<<"$list")
+    list=$(printf '%s\n%s\n' "$list" "$page" | jq -cs '.[0] + .[1]') || return 1
   done
   now=$(date -u +%s)
   min=$((now + HELD_MIN_HOURS * 3600))
@@ -181,24 +181,25 @@ hold_queue() {
 }
 
 drain() {
-  local start now st ran='[]' key last="" w
+  local start now st ran='{}' key last="" w
   start=$(date -u +%s)
   echo "drain: every remote message queued before $(date -u -d "@$start" +%FT%TZ) stays held past its longest delivery attempt ($DOMAIN_SECS s per remote domain) before port 25 opens"
   while :; do
     read_queue || return 1
     now=$(date -u +%s)
-    st=$(jq -c --argjson now "$now" --argjson start "$start" --argjson ran "$ran" '
-      [.msgs[] | select(.created < $start)] as $old
+    st=$(printf '%s\n%s\n' "$Q" "$ran" | jq -cs --argjson now "$now" --argjson start "$start" '
+      .[1] as $ran | .[0]
+      | [.msgs[] | select(.created < $start)] as $old
       | [$old[] | if .held then .wrote + .bound - $now else .bound end | select(. > 0)] as $w
-      | {hold: [.msgs[] | select(.held | not) | .id], again: [.msgs[] | select((.held | not) and (.id | IN($ran[]))) | .id], old: ($old | length), late: ([.msgs[] | select(.created >= $start)] | length), waiting: ($w | length), longest: ($w | max // 0)}' <<<"$Q") || return 1
+      | {hold: [.msgs[] | select(.held | not) | .id], again: [.msgs[] | select((.held | not) and $ran[.id] == true) | .id], old: ($old | length), late: ([.msgs[] | select(.created >= $start)] | length), waiting: ($w | length), longest: ($w | max // 0)}') || return 1
     key=$(jq -r '"\(.old) \(.waiting) \(.late)"' <<<"$st")
     [ "$key" = "$last" ] || jq -r '"drain: queued before the drain: \(.old) remote, \(.waiting) still waiting (longest \(.longest) s); queued since: \(.late)"' <<<"$st"
     last=$key
-    ran=$(jq -c --argjson q "$Q" '. + [$q.msgs[] | select(.held) | .id] | unique' <<<"$ran")
+    ran=$(printf '%s\n%s\n' "$Q" "$ran" | jq -cs '.[1] + ([.[0].msgs[] | select(.held) | {(.id): true}] | add // {})') || return 1
     [ "$(jq '.again | length' <<<"$st")" = 0 ] || echo "drain: held again, overwritten by a delivery attempt that ended: ids=$(jq -r '.again | join(",")' <<<"$st")"
     if [ "$(jq '.hold | length' <<<"$st")" -gt 0 ]; then
       set_retry "$(jq -c .hold <<<"$st")" "$(date -u -d "+$HOLD_HOURS hours" +%FT%TZ)" || return 1
-      ran=$(jq -c --argjson h "$(jq -c .hold <<<"$st")" '. + $h | unique' <<<"$ran")
+      ran=$(printf '%s\n%s\n' "$st" "$ran" | jq -cs '.[1] + ([.[0].hold[] | {(.): true}] | add // {})') || return 1
     fi
     w=$(jq .longest <<<"$st")
     if [ "$APPLY" = 0 ]; then
