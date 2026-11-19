@@ -267,7 +267,18 @@ the keying for the real hosts.
 - On tb-prod W4 has three phases, and `--apply` without one exits 64; the dry run without a
   phase prints all three. `--phase read` (gate `go-W4-read`) dumps through `dump_legacy.py` (the
   password stays in the environment, `DUMP_WORKERS` concurrent reads, default 8), then runs
-  `duplicates`, `convert`, `domains`, `retarget` and `queue-drain` last. `domains` runs
+  `stubs`, `duplicates`, `convert`, `domains`, `retarget` and `queue-drain` last. `stubs` runs
+  `stub_drop.py` on the dump (both W4 paths, every environment): it drops each individual whose
+  name exactly one other principal holds as an alias and which holds nothing else (no address,
+  secret, description, quota, used quota, membership or permission, role `user` only), the empty
+  account the 0.15 OIDC directory leaves when a bearer login names an address another account
+  holds. The raw `principals.json` stays as dumped; `principals.kept.json` (a byte copy when
+  nothing matches) is what `duplicates`, `convert` and `domains` read, and
+  `stubs-dropped.json` (mode 600) holds the dropped ids and names. It prints
+  `stubs: dropped=<n> expected=<STUBS_EXPECTED> ids <ids>`, with `CHECK` after the expected count
+  when they differ (2 on tb-prod, 0 elsewhere), and never stops; any other duplicate still stops
+  `duplicates` as before. The verify suite reads the ids through `DROPPED_STUBS`
+  (`verify/tb-prod.env`) and leaves those accounts out of every compare. `domains` runs
   `domain_fix.py` on the export. It drops each Domain that Stalwart 0.16 refuses, with the DKIM
   signatures that point at it: a name no public suffix rule matches (`domain-suffixes.txt`, the
   rules of the `psl` crate 2.1.241 that Stalwart 0.16.27 is built with, in ASCII form, plus the

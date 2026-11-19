@@ -46,5 +46,6 @@ CF_TOKEN_FILE=$HOME/.prod-cloudflare.env
 APPT_DEPLOY_WORKFLOW=deploy-production.yml
 LEGACY_NODE_NAME_FILTER='mailstrom-prod-stalwart-*'
 LEGACY_NODE_COUNT=6
+STUBS_EXPECTED=2
 SPF_DECIDED_TXT='v=spf1 ip4:5.60.96.8/29 include:mail.zendesk.com -all'
 STAGE_ONLY_OK=0

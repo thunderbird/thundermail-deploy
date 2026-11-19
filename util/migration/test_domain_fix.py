@@ -223,7 +223,7 @@ class W4DomainsGate(Prod):
                 json.dumps(op, ensure_ascii=False) + '\n' for op in export(alias_domain='#create-1')
             )
         )
-        (self.t / 'secret' / 'principals.json').write_text(principals)
+        (self.t / 'secret' / 'principals.kept.json').write_text(principals)
         if baseline is not None:
             (self.t / 'secret' / 'convert-dropped-baseline.txt').write_text(baseline)
         return self.w4(
