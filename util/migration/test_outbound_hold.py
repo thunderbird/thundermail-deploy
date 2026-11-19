@@ -741,7 +741,9 @@ class Hold25(Base):
         self.held_for_release()
         gap = msg(time.time() - 60)
         gap['createdAt'] = 'now'
-        self.edit(on_open={'17': gap})
+        late = msg(time.time() - 60)
+        late['createdAt'] = iso(time.time() + 7200)
+        self.edit(on_open={'17': gap, '18': late})
         p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn('drain: unproven=0', p.stdout)

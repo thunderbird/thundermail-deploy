@@ -269,7 +269,7 @@ case "$MODE" in
     open_25 || stop "opening port 25 on $SG failed"
     OPEN_AT=$(date -u +%s)
     with_queue hold_queue "$OPEN_AT"
-    [ "$APPLY" = 0 ] || echo "release: $(jq --argjson d "$DRAIN_AT" '[.msgs[] | select(.created >= $d)] | length' <<<"$Q") message(s) queued between the end of the drain and the port opening, held now, but sent at once if an attempt was already running"
+    [ "$APPLY" = 0 ] || echo "release: $(jq --argjson d "$DRAIN_AT" --argjson o "$OPEN_AT" '[.msgs[] | select(.created >= $d and .created <= $o)] | length' <<<"$Q") message(s) queued between the end of the drain and the port opening, held now, but sent at once if an attempt was already running"
     [ "$APPLY" = 0 ] || mark hold25-release-port25 held "$VALUE" ;;
   release-queue)
     gate_row hold25-release-port25 "port 25 is released first (7.5)"
