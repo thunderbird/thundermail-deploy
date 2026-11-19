@@ -319,6 +319,10 @@ the keying for the real hosts.
   (fewer is a failure, more a warning on the expected list).
 - On tb-prod `window/w5-promote.sh` takes `T6_SHA` from the merge commit of PR 195
   (`T6_PR_DEFAULT` in `targets/tb-prod.sh`) when the env file has neither `T6_SHA` nor `T6_PR`.
+- `window/freight-for.sh <commit on main>` prints the newest Freight of `KARGO_WAREHOUSE_CONFIGS`
+  whose preview commit holds the settings trees of that commit (`Freight <name> (preview commit
+  <sha>) matches <commit>`), the same match `w5-promote.sh` uses; the Warehouse follows the
+  preview branch, so a merge commit on `main` is never a Freight commit itself.
 - `gate-keycloak-version.sh --pull[=IMAGE]` runs the image once before the window and prints
   `image <ref> cached: Keycloak <version>`; the gate prints the podman error when the image gives
   no version.
