@@ -52,6 +52,11 @@ a = ' '.join(args)
 for f in st.get('fail', []):
     if f in a:
         sys.stderr.write('An error occurred (Fake)\n'); sys.exit(255)
+for f in list(st.get('fail_once', [])):
+    if f in a:
+        st['fail_once'].remove(f)
+        json.dump(st, open(p, 'w'))
+        sys.stderr.write('An error occurred (Fake)\n'); sys.exit(255)
 out = None
 if 'eks describe-cluster' in a:
     out = st['cluster_vpc']
@@ -940,6 +945,39 @@ class Hold25(Base):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertEqual(self.state().get('delivered', []), [])
         self.assertGreaterEqual(sum(self.state()['sleeps']), 1350)
+
+    def test_release_port25_moves_the_stop_past_a_full_wait_after_a_slow_write(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        five = msg(time.time() + 3000, domains=('a.test', 'b.test', 'c.test', 'd.test', 'e.test'))
+        self.edit(pods=['stalwart-a'], queue={'49': five}, slow_set=True)
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('drain: a full wait was written until', p.stdout)
+        self.assertGreaterEqual(sum(self.state()['sleeps']), 5 * 1360 - 10)
+        self.assertEqual(self.egress(), {('-1', -1, -1)})
+
+    def test_release_port25_closes_port_25_when_opening_fails_part_way(self):
+        self.held_for_release()
+        self.clock.write_text('1400')
+        self.edit(fail_once=['revoke-security-group-egress'])
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(self.egress(), CLOSED)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('opening port 25 failed part way: closing port 25 again', p.stdout)
+        self.assertNotIn('hold25-release-port25', self.rows())
+
+    def test_release_port25_counts_mail_that_relies_on_the_estimate(self):
+        self.held_for_release()
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn(
+            'drain: 1 remote message(s) passed their estimated bound less than 1360 s ago', p.stdout
+        )
+        self.assertIn('QUEUE_DOMAIN_ATTEMPT_SECONDS=2720', p.stdout)
+        self.assertLess(
+            p.stdout.index('passed their estimated bound'), p.stdout.index('authorize-')
+        )
 
     def test_release_port25_closes_port_25_when_the_read_after_opening_fails(self):
         for n, after in enumerate(({'jmap_down': True}, {'query_cap': 1})):

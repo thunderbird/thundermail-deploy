@@ -21,6 +21,7 @@ WRITE_SECS=30
 MEMF=$EVIDENCE_DIR/hold25-memory.json
 MEM='{}'
 PLAN='{}'
+REWRITE_UNTIL=0
 OPEN_KEY='-1|-1|-1|0.0.0.0/0'
 CLOSED_KEYS='tcp|0|24|0.0.0.0/0 tcp|26|65535|0.0.0.0/0 udp|0|65535|0.0.0.0/0 icmp|-1|-1|0.0.0.0/0'
 RULES='[]'
@@ -196,7 +197,8 @@ plan() {
        mem: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts}}] | add // {})),
        again: [$m[] | select(.again) | .id], old: ([$m[] | select(.created <= $cut)] | length),
        late: ([$m[] | select(.created > $cut)] | length), tohold: ([$m[] | select((.held | not) and .created <= $cut)] | length),
-       waiting: ($w | length), longest: ($w | max // 0)}') || return 1
+       waiting: ($w | length), longest: ($w | max // 0),
+       recent: ([$m[] | select(.created <= $cut and .safe <= $t and .safe > $t - $p)] | length)}') || return 1
 }
 
 hold_pass() {
@@ -211,6 +213,7 @@ hold_pass() {
     echo "hold write finished more than $WRITE_SECS s after the queue read: writing a full wait from now for every remote domain of those messages"
     set_retry "$(jq -c --argjson n "$now" --argjson p "$DOMAIN_SECS" --argjson h "$((HOLD_HOURS * 3600))" '.alld | map_values($n + ([., 1] | max) * $p + $h)' <<<"$PLAN")" || return 1
     MEM=$(jq -c --argjson n "$now" --argjson p "$DOMAIN_SECS" '.mem as $m | $m + (.alld | with_entries(.value = ($m[.key] + {floor: ($n + ([.value, 1] | max) * $p)})))' <<<"$PLAN") || return 1
+    REWRITE_UNTIL=$(jq --argjson n "$now" --argjson p "$DOMAIN_SECS" '[.alld[] | $n + ([., 1] | max) * $p] | max // 0' <<<"$PLAN") || return 1
   fi
   printf '%s\n' "$MEM" > "$MEMF"
 }
@@ -257,8 +260,13 @@ drain() {
     if [ -z "$end" ]; then
       end=$((start + (DRAIN_MAX > w + DOMAIN_SECS ? DRAIN_MAX : w + DOMAIN_SECS)))
       echo "drain: expected wait at most $w s, until $(date -u -d "@$((now + w))" +%FT%TZ) (sooner when the running attempts end); stops with port 25 closed at $(date -u -d "@$end" +%FT%TZ)"
-      echo "drain: the wait is an estimate of $DOMAIN_SECS s per due remote domain: one route group per domain, 5 MX hosts x 2 addresses x the 127 s kernel SYN timeout (below Stalwart's 300 s connect timeout), plus DNS lookups"
+      echo "drain: the wait is an estimate of $DOMAIN_SECS s per due remote domain: one route group per domain, 5 MX hosts x 2 addresses x the 127 s kernel SYN timeout (below Stalwart's 300 s connect timeout), plus DNS lookups; to wait longer, run with QUEUE_DOMAIN_ATTEMPT_SECONDS set higher (for example $((DOMAIN_SECS * 2)))"
     fi
+    if [ "$REWRITE_UNTIL" -gt $((end - DOMAIN_SECS)) ]; then
+      end=$((REWRITE_UNTIL + DOMAIN_SECS))
+      echo "drain: a full wait was written until $(date -u -d "@$REWRITE_UNTIL" +%FT%TZ); the drain now stops with port 25 closed at $(date -u -d "@$end" +%FT%TZ)"
+    fi
+    REWRITE_UNTIL=0
     if [ "$APPLY" = 0 ]; then
       echo "drain: --apply would wait up to $w s, read the queue every $DRAIN_POLL s, hold again what an ending attempt overwrites, and stop after $((end - start)) s"
       return 0
@@ -267,6 +275,7 @@ drain() {
       DRAIN_AT=$now
       echo "drain: done after $((now - start)) s: no delivery attempt that started before its hold is still running for mail queued before the drain"
       echo "drain: unproven=$(jq .late <<<"$PLAN") (queued during the drain and held, but an attempt that started before its hold can still deliver once port 25 opens)"
+      echo "drain: $(jq .recent <<<"$PLAN") remote message(s) passed their estimated bound less than $DOMAIN_SECS s ago; an attempt longer than the estimate can still be running for them. To wait longer, stop before the go and run release-port25 with QUEUE_DOMAIN_ATTEMPT_SECONDS=$((DOMAIN_SECS * 2))"
       return 0
     fi
     [ "$now" -lt "$end" ] || { echo "drain: $(jq .waiting <<<"$PLAN") message(s) not proven held after $((now - start)) s; port 25 stays closed"; return 1; }
@@ -324,7 +333,12 @@ case "$MODE" in
     pods || stop "a Running Stalwart pod is outside $SG"
     with_queue drain
     printf 'bash %s set --dry-run\nbash %s set --apply\n' "$0" "$0" > "$RESTORE"
-    open_25 || stop "opening port 25 on $SG failed"
+    if ! open_25; then
+      [ "$APPLY" = 1 ] || stop "opening port 25 on $SG failed"
+      echo "opening port 25 failed part way: closing port 25 again"
+      close_25 || stop "opening port 25 failed part way, and closing port 25 again failed: run bash $0 set --apply"
+      stop "opening port 25 on $SG failed; port 25 is closed again, rerun release-port25"
+    fi
     OPEN_AT=$(date -u +%s)
     if [ "$APPLY" = 0 ]; then with_queue hold_queue "$OPEN_AT"
     elif ! { connect && hold_queue "$OPEN_AT"; }; then
