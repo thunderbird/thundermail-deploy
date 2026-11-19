@@ -3,6 +3,13 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need STALWART_URL STALWART_USER STALWART_PASSWORD STALWART_ADMIN_ACCOUNT_ID
 TIMEOUT=${QUOTA_RESET_TIMEOUT:-600}
+MODE=wait
+case "${1:-}" in
+  '') ;;
+  --no-wait) MODE=no-wait ;;
+  status) MODE=status ;;
+  *) die "usage: quota-reset.sh [--dry-run | --apply [--no-wait]] | status [<task id>]" ;;
+esac
 API=${STALWART_URL%/}/jmap
 USING='["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]'
 cred() {
@@ -27,17 +34,40 @@ usage() {
   done
   jq -r '"accounts=\(length) with_usage=\([.[] | select((.usedDiskQuota // 0) > 0)] | length) used_bytes=\([.[].usedDiskQuota // 0] | add // 0)"' <<<"$list"
 }
+if [ "$MODE" != wait ]; then
+  . "$MIG_DIR/timing.sh"
+fi
+if [ "$MODE" = status ]; then
+  id=${2:-$(awk -F'\t' '$1 == "quota-reset-started" {v = $5} END {print v}' "$TIMING_TSV" 2>/dev/null)}
+  s=$(queued StoreMaintenance) && a=$(queued AccountMaintenance) || { echo "quota reset status: x:Task/query failed"; exit 1; }
+  printf 'quota reset task %s: queued StoreMaintenance=%s AccountMaintenance=%s\n' "${id:-unknown}" "$s" "$a"
+  if [ "$s" = 0 ] && [ "$a" = 0 ]; then
+    echo "DONE  quota reset finished: $(usage)"
+    exit 0
+  fi
+  echo "WAIT  quota reset task ${id:-unknown} not finished: $a account task(s) and $s store task(s) still queued"
+  exit 2
+fi
 now=$(date -u +%FT%TZ)
 body=$(sed "s/__ACCOUNT_ID__/$STALWART_ADMIN_ACCOUNT_ID/; s/__NOW__/$now/g" "$MIG_DIR/quota-reset.json.tpl")
 jq -e '.methodCalls[0][1].create["quota-reset"].maintenanceType == "resetUserQuotas"' <<<"$body" >/dev/null || die "quota-reset.json.tpl did not render"
 if [ "$APPLY" != 1 ]; then
   printf 'dry-run: POST %s x:Task/set StoreMaintenance resetUserQuotas, accountId %s, due %s\n' "$API" "$STALWART_ADMIN_ACCOUNT_ID" "$now"
-  printf 'dry-run: then poll x:Task/query StoreMaintenance and AccountMaintenance until both are 0 (timeout %ss), then x:Account/get usedDiskQuota\n' "$TIMEOUT"
+  if [ "$MODE" = no-wait ]; then
+    printf 'dry-run: then print the task id, write a quota-reset-started row and return without waiting; quota-reset.sh status reads whether it is done\n'
+  else
+    printf 'dry-run: then poll x:Task/query StoreMaintenance and AccountMaintenance until both are 0 (timeout %ss), then x:Account/get usedDiskQuota\n' "$TIMEOUT"
+  fi
   exit 0
 fi
 r=$(jmap "$body" | jq -ce '.methodResponses[0] | if .[0] == "error" then error(.[1] | tostring) else .[1] end') || die "x:Task/set failed"
 jq -e '.created["quota-reset"].id' <<<"$r" >/dev/null || die "quota reset task not created: $(jq -c '.notCreated' <<<"$r")"
 echo "created task $(jq -r '.created["quota-reset"].id' <<<"$r") due $now"
+if [ "$MODE" = no-wait ]; then
+  printf 'quota-reset-started\t%s\t%s\ttask\t%s\n' "$now" "$(date -u +%FT%TZ)" "$(jq -r '.created["quota-reset"].id' <<<"$r")" >> "$TIMING_TSV"
+  echo "not waiting: the reset runs on the server; check it with bash $MIG_DIR/quota-reset.sh status"
+  exit 0
+fi
 start=$(date +%s)
 while :; do
   s=$(queued StoreMaintenance) || s=error
