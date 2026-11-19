@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ import json, os, sys
 args = sys.argv[1:]
 a = ' '.join(args)
 open(os.environ['FAKE_LOG'], 'a').write('kubectl ' + a + '\n')
+open(os.environ['FAKE_LOG'] + '.json', 'a').write(json.dumps(['kubectl'] + args) + '\n')
 p = os.environ['KUBE_STATE']
 st = json.load(open(p))
 out, rc = '', 0
@@ -53,7 +55,7 @@ elif verb == 'get' and rest[:3] == ['pod', 'runner', '-o'] and rest[3] == 'json'
         out = json.dumps({{'metadata': {{'annotations': ann}}, 'spec': spec, 'status': status}})
 elif verb == 'get' and rest[:1] == ['node']:
     out = st.get('role', 'mail')
-elif verb == 'get' and rest[:1] == ['pods']:
+elif verb == 'get' and rest[:1] == ['pods,jobs,cronjobs']:
     out = '\n'.join(st.get('pods', ['pod/runner'] if st.get('pod') else []))
 elif verb == 'create':
     f = rest[rest.index('-f') + 1]
@@ -61,6 +63,10 @@ elif verb == 'create':
     open(os.environ['CREATED'], 'a').write(text + '\n---\n')
     if '"kind": "Secret"' in text:
         st['secret'] = True
+        if st.get('term'):
+            json.dump(st, open(p, 'w'))
+            os.kill(os.getppid(), 15)
+            sys.exit(1)
     else:
         st['pod'] = True
         st['automount'] = False if 'automountServiceAccountToken: false' in text else None
@@ -188,6 +194,10 @@ class RunnerStart(unittest.TestCase):
         p = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
         return p.returncode, p.stdout + p.stderr
 
+    def argv(self):
+        p = self.t / 'fake.log.json'
+        return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
     def calls(self):
         p = self.t / 'fake.log'
         return p.read_text().splitlines() if p.exists() else []
@@ -212,19 +222,26 @@ class RunnerStart(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.rows(), [])
-        planned = [
-            x[4:]
-            for x in out.splitlines()
-            if x.startswith('  + ') and re.search(r' (create|delete|wait) ', x)
-        ]
-        self.assertEqual(len(planned), 3, out)
+        planned = [shlex.split(x[4:]) for x in out.splitlines() if x.startswith('  + kubectl ')]
+        self.assertEqual(
+            [c[5] for c in planned if c[5] in ('create', 'wait')], ['create'] * 2 + ['wait']
+        )
         self.assertIn('+ env SECRET_DIR=%s TS=20261119T010000Z bash ' % self.secret_dir, out)
         self.assertIn('runner-pod.sh --secret', out)
+        gates = len(self.argv())
         rc, out2 = self.run_tool('--apply')
         self.assertEqual(rc, 0, out2)
-        done = [c for c in self.calls() if re.search(r' (create|delete|wait) ', c)]
-        self.assertEqual(planned, done)
+        ran = self.argv()[2 * gates :]
+        self.assertEqual(planned, [c for c in ran if c[3:6] != ['get', 'node', 'n1']])
+        self.assertIn('  + kubectl --kubeconfig %s get node n1' % self.kc, out2)
         self.assertEqual(self.rows(), ['runner-start'])
+
+    def test_an_interrupt_leaves_no_secret_file(self):
+        self.state(sgps=SGPS, term=True)
+        rc, out = self.run_tool('--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('interrupted by signal', out)
+        self.assertEqual(list(self.secret_dir.iterdir()), [])
 
     def test_dry_run_reports_need_and_apply_stops_on_each_gate(self):
         cases = {
@@ -334,6 +351,7 @@ class RunnerStart(unittest.TestCase):
             'legacy down': dict(isready='no response'),
             'legacy password line': dict(pgpass='1\nnokey'),
             'other pod': dict(pods=['pod/runner', 'pod/stalwart-abc']),
+            'a job': dict(pods=['pod/runner', 'job.batch/stalwart-config-apply']),
         }
         for name, st in cases.items():
             with self.subTest(name):
@@ -358,7 +376,7 @@ class RunnerStart(unittest.TestCase):
             'PASS  cutover-branch login: stalwart|stalwart_owner',
             'PASS  keycloak login: keycloak|keycloak_user',
             'PASS  accounts login: accounts|accounts_user',
-            'PASS  zero: thundermail 1 is pod/runner, the only pod',
+            'PASS  zero: thundermail 1 is pod/runner, no other pod, Job or CronJob',
             'RUNNER apply: done',
         ):
             self.assertIn(line, out)
@@ -387,6 +405,9 @@ class RunnerStart(unittest.TestCase):
             '-n thundermail delete pod runner --ignore-not-found --wait=true --timeout=120s', out
         )
         self.assertIn('-n thundermail delete secret legacy-pg --ignore-not-found', out)
+        self.secret_dir.mkdir(parents=True)
+        (self.secret_dir / 'legacy-pg-20261118T000000Z.yaml').write_text('{}')
+        (self.secret_dir / 'other.yaml').write_text('{}')
         self.state(sgps=SGPS, pod=True, secret=True, sticky=True)
         rc, out = self.run_tool('remove', '--apply')
         self.assertEqual(rc, 1, out)
@@ -399,6 +420,7 @@ class RunnerStart(unittest.TestCase):
         self.assertIn('PASS  runner pod and Secret legacy-pg gone', out)
         self.assertEqual(self.rows()[-1], 'runner-removed')
         self.assertFalse(self.kube().get('pod') or self.kube().get('secret'))
+        self.assertEqual([x.name for x in self.secret_dir.iterdir()], ['other.yaml'])
 
     def test_usage(self):
         rc, out = self.run_tool('stop')

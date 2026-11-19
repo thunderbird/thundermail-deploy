@@ -83,6 +83,7 @@ render() {
 }
 
 start() {
+  trap 'rm -f "$SECRET_FILE"' EXIT
   run env SECRET_DIR="$SECRET_DIR" TS="$TS" bash "$MIG_DIR/runner-pod.sh" --secret || return 1
   run "${K[@]}" create -f "$SECRET_FILE" || { rm -f "$SECRET_FILE"; return 1; }
   run rm -f "$SECRET_FILE"
@@ -96,7 +97,7 @@ admitted() {
   [ "$LIVE" = 1 ] || return 0
   POD_OK=1
   n=$(jq -r '.spec.nodeName // ""' <<<"$j")
-  r=$( [ -z "$n" ] || "${KS[@]}" get node "$n" -o jsonpath='{.metadata.labels.role}') || r=""
+  r=$( [ -z "$n" ] || rd "${KS[@]}" get node "$n" -o jsonpath='{.metadata.labels.role}') || r=""
   [ "$r" = mail ] && pass "node role mail" || fail "node ${n:-none} has role '${r}', not mail"
   [ "$(jq -r '[.spec.containers[].resources.limits["vpc.amazonaws.com/pod-eni"] // empty] | join(",")' <<<"$j")" = 1 ] && pass "vpc.amazonaws.com/pod-eni limit 1: a SecurityGroupPolicy matched" || fail "no vpc.amazonaws.com/pod-eni limit: no SecurityGroupPolicy matched the runner"
   [ -n "$(jq -r '.metadata.annotations["vpc.amazonaws.com/pod-eni"] // ""' <<<"$j")" ] && pass "branch network interface attached" || fail "no vpc.amazonaws.com/pod-eni annotation: no branch network interface"
@@ -127,11 +128,11 @@ logins() {
 
 zero_exception() {
   local p o
-  p=$(rd "${K[@]}" get pods -o name) || { fail "thundermail pods not readable"; return 0; }
+  p=$(rd "${K[@]}" get pods,jobs,cronjobs -o name) || { fail "thundermail pods, Jobs and CronJobs not readable"; return 0; }
   [ "$LIVE" = 1 ] || return 0
   o=$(grep -vx 'pod/runner' <<<"$p" | grep . | tr '\n' ' ') || o=""
   grep -qx 'pod/runner' <<<"$p" || { fail "zero: no pod/runner in thundermail"; return 0; }
-  if [ -z "$o" ]; then pass "zero: thundermail 1 is pod/runner, the only pod"
+  if [ -z "$o" ]; then pass "zero: thundermail 1 is pod/runner, no other pod, Job or CronJob"
   elif [ "$MODE" = start ]; then fail "zero: thundermail has pod/runner and ${o% }"
   else printf 'INFO  zero: thundermail has pod/runner and %s\n' "${o% }"; fi
 }
@@ -139,8 +140,9 @@ zero_exception() {
 remove() {
   run "${K[@]}" delete pod runner --ignore-not-found --wait=true --timeout=120s || return 1
   run "${K[@]}" delete secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found || return 1
+  run find "$SECRET_DIR" -maxdepth 1 -name "$LEGACY_PG_SECRET_NAME-*.yaml" -delete || return 1
   [ "$APPLY" = 1 ] || return 0
-  [ -z "$("${K[@]}" get pod runner --ignore-not-found -o name)" ] && [ -z "$("${K[@]}" get secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found -o name)" ] || { fail "runner pod or Secret $LEGACY_PG_SECRET_NAME still there"; return 0; }
+  [ -z "$(rd "${K[@]}" get pod runner --ignore-not-found -o name)" ] && [ -z "$(rd "${K[@]}" get secret "$LEGACY_PG_SECRET_NAME" --ignore-not-found -o name)" ] || { fail "runner pod or Secret $LEGACY_PG_SECRET_NAME still there"; return 0; }
   pass "runner pod and Secret $LEGACY_PG_SECRET_NAME gone"
 }
 
