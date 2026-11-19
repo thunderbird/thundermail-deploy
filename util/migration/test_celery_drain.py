@@ -57,6 +57,8 @@ elif cmd == 'logs get-log-events':
     since = int(opt('--start-time') or 0)
     ev = [{'timestamp': now - a, 'message': m} for a, m in ev if now - a >= since]
     tok = opt('--next-token')
+    if tok in st.get('hang_tok', {}):
+        time.sleep(st['hang_tok'][tok])
     if opt('--log-stream-name') in st.get('empty_first', []) and tok in (None, 'e0'):
         if tok is None:
             print(json.dumps({'events': [], 'nextForwardToken': 'e0'}))
@@ -676,6 +678,32 @@ class CeleryDrain(Base):
             rows = (self.t / 'ev' / ('celery-held-late%s.tsv' % cmd[:4])).read_text().splitlines()
             self.assertEqual([r.split('\t')[1] for r in rows[1:]], [ID2])
 
+    def test_a_later_round_cut_at_the_limit_keeps_the_last_complete_read(self):
+        self.snapshot()
+        got = [20000, line(0, TASK, ID2, 'received')]
+        idle = [15000, '[2026-11-19 07:00:00,000: INFO/MainProcess] Connected to redis://x']
+        later = [got, [18000, line(0, TASK, ID2, 'succeeded in 1s: x')], idle]
+        later.append([12000, line(0, TASK, ID2, 'received')])
+        self.state(
+            cycles=[
+                {STREAM + 'aaa': done(ID1), STREAM + 'bbb': [got]},
+                {STREAM + 'aaa': done(ID1), STREAM + 'bbb': later},
+            ],
+            hang_tok={'f3': 30},
+        )
+        rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='6')
+        self.assertEqual(rc, 0, out)
+        self.assertIn(
+            'the read at the limit did not finish; the counts and rows of the last complete '
+            'read above stand',
+            out,
+        )
+        self.assertEqual(out.count('celery held='), 1, out)
+        self.assertIn('celery timed read: held=1 ignored=0 ', out)
+        rows = self.held_tsv()[0].read_text().splitlines()
+        self.assertEqual([r.split('\t')[1] for r in rows[1:]], [ID2])
+        self.assertTrue(self.timing().read_text().rstrip().endswith('held\t1'))
+
     def test_timed_read_sleeps_no_further_than_its_limit(self):
         self.snapshot()
         (self.bin / 'sleep').write_text(
@@ -741,16 +769,25 @@ class CeleryDrain(Base):
         rev.write_text(''.join(ln + '\n' for ln in rev.read_text().splitlines() if SV not in ln))
         self.state()
         rc, out = self.run_tool('timed', '--apply', TS='r2')
-        self.assertEqual(rc, 1, out)
-        self.assertIn('%s names no service %s: run the ECS loop of 1.5 again' % (rev, SV), out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(
+            'NOTE  %s names no service %s: task definitions are not compared here, '
+            'only service names (2.2 compares both)' % (rev, SV),
+            out,
+        )
+        self.assertIn('service names equal the 1.5 snapshot; task definitions not compared', out)
         rev.unlink()
         rc, out = self.run_tool('timed', TS='r3')
-        self.assertEqual(rc, 2, out)
-        self.assertIn('NEED  no %s: run the ECS loop of 1.5 first' % rev, out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(
+            'NOTE  no %s from the ECS loop of 1.5: task definitions are not compared' % rev, out
+        )
+        self.state(taskdefs={CL + '/' + SV: new})
         rc, out = self.run_tool('timed', '--apply', TS='r4')
-        self.assertEqual(rc, 1, out)
-        self.assertIn('STOP CELERY (apply): no %s' % rev, out)
-        self.assertNotIn('celery-read', self.rows())
+        self.assertEqual(rc, 0, out)
+        self.assertIn('accounts-prod/%s task=%s:2 saved=- desired=2 saved=2' % (SV, SV), out)
+        self.assertIn('celery timed read: held=0 ', out)
+        self.assertEqual(self.rows()[-1], 'celery-read')
 
     def test_timed_dry_run_prints_the_plan_and_calls_nothing(self):
         rc, out = self.run_tool('timed')

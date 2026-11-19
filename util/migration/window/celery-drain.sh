@@ -96,6 +96,7 @@ celery_read() {
   [ -z "$missing" ] || { echo "no log stream in $LOG_GROUP for running Celery task(s):$missing"; return 1; }
   [ -z "$failed" ] || { echo "logs get-log-events failed for$failed"; return 1; }
   [ -z "$partial" ] || { echo "the log history of$partial was not read to its end within ${READ_FOR}s; raise CELERY_DRAIN_READ_FOR"; return 1; }
+  [ "${CUT:-0}" = 0 ] || return 2
   now=$(( $(date +%s) * 1000 ))
   [ -z "$HELD_RAW" ] || : > "$HELD_RAW"
   sum=$(printf '%s' "$SEEN" | held_count "$now")
@@ -120,9 +121,9 @@ ecs_snapshot() {
 
 revisions() {
   local t
-  [ -s "$REVISIONS" ] || { echo "no $REVISIONS: run the ECS loop of 1.5 first"; return 1; }
+  [ -s "$REVISIONS" ] || { echo "no $REVISIONS from the ECS loop of 1.5: task definitions are not compared here, only service names (2.2 compares both)"; return 1; }
   for t in $LEGACY_ECS_TARGETS; do
-    awk -F'\t' -v s="${t##*/}" '$1 == s {f = 1} END {exit !f}' "$REVISIONS" || { echo "$REVISIONS names no service ${t##*/}: run the ECS loop of 1.5 again"; return 1; }
+    awk -F'\t' -v s="${t##*/}" '$1 == s {f = 1} END {exit !f}' "$REVISIONS" || { echo "$REVISIONS names no service ${t##*/}: task definitions are not compared here, only service names (2.2 compares both)"; return 1; }
   done
   echo "ECS revisions of 1.5: $REVISIONS"
 }
@@ -130,16 +131,19 @@ revisions() {
 same_services() {
   local t want wantd have name td d moved="" bad=0
   for t in $LEGACY_ECS_TARGETS; do
-    want=$(awk -F'\t' -v s="${t##*/}" '$1 == s {print $2; exit}' "$REVISIONS")
+    want=-
+    [ -z "$REVISIONS" ] || want=$(awk -F'\t' -v s="${t##*/}" '$1 == s {print $2; exit}' "$REVISIONS")
     wantd=$(jq -r --arg c "${t%%/*}" --arg s "${t##*/}" '[.services[] | select(.cluster == $c and .serviceName == $s) | .desiredCount][0] // "none"' "$ECS_BEFORE")
     have=$("${RO[@]}" ecs describe-services --cluster "${t%%/*}" --services "${t##*/}" --query 'services[0].[serviceName,taskDefinition,desiredCount]' --output text) || { echo "ecs describe-services $t failed"; return 1; }
     IFS=$'\t' read -r name td d <<<"$have"
     printf '  %s task=%s saved=%s desired=%s saved=%s\n' "$t" "${td##*/}" "${want##*/}" "$d" "$wantd"
-    [ "$name" = "${t##*/}" ] && [ "$td" = "$want" ] || bad=1
+    [ "$name" = "${t##*/}" ] && [ "$wantd" != none ] || bad=1
+    [ -z "$REVISIONS" ] || [ "$td" = "$want" ] || bad=1
     [ "$d" = "$wantd" ] || moved="$moved ${t##*/}"
   done
-  [ "$bad" = 0 ] || { echo "a service name or task definition differs from 1.5 $REVISIONS"; return 1; }
-  echo "service names and task definitions equal 1.5"
+  [ "$bad" = 0 ] || { echo "a service name or task definition differs from 1.5 ${REVISIONS:-$ECS_BEFORE}"; return 1; }
+  if [ -n "$REVISIONS" ]; then echo "service names and task definitions equal 1.5"
+  else echo "service names equal the 1.5 snapshot; task definitions not compared"; fi
   if [ -n "$moved" ]; then echo "desired count differs from the 1.5 snapshot for$moved: autoscaling moves it; the timed read goes on"
   else echo "desired counts equal the 1.5 snapshot"; fi
 }
@@ -189,8 +193,7 @@ if [ "$CMD" != read ]; then
 fi
 if [ "$CMD" = timed ]; then
   if rev=$(revisions); then printf '%s\n' "$rev"
-  elif [ "$APPLY" = 1 ]; then stop "$rev"
-  else printf 'NEED  %s\n' "$rev"; NEEDS=$((NEEDS + 1)); fi
+  else printf 'NOTE  %s\n' "$rev"; REVISIONS=""; fi
 fi
 [ "$APPLY" = 1 ] || { finish; exit 0; }
 
@@ -213,13 +216,12 @@ if [ "$CMD" = timed ]; then
   while :; do
     CUT=0 rc=0
     celery_read || rc=$?
-    if [ "$rc" = 2 ] && [ "$rounds" -gt 0 ]; then echo "  the read at the limit did not finish; the last complete read above stands"; break; fi
+    if [ "$rc" = 2 ] && [ "$rounds" -gt 0 ]; then echo "  the read at the limit did not finish; the counts and rows of the last complete read above stand"; break; fi
     [ "$rc" = 0 ] || stop "celery read failed: a failed read is not an empty read"
     rounds=$((rounds + 1))
     [ "$LINES" -gt 0 ] || stop "no Celery task line in the running workers' log streams: a failed read is not an empty read"
     [ "$READ_OK" = 1 ] && [ "$HELD" = 0 ] && break
     left=$(( end - $(date +%s) ))
-    [ "$CUT" = 0 ] || { echo "  the read stopped at the limit; tasks are counted from the events read by then"; break; }
     [ "$left" -gt 0 ] || break
     sleep "$(( left < INTERVAL ? left : INTERVAL ))"
     [ "$(date +%s)" -lt "$end" ] || break
