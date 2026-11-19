@@ -32,15 +32,14 @@ declare -A TOK=()
 SEEN=""
 
 events() {
-  local s=$1 tok=${TOK[$1]:-} out next n lines
+  local s=$1 tok=${TOK[$1]:-} out next lines
   while :; do
     out=$("${RO[@]}" logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-from-head ${tok:+--next-token "$tok"} --output json) || return 1
     lines=$(printf '%s' "$out" | jq -r '.events[] | [(.timestamp | tostring)] + (.message | first(capture("Task (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\] (?<w>[a-z]+)"), (capture("Discarding revoked task: (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "revoked"), {n: "-", i: "-", w: "-"}) | [.n, .i, .w]) | join(" ")') || return 1
-    n=$(printf '%s' "$out" | jq '.events | length') || return 1
     next=$(printf '%s' "$out" | jq -r '.nextForwardToken // ""') || return 1
     [ -z "$lines" ] || SEEN+=$lines$'\n'
     [ -z "$next" ] || TOK[$s]=$next
-    [ "$n" -gt 0 ] && [ -n "$next" ] && [ "$next" != "$tok" ] || return 0
+    [ -n "$next" ] && [ "$next" != "$tok" ] || return 0
     tok=$next
   done
 }

@@ -40,6 +40,11 @@ elif cmd == 'logs get-log-events':
     since = int(opt('--start-time') or 0)
     ev = [{'timestamp': now - a, 'message': m} for a, m in ev if now - a >= since]
     tok = opt('--next-token')
+    if opt('--log-stream-name') in st.get('empty_first', []) and tok in (None, 'e0'):
+        if tok is None:
+            print(json.dumps({'events': [], 'nextForwardToken': 'e0'}))
+            sys.exit(0)
+        tok = None
     if opt('--log-stream-name') in st.get('garbled', []):
         print('<html>throttled</html>')
         sys.exit(0)
@@ -259,6 +264,15 @@ class CeleryDrain(Base):
         rc, out = self.run_tool('read', '--apply')
         self.assertIn('celery held=0 received=2 finished=2', out)
         self.assertEqual(self.rows(), [])
+
+    def test_an_empty_page_before_the_end_does_not_end_the_read(self):
+        held = [[30000, line(0, TASK, ID2, 'received')]]
+        self.state(
+            cycles=[{STREAM + 'aaa': done(ID1), STREAM + 'bbb': held}], empty_first=[STREAM + 'bbb']
+        )
+        rc, out = self.run_tool('read', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('celery held=1 ', out)
 
     def test_an_unreadable_log_page_stops_the_read(self):
         self.state(garbled=[STREAM + 'bbb'])
