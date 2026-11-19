@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import json
 import os
@@ -219,14 +220,18 @@ class Prod(Harness):
 
 
 CUT = ['cut-ecs', '2026-11-19T04:00:00Z', '2026-11-19T04:00:00Z', 'tasks', '0']
-EXPORT = ['w4-export', '2026-11-19T04:19:00Z', '2026-11-19T04:19:00Z', 'file', 'x']
+FILES = (('export', 'export.json', '{}'), ('kept', 'principals.kept.json', '[]'), ('stubs', 'stubs-dropped.json', '{"ids": []}'))
+FILES_SH = 'mkdir -p "$S"; ' + ''.join("printf '%%s\\n' '%s' > \"$S/%s\"; " % (c, f) for _, f, c in FILES) + '\n'
+DIGESTS = ','.join('%s=%s' % (k, hashlib.sha256((c + '\n').encode()).hexdigest()) for k, _, c in FILES)
+EXPORT = ['w4-export', '2026-11-19T04:19:00Z', '2026-11-19T04:19:00Z', 'sha256', DIGESTS]
+BOUND = ['reset-export', '2026-11-19T04:45:00Z', '2026-11-19T04:45:00Z', 'sha256', DIGESTS]
 READ = ['w4-read-done', '2026-11-19T04:20:00Z', '2026-11-19T04:20:00Z', 'export', 'x']
 STOPPED = ['stop-legacy-stalwart', '2026-11-19T04:30:00Z', '2026-11-19T04:30:00Z', 'nodes', '6']
 
 
 class ReadPhase(Prod):
     BODY = (
-        'dump() { echo DUMP; }; stub_drop() { echo STUBS; cp "$S/principals.json" "$S/principals.kept.json"; VALUE=0; }; duplicates() { echo DUP; }\n'
+        'dump() { echo DUMP; }; stub_drop() { echo STUBS; cp "$S/principals.json" "$S/principals.kept.json"; echo \'{"ids": []}\' > "$S/stubs-dropped.json"; VALUE=0; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
         'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
@@ -275,7 +280,7 @@ class ReadPhase(Prod):
         self.assertIn('DUMP', out.split())
         self.rows([CUT, EXPORT, READ, ['w4-export-start', 'b', 'b', 'file', 'x'], STOPPED])
         self.kube({'replicas': 0, 'pods': []})
-        out = self.w4('mkdir -p "$S"; echo "{}" > "$S/export.json"\nreset_preflight; echo "rc=$?"')
+        out = self.w4(FILES_SH + 'reset_preflight; echo "rc=$?"')
         self.assertIn('the export of the last read run did not pass its checks', out)
         self.assertIn('rc=1', out)
 
@@ -292,10 +297,31 @@ class ResetPhase(Prod):
     def preflight(self, rows, **kube):
         self.rows(rows)
         self.kube(dict({'replicas': 0, 'pods': []}, **kube))
-        return self.w4(
-            'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
-            'reset_preflight; echo "rc=$? stop=$STOP_AT"'
-        )
+        return self.w4(FILES_SH + 'reset_preflight; echo "rc=$? stop=$STOP_AT"')
+
+    def test_the_export_record_covers_the_stub_files(self):
+        out = self.preflight([CUT, EXPORT, READ, STOPPED])
+        self.assertIn('rc=0', out)
+        export_only = hashlib.sha256(b'{}\n').hexdigest()
+        for case, export in (
+            ('no digest', EXPORT[:3] + ['file', 'x']),
+            ('export.json only', EXPORT[:4] + [export_only]),
+        ):
+            with self.subTest(case=case):
+                out = self.preflight([CUT, export, READ, STOPPED])
+                self.assertIn('the w4-export row does not hold the sha256 of export.json, principals.kept.json and stubs-dropped.json', out)
+                self.assertIn('rc=1', out)
+        self.rows([CUT, EXPORT, READ, STOPPED])
+        self.kube({'replicas': 0, 'pods': []})
+        for case, body in (
+            ('empty stubs-dropped.json', ': > "$S/stubs-dropped.json"\n'),
+            ('another stubs-dropped.json', 'echo \'{"ids": [7]}\' > "$S/stubs-dropped.json"\n'),
+            ('another principals.kept.json', 'echo \'[1]\' > "$S/principals.kept.json"\n'),
+        ):
+            with self.subTest(case=case):
+                out = self.w4(FILES_SH + body + 'reset_preflight; echo "rc=$?"')
+                self.assertIn('the export of the last read run did not pass its checks', out)
+                self.assertIn('rc=1', out)
 
     def test_the_reset_needs_the_read_phase_then_the_stop_and_no_pod(self):
         out = self.preflight([CUT, EXPORT, READ, STOPPED])
@@ -469,15 +495,49 @@ class BootPhase(Prod):
     def test_boot_resumes_only_after_reset_guard_and_pre_delete(self):
         r = ['reset', '2026-11-19T05:00:00Z', '2026-11-19T05:00:00Z', 'last_reset_at', 'x']
         g = ['guard', '2026-11-19T05:05:00Z', '2026-11-19T05:05:00Z', 'result', 'pass']
-        self.rows([CUT, r, g, self.PRE])
+        self.rows([CUT, EXPORT, READ, STOPPED, BOUND, r, g, self.PRE])
         self.assertIn(
             'resuming after the pre-delete of 2026-11-19T05:10:00Z; no second reset',
-            self.w4('boot_resume'),
+            self.w4(FILES_SH + 'boot_resume'),
         )
         for rows in ([CUT, r, g], [CUT, g, r, self.PRE], [r, g, self.PRE, CUT]):
             with self.subTest(rows=[x[0] for x in rows]):
                 self.rows(rows)
                 self.assertIn('nothing to resume', self.w4('boot_resume; echo "rc=$?"'))
+
+    def test_boot_applies_the_reset_rule_and_needs_the_export_the_reset_checked(self):
+        r = ['reset', '2026-11-19T05:00:00Z', '2026-11-19T05:00:00Z', 'last_reset_at', 'x']
+        g = ['guard', '2026-11-19T05:05:00Z', '2026-11-19T05:05:00Z', 'result', 'pass']
+        ok = [CUT, EXPORT, READ, STOPPED, BOUND, r, g, self.PRE]
+        start = ['start-legacy-stalwart', '2026-11-19T05:20:00Z', '2026-11-19T05:20:00Z', 'nodes', '6']
+        self.rows(ok + [start])
+        out = self.w4(FILES_SH + 'boot_resume; echo "rc=$?"')
+        self.assertIn('a start-legacy-stalwart row follows the w4-export row', out)
+        self.assertIn('rc=1', out)
+        self.assertNotIn('resuming after the pre-delete', out)
+        reread = ok + [
+            ['w4-export-start', '2026-11-19T05:20:00Z', '2026-11-19T05:20:00Z', 'file', 'x'],
+            EXPORT[:4] + [DIGESTS.replace('export=', 'export=0')],
+            READ,
+        ]
+        self.rows(reread)
+        out = self.w4(FILES_SH + 'boot_resume; echo "rc=$?"')
+        self.assertIn('rc=1', out)
+        self.rows(ok)
+        changed = FILES_SH + 'echo \'{"changed": 1}\' > "$S/export.json"\n'
+        out = self.w4(changed + 'boot_resume; echo "rc=$?"')
+        self.assertIn('rc=1', out)
+        self.rows([x for x in ok if x[0] != 'reset-export'])
+        out = self.w4(FILES_SH + 'boot_resume; echo "rc=$?"')
+        self.assertIn('the export files in', out)
+        self.assertIn('are not the ones the reset checked (reset-export row)', out)
+        self.assertIn('rc=1', out)
+        self.rows(ok + [start])
+        out = self.w4(
+            FILES_SH + 'incluster_apply() { echo SENT; }; port_forward() { :; }\nAPPLY=1; prod_apply; echo "rc=$?"'
+        )
+        self.assertIn('the export is not the one the reset checked: nothing sent', out)
+        self.assertNotIn('SENT', out)
 
     def test_an_applied_export_is_not_applied_again_on_resume(self):
         a = ['export-applied', '2026-11-19T05:30:00Z', '2026-11-19T05:30:00Z', 'errors', '0']
@@ -493,8 +553,8 @@ class BootPhase(Prod):
         r = ['reset', '2026-11-19T05:00:00Z', '2026-11-19T05:00:00Z', 'last_reset_at', 'x']
         g = ['guard', '2026-11-19T05:05:00Z', '2026-11-19T05:05:00Z', 'result', 'pass']
         sent = ['reset-sent', '2026-11-19T05:40:00Z', '2026-11-19T05:40:00Z', 'branch', 'b']
-        self.rows([CUT, sent[:1] + ['2026-11-19T04:59:00Z'] * 2 + sent[3:], r, g, self.PRE])
-        self.assertIn('resuming after the pre-delete', self.w4('boot_resume'))
+        self.rows([CUT, EXPORT, READ, STOPPED, BOUND, sent[:1] + ['2026-11-19T04:59:00Z'] * 2 + sent[3:], r, g, self.PRE])
+        self.assertIn('resuming after the pre-delete', self.w4(FILES_SH + 'boot_resume'))
         self.rows([CUT, r, g, self.PRE, sent])
         out = self.w4('boot_resume; echo "rc=$?"')
         self.assertIn('the last reset was sent (2026-11-19T05:40:00Z) and did not finish', out)
@@ -608,7 +668,8 @@ class Script(Prod):
     def test_a_second_reset_needs_go_and_boot_needs_a_reset(self):
         self.kube({'replicas': 0, 'pods': []})
         (self.t / 'secret').mkdir(exist_ok=True, mode=0o700)
-        (self.t / 'secret' / 'export.json').write_text('{}\n')
+        for _, f, c in FILES:
+            (self.t / 'secret' / f).write_text(c + '\n')
         reset = [
             'reset',
             '2026-11-19T05:00:00Z',

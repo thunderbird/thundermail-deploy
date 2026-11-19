@@ -308,7 +308,9 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
   `class Domain:refused-by-0.16` lines, and the names convert drops itself as
   `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
-  `w4-export` and `w4-read-done` rows only. A rerun after a `queue-drain` stop reads the queue
+  `w4-export` and `w4-read-done` rows only; the `w4-export` row holds the sha256 of
+  `export.json`, `principals.kept.json` and `stubs-dropped.json`, and an export is reused or
+  reset on only when all three files still match it. A rerun after a `queue-drain` stop reads the queue
   only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
   without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`
   row, when a `start-legacy-stalwart` row follows the `w4-export` row (the export is stale, and
@@ -326,7 +328,9 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
   boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
   recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
-  applies the export inside the cluster (below). A second reset needs `--go`. `--phase boot` resumes an expired wait
+  applies the export inside the cluster (below). The reset writes a `reset-export` row with the
+  same three digests, and the boot (a resume too, and again right before the export is sent)
+  applies the reset's export rule and refuses unless the files still match that row. A second reset needs `--go`. `--phase boot` resumes an expired wait
   without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
   restore or blob step.
 - On tb-prod the apply runs in a one-shot pod next to Stalwart, never through a port-forward from
