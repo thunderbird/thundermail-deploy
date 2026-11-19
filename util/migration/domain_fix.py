@@ -28,6 +28,7 @@ def main(argv=None):
     )
     ap.add_argument('--export', required=True)
     ap.add_argument('--output')
+    ap.add_argument('--dropped-list')
     a = ap.parse_args(argv)
     path = pathlib.Path(a.export)
     ops = [json.loads(x) for x in path.read_text(encoding='utf-8').splitlines() if x.strip()]
@@ -79,6 +80,27 @@ def main(argv=None):
         ''.join(json.dumps(op, ensure_ascii=False) + '\n' for op in ops), encoding='utf-8'
     )
     tmp.replace(out)
+    if a.dropped_list:
+        kept = sum(
+            len(op['value'])
+            for op in ops
+            if op.get('object') == 'DkimSignature' and op.get('@type') == 'create'
+        )
+        listed = pathlib.Path(a.dropped_list)
+        part = listed.with_name(listed.name + '.tmp')
+        part.write_text(
+            json.dumps(
+                {
+                    'domains': sorted(names[cid] for cid in drop),
+                    'dkim_dropped': gone,
+                    'dkim_kept': kept,
+                },
+                ensure_ascii=False,
+            )
+            + '\n',
+            encoding='utf-8',
+        )
+        part.replace(listed)
     for line in lines:
         print(line)
     print(

@@ -339,7 +339,7 @@ neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon r
 
 domain_fix_step() {
   local rc=0
-  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" || rc=$?
+  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --dropped-list "$S/domains-dropped.json" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
@@ -416,7 +416,10 @@ neon_reset() {
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || return 1
   VALUE=$(sed -n 's/^after: .* last_reset_at=\([^ ]*\) .*/\1/p' <<<"$out")
+  RESET_LSN=$(sed -n 's/^after: .* parent_lsn=\([0-9A-Fa-f]*\/[0-9A-Fa-f]*\) .*/\1/p' <<<"$out")
+  [ -n "$RESET_LSN" ] || { echo "the reset printed no parent_lsn: $SOURCE_BRANCH cannot be created at the reset point"; return 1; }
   mark reset last_reset_at "$VALUE"
+  mark reset-lsn parent_lsn "$RESET_LSN"
 }
 
 branch_check() {
@@ -432,8 +435,11 @@ branch_check() {
 
 source_branch() {
   local out rc=0 f=$S/source-branch.env n v
-  printf '  + %s source --name %s --role %s --db %s --out %s --after %s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "$(apply_flag)"
-  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
+  local lsn=() at=${RESET_LSN:-$(cut_row reset-lsn | cut -f6)}
+  [ -z "$at" ] || lsn=(--lsn "$at")
+  [ "$APPLY" = 0 ] || [ -n "$at" ] || { echo "no parent_lsn of the reset in this run or in a reset-lsn row: $SOURCE_BRANCH is created only at the reset point"; return 1; }
+  printf '  + %s source --name %s --role %s --db %s --out %s --after %s%s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "${at:+ --lsn $at}" "$(apply_flag)"
+  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${lsn[@]+"${lsn[@]}"}" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
   printf '%s\n' "$out"
   neon_need "$rc" "neon_branch.py source"
   if [ "$APPLY" = 0 ]; then

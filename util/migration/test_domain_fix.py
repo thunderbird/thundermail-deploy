@@ -200,6 +200,8 @@ class W4DomainsGate(Prod):
         self.assertIn('rc=0 VALUE=8', out)
         self.assertNotIn(UNI, out)
         self.assertNotIn(BAD, out)
+        listed = json.loads((self.t / 'secret' / 'domains-dropped.json').read_text())
+        self.assertEqual(listed, {'domains': sorted([BAD, PUNY, UNI]), 'dkim_dropped': 5, 'dkim_kept': 1})
 
 
 if __name__ == '__main__':

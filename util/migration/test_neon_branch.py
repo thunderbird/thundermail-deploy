@@ -21,6 +21,7 @@ def now():
 class FakeNeon:
     def __init__(self):
         self.log, self.lock_left, self.reset_moves = [], 0, True
+        self.head = 0x999
         self.redirect, self.followed = False, 0
         self.branches = {
             PARENT: {'id': PARENT, 'name': 'production', 'default': True, 'parent_id': None},
@@ -111,7 +112,8 @@ class FakeNeon:
             if method == 'POST' and rest == '/restore':
                 if self.reset_moves:
                     b['last_reset_at'] = now()
-                    b['parent_lsn'] = '0/999'
+                    b['parent_lsn'] = '0/%X' % self.head
+                    self.head += 0x10
                 return 200, {'branch': b}
             if method == 'DELETE' and not rest:
                 del self.branches[bid]
@@ -127,6 +129,7 @@ class FakeNeon:
                 'parent_id': body['branch']['parent_id'],
                 'created_at': now(),
                 'current_state': 'ready',
+                'parent_lsn': body['branch'].get('parent_lsn', '0/%X' % self.head),
             }
             self.endpoints.append(
                 {
@@ -365,6 +368,36 @@ class NeonBranch(unittest.TestCase):
         self.assertIn(
             'last_reset_at 2026-11-19T04:00:00Z is not later than 2026-11-19T04:30:00Z', p.stdout
         )
+
+    def test_the_source_branch_is_made_at_the_reset_lsn_while_the_parent_moves(self):
+        after = ('--after', '2026-11-19T00:00:00Z')
+        p = self.run_tool('reset', '--branch', 'tb-prod-cutover', *after, '--apply')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        lsn = re.search(r'(?m)^after: .* parent_lsn=(\S+) ', p.stdout).group(1)
+        self.assertNotEqual(lsn, '0/%X' % self.fake.head)
+        src = ('source', '--name', 'tb-prod-cutover-source', '--role', 'stalwart_owner')
+        src += ('--db', 'stalwart', '--out', str(self.t / 'src.env'), *after, '--apply')
+        p = self.run_tool(*src, '--lsn', lsn)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        create = [b for m, q, b, _ in self.fake.log if m == 'POST' and q.endswith('/branches')]
+        self.assertEqual(create[-1]['branch']['parent_lsn'], lsn)
+        p = self.run_tool(
+            'check', '--cutover', 'tb-prod-cutover', '--source', 'tb-prod-cutover-source', *after
+        )
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('parent_lsn %s' % lsn, p.stdout)
+        p = self.run_tool(*src, '--lsn', '0/1; drop')
+        self.assertIn("REFUSED: --lsn '0/1; drop' is not an LSN", p.stderr)
+
+    def test_a_reset_that_left_the_lsn_fails(self):
+        self.fake.branches[CHILD]['parent_lsn'] = '0/999'
+        self.fake.reset_moves = True
+        self.fake.head = 0x999
+        p = self.run_tool(
+            'reset', '--branch', 'tb-prod-cutover', '--after', '2026-11-19T00:00:00Z', '--apply'
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('reset proof FAILED: parent_lsn 0/999 after the reset (before 0/999)', p.stdout)
 
     def test_a_redirect_is_not_followed(self):
         self.fake.redirect = True

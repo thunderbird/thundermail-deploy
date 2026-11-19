@@ -311,6 +311,24 @@ class ResetPhase(Prod):
         self.assertIn('rc=1', out)
         self.assertNotIn('reset', [r[0] for r in self.timing()])
 
+    def test_the_source_branch_is_created_at_the_lsn_of_the_reset(self):
+        (self.t / 'cutover.env').write_text('')
+        out = self.w4(
+            'APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\n'
+            'neon_reset; echo "rc=$?"; source_branch; echo "rc=$?"'
+        )
+        self.assertEqual(out.count('rc=0'), 2, out)
+        src = [c for c in self.calls('nb') if ' source ' in c]
+        self.assertEqual(len(src), 1, src)
+        self.assertIn(' --lsn 0/9 ', src[0] + ' ')
+        self.assertIn(['reset-lsn', 'parent_lsn', '0/9'], [[r[0], r[3], r[4]] for r in self.timing()])
+        out = self.w4('APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\nsource_branch; echo "rc=$?"')
+        self.assertIn('rc=0', out)
+        self.assertIn(' --lsn 0/9 ', [c for c in self.calls('nb') if ' source ' in c][-1] + ' ')
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.w4('APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\nsource_branch; echo "rc=$?"')
+        self.assertIn('is created only at the reset point\nrc=1', out)
+
     def test_schema_other_than_5_after_the_reset_stops(self):
         self.kube({'schema': '00000006'})
         out = self.w4('schema_before; echo "rc=$?"')
