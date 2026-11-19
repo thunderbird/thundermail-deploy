@@ -18,6 +18,8 @@ args = sys.argv[1:]
 open(os.environ['FAKE_LOG'], 'a').write('aws ' + ' '.join(args) + '\n')
 p = os.environ['AWS_STATE']
 st = json.load(open(p))
+if 'get-log-events' in args:
+    time.sleep(st.get('slow', 0))
 now = int(time.time() * 1000)
 def opt(name):
     return args[args.index(name) + 1] if name in args else None
@@ -436,6 +438,70 @@ class CeleryDrain(Base):
         self.assertIn('desired counts differ from the 1.5 snapshot before the wait', out)
         self.assertNotIn('get-log-events', self.log())
         self.assertNotIn('celery-drain', self.rows())
+
+    def test_a_task_past_the_hard_time_limit_is_finished(self):
+        hard = (
+            '[2026-11-19 07:00:00,000: ERROR/MainProcess] '
+            'Hard time limit (300.0s) exceeded for %s[%s]'
+        )
+        ev = [[400000, line(0, TASK, ID2, 'received')], [100000, hard % (TASK, ID2)]]
+        self.state(cycles=[{STREAM + 'aaa': done(ID1), STREAM + 'bbb': ev}])
+        rc, out = self.run_tool('read', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('celery held=0 received=2 finished=2 ', out)
+        ev.append([50000, line(0, TASK, ID2, 'received')])
+        self.state(cycles=[{STREAM + 'aaa': done(ID1), STREAM + 'bbb': ev}])
+        rc, out = self.run_tool('read', '--apply')
+        self.assertIn('celery held=1 ', out)
+
+    def test_the_ignore_list_is_printed_and_passes_only_its_tasks(self):
+        self.snapshot()
+        held = {
+            STREAM + 'aaa': done(ID1) + [[20000, line(0, TASK, ID1[:-1] + '2', 'received')]],
+            STREAM + 'bbb': [[3 * 3600 * 1000, line(0, TASK, ID2, 'received')]],
+        }
+        self.state(cycles=[held])
+        rc, out = self.run_tool('wait', '--apply', CELERY_DRAIN_TIMEOUT='0')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('CELERY_DRAIN_IGNORE: none', out)
+        self.assertIn('celery held=2 ', out)
+        self.assertRegex(out, r'held %s received 10(799|800|801)s id=%s\n' % (re.escape(TASK), ID2))
+        rc, out = self.run_tool(
+            'wait', '--apply', CELERY_DRAIN_TIMEOUT='0', CELERY_DRAIN_IGNORE=ID2
+        )
+        self.assertEqual(rc, 1, out)
+        self.assertIn('CELERY_DRAIN_IGNORE: %s' % ID2, out)
+        self.assertIn('celery held=1 ', out)
+        self.assertRegex(
+            out,
+            r'ignored %s received 10(799|800|801)s id=%s \(CELERY_DRAIN_IGNORE\)'
+            % (re.escape(TASK), ID2),
+        )
+        self.assertNotIn('celery-drain', self.rows())
+        ign = ID2 + ',' + ID1[:-1] + '2'
+        rc, out = self.run_tool('wait', '--apply', CELERY_DRAIN_IGNORE=ign)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('CELERY_DRAIN_IGNORE: ' + ign, out)
+        self.assertRegex(out, r'celery held=0 .* ignored=2\n')
+        self.assertEqual(self.rows()[-1], 'celery-drain')
+        log = ''.join(p.read_text() for p in (self.t / 'ev').glob('*.log'))
+        self.assertIn('CELERY_DRAIN_IGNORE: ' + ign, log)
+        self.assertIn('ignored %s received' % TASK, log)
+        rc, out = self.run_tool('read', CELERY_DRAIN_IGNORE='x; rm -rf /')
+        self.assertEqual(rc, 64, out)
+        self.assertIn('CELERY_DRAIN_IGNORE takes Celery task ids', out)
+
+    def test_events_logged_during_the_read_are_fresh_not_negative(self):
+        self.snapshot()
+        live = [[0, line(0, TASK, ID1, 'received')], [0, line(0, TASK, ID1, 'succeeded in 0s: x')]]
+        self.state(cycles=[{STREAM + 'aaa': live, STREAM + 'bbb': done(ID2)}], slow=1.5)
+        rc, out = self.run_tool('read', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r'celery held=0 received=2 finished=2 newest_log_age=[0-9]+s ')
+        self.assertNotIn('not a drained read', out)
+        rc, out = self.run_tool('wait', '--apply', CELERY_DRAIN_TIMEOUT='0')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.count('celery held='), 1, out)
 
     def test_one_celery_service_and_one_celery_log_group(self):
         self.env_file.write_text(
