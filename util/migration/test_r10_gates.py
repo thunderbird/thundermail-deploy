@@ -1,6 +1,7 @@
 import importlib
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -386,6 +387,83 @@ class Keep(Prod):
         self.assertLess(
             reset.index('step source-branch-create'), reset.index('step keep-source files keep_copy')
         )
+
+
+def git(repo, *args):
+    return subprocess.run(
+        ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+class FreightFor(Harness):
+    def repo(self):
+        r = self.t / 'origin'
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(r)], check=True)
+        for p in ('overlays/tb-prod/stalwart-configs', 'bases/stalwart-configs'):
+            (r / p).mkdir(parents=True)
+            (r / p / 'values.yaml').write_text('a: 1\n')
+        git(r, 'add', '-A')
+        git(r, 'commit', '-q', '-m', 'settings')
+        merge = git(r, 'rev-parse', 'HEAD')
+        git(r, 'checkout', '-q', '-b', 'env/tb-prod-thundermail-stalwart-configs-preview')
+        (r / 'rendered.txt').write_text('x\n')
+        git(r, 'add', '-A')
+        git(r, 'commit', '-q', '-m', 'chore(stalwart-config): preview')
+        preview = git(r, 'rev-parse', 'HEAD')
+        git(r, 'checkout', '-q', 'main')
+        clone = self.t / 'clone'
+        subprocess.run(['git', 'clone', '-q', str(r), str(clone)], check=True)
+        return r, clone, merge, preview
+
+    def test_the_freight_of_a_merge_is_found_by_its_settings_trees(self):
+        r, clone, merge, preview = self.repo()
+        freight = json.dumps(
+            {
+                'items': [
+                    {
+                        'metadata': {'name': 'f-old', 'creationTimestamp': '2026-11-18T00:00:00Z'},
+                        'origin': {'name': 'deploy-thundermail-tb-prod01-git'},
+                        'commits': [{'id': '0' * 40}],
+                    },
+                    {
+                        'metadata': {'name': 'f-new', 'creationTimestamp': '2026-11-19T00:00:00Z'},
+                        'origin': {'name': 'deploy-thundermail-tb-prod01-git'},
+                        'commits': [{'id': preview}],
+                    },
+                ]
+            }
+        )
+        rules = [
+            {'tool': 'kubectl', 'match': 'get freight -o json', 'out': freight},
+            {'tool': 'git', 'match': '.', 'forward': False},
+        ]
+        real_git = shutil.which('git')
+        (self.t / 'gitbin').mkdir()
+        (self.t / 'gitbin' / 'git').symlink_to(real_git)
+        out = self.fn(
+            'w5-promote.sh',
+            'freight_for %s; echo "rc=$? FREIGHT_FOUND=$FREIGHT_FOUND"' % merge,
+            'PATH=%s:$PATH REPO_DIR=%s TMD_URL=%s PREVIEW_BRANCH=env/tb-prod-thundermail-stalwart-configs-preview '
+            'CFG_PATHS="overlays/tb-prod/stalwart-configs bases/stalwart-configs" '
+            'KARGO_PROJECT_CONFIGS=tb-stalwart-configs KARGO_WAREHOUSE_CONFIGS=deploy-thundermail-tb-prod01-git'
+            % (self.t / 'gitbin', clone, r),
+            rules=rules[:1],
+        )
+        self.assertIn('Freight f-new (preview commit %s) matches %s' % (preview, merge), out)
+        self.assertIn('rc=0 FREIGHT_FOUND=f-new', out)
+        script = (HERE / 'window' / 'freight-for.sh').read_text()
+        self.assertIn('step freight-for freight match', script)
+        p = subprocess.run(
+            ['bash', str(HERE / 'window' / 'freight-for.sh'), 'nope'],
+            capture_output=True,
+            text=True,
+            env={'PATH': '/usr/bin:/bin', 'HOME': str(self.t), 'TARGET_ENV': 'tb-stage'},
+            timeout=60,
+        )
+        self.assertEqual(p.returncode, 64, p.stdout + p.stderr)
 
 
 if __name__ == '__main__':
