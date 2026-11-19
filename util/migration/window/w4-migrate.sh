@@ -410,6 +410,7 @@ reset_preflight() {
 neon_reset() {
   local out rc=0
   printf '  + %s reset --branch %s --after %s %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH" "$STOP_AT" "$(apply_flag)"
+  [ "$APPLY" = 0 ] || mark reset-sent branch "$CUTOVER_BRANCH"
   out=$("${NB[@]}" reset --branch "$CUTOVER_BRANCH" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
   printf '%s\n' "$out"
   neon_need "$rc" "neon_branch.py reset"
@@ -548,7 +549,7 @@ prod_recovery_boot() {
 prod_apply() {
   local a p
   a=$(cut_line export-applied) p=$(cut_line pre-delete)
-  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; return 0; fi
+  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; port_forward; return; fi
   apply_export || return 1
   [ "$APPLY" = 0 ] || mark export-applied errors 0
 }
@@ -563,7 +564,9 @@ prod_recovery_hold() {
 
 boot_resume() {
   local r g p
-  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete)
+  local s
+  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete) s=$(cut_line reset-sent)
+  [ -z "$s" ] || [ -z "$r" ] || [ "$s" -lt "$r" ] || { echo "the last reset was sent ($(cut_time reset-sent)) and did not finish: it may have undone the pre-delete; rerun --phase reset --apply --go '<words>'"; return 1; }
   [ -n "$r" ] && [ -n "$g" ] && [ -n "$p" ] && [ "$g" -gt "$r" ] && [ "$p" -gt "$g" ] || { echo "nothing to resume: want reset, guard and pre-delete rows, in that order, after the last cut-ecs row"; return 1; }
   echo "resuming after the pre-delete of $(cut_time pre-delete); no second reset"
 }
@@ -579,7 +582,7 @@ reset_phase() {
   STOP_AT=""
   [ "$APPLY" = 0 ] || APPLY_ARG=(--apply)
   step reset-preflight "" reset_preflight
-  if [ "$APPLY" = 1 ] && [ -n "$(cut_row reset)" ]; then
+  if [ "$APPLY" = 1 ] && { [ -n "$(cut_row reset)" ] || [ -n "$(cut_row reset-sent)" ]; }; then
     [ -n "$GO" ] || stop "$CUTOVER_BRANCH was already reset in this cut: a second reset needs the operator's confirmation (--go); after an expired pod wait use --phase boot"
     go_gate
   fi

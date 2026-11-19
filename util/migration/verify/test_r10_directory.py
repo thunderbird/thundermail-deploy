@@ -48,7 +48,12 @@ class Directory(unittest.TestCase):
         (self.t / 'principals.json').write_text(
             json.dumps(
                 [
-                    {'id': 1, 'type': 'individual', 'name': 'u@a.example.com', 'emails': ['u@a.example.com']},
+                    {
+                        'id': 1,
+                        'type': 'individual',
+                        'name': 'u@a.example.com',
+                        'emails': ['u@a.example.com', '@' + BAD],
+                    },
                     {'id': 2, 'type': 'domain', 'name': 'a.example.com'},
                     {'id': 3, 'type': 'domain', 'name': UNI},
                     {'id': 4, 'type': 'domain', 'name': PUNY},
