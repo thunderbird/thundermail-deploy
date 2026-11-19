@@ -343,10 +343,17 @@ read_done() {
   echo "legacy-read phase done: $S/export.json; legacy Stalwart may be stopped now (W 4.3)"
 }
 
+export_ok() {
+  local e s
+  e=$(cut_line w4-export) s=$(cut_line w4-export-start)
+  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ]
+}
+
 read_phase() {
-  if [ "$APPLY" = 1 ] && [ -z "$GO" ] && [ -n "$(cut_row w4-export)" ] && [ -s "$S/export.json" ]; then
+  if [ "$APPLY" = 1 ] && [ -z "$GO" ] && export_ok; then
     echo "reusing the export of this cut (w4-export row, $S/export.json): only queue-drain runs; --go '<words>' dumps again"
   else
+    [ "$APPLY" = 0 ] || mark w4-export-start file "$S/export.json"
     step dump "" dump
     step duplicates duplicates duplicates
     step convert export_lines convert
@@ -373,6 +380,7 @@ reset_preflight() {
   local read stop bad=0
   read=$(cut_line w4-read-done) stop=$(cut_line stop-legacy-stalwart)
   STOP_AT=$(cut_time stop-legacy-stalwart)
+  if [ -n "$read" ] && ! export_ok; then echo "the export of the last read run did not pass its checks (no w4-export row after the last w4-export-start row)"; read=""; fi
   if ! awk -F'\t' '$1 == "cut-ecs" {f = 1} END {exit !f}' "$TIMING_TSV" 2>/dev/null; then echo "no cut-ecs row in $TIMING_TSV: W2 has not cut legacy in this attempt"; bad=1; fi
   if [ -z "$read" ] || [ ! -s "$S/export.json" ]; then echo "no w4-read-done row after the last cut-ecs row (or no $S/export.json): run --phase read first"; bad=1; fi
   if [ -z "$stop" ]; then echo "no stop-legacy-stalwart row after the last cut-ecs row: legacy Stalwart is not recorded stopped (W 4.3)"; bad=1

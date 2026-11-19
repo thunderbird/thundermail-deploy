@@ -51,7 +51,16 @@ sm() { aws secretsmanager get-secret-value --profile "$1" --region "${3:-$REGION
 sm_exists() { aws secretsmanager describe-secret --profile "$1" --region "${3:-$REGION}" --secret-id "$2" --query Name --output text >/dev/null 2>&1; }
 mode600() { [ -f "$1" ] && [ "$(stat -c %a "$1")" = 600 ]; }
 from_file() { sed -n "s/^\(export \)\{0,1\}$2=//p" "$1" 2>/dev/null | tail -1 | sed "s/^['\"]//; s/['\"]\$//; s/'\\\\''/'/g"; }
-ev() { local v; v=$(if [ -d "$(dirname "$ENV_FILE")" ] && command -v flock >/dev/null 2>&1; then { flock -s -w 60 9 || true; from_file "$ENV_FILE" "$1"; } 9>>"$ENV_FILE.lock" 2>/dev/null || from_file "$ENV_FILE" "$1"; else from_file "$ENV_FILE" "$1"; fi); printf '%s' "${v:-${!1:-}}"; }
+ev() {
+  local v rc=0
+  if [ -d "$(dirname "$ENV_FILE")" ] && command -v flock >/dev/null 2>&1; then
+    v=$( { flock -s -w 60 9 || exit 3; from_file "$ENV_FILE" "$1"; } 9>>"$ENV_FILE.lock" 2>/dev/null ) || rc=$?
+    [ "$rc" = 0 ] || { echo "no shared lock on $ENV_FILE.lock: $1 not read" >&2; return 1; }
+  else
+    v=$(from_file "$ENV_FILE" "$1")
+  fi
+  printf '%s' "${v:-${!1:-}}"
+}
 envfile_has() { [ -n "$(ev "$1")" ]; }
 load_operator_env() {
   local f=$1 name val
