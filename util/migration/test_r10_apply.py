@@ -24,6 +24,10 @@ elif ' wait --for=condition=Ready ' in j:
     rc = st.get('ready_rc', 0)
 elif ' attach -i -c cli ' in j:
     open(t + '/attached.bin', 'wb').write(sys.stdin.buffer.read())
+    import time
+    time.sleep(st.get('attach_sleep', 0))
+elif ' describe pod ' in j:
+    out = 'Events:\n  Warning  Failed  ImagePullBackOff\n'
 elif '{{.status.phase}}' in j:
     out = st.get('phase', 'Succeeded')
 elif ' logs --timestamps -c cli ' in j:
@@ -82,11 +86,14 @@ class InClusterApply(w4.Prod):
         e['APPLY_DIR'] = str(self.t)
         return e
 
-    def apply(self, rows=None):
+    def apply(self, rows=None, wait=30):
+        self.wait = wait
+
         self.rows(rows or [w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
         return self.w4(
-            'export STALWART_PASSWORD=recovery-pw-1; APPLY_POD_WAIT=30\n'
-            'prod_apply; echo "rc=$? VALUE=${VALUE:-}"'
+            'export STALWART_PASSWORD=recovery-pw-1; APPLY_POD_WAIT=%d\n'
+            'port_forward() { echo PF-OK; }\n'
+            'prod_apply; echo "rc=$? VALUE=${VALUE:-}"' % self.wait
         )
 
     def kube_log(self):
@@ -158,6 +165,28 @@ class InClusterApply(w4.Prod):
         self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
         out = self.apply([list(r) for r in self.timing()])
         self.assertIn('rc=0 VALUE=0', out)
+
+    def test_the_reads_after_the_apply_get_a_port_forward_also_on_a_rerun(self):
+        out = self.apply()
+        self.assertLess(out.index('apply: pod/'), out.index('PF-OK'))
+        out = self.apply([list(r) for r in self.timing()])
+        self.assertIn('the export is already applied after this pre-delete', out)
+        self.assertIn('PF-OK', out)
+        self.assertIn('rc=0', out)
+
+    def test_the_wait_bounds_the_attach_and_a_failure_keeps_the_pod_status(self):
+        import time
+
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK, 'attach_sleep': 20, 'phase': 'Running'})
+        t0 = time.monotonic()
+        out = self.apply(wait=2)
+        self.assertLess(time.monotonic() - t0, 15, out)
+        self.assertIn('still Running 2s after the export was sent', out)
+        self.assertIn('rc=1', out)
+        diag = (self.t / 'ev' / 'apply-pod-20261112T000000Z.txt').read_text()
+        self.assertIn('ImagePullBackOff', diag)
+        self.assertTrue((self.t / 'secret' / 'apply.log').exists())
+        self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
 
     def test_not_exactly_one_ready_pod_creates_nothing(self):
         self.state({'pods': [ready('10.0.0.5'), ready('10.0.0.6', 'b')], 'log': LOG_OK})

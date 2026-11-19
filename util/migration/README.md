@@ -299,11 +299,15 @@ the keying for the real hosts.
   (keys `STALWART_USER`, `STALWART_PASSWORD`) by reference, as the settings Job has it. W4 creates
   it with the manifest on stdin and `STALWART_URL=http://<pod IP of the one Ready recovery
   pod>:8080`, sends `$SECRET_DIR/export.json` through `kubectl attach -i` (stdin; the CLI runs
-  `apply --stdin`), waits `APPLY_POD_WAIT` (1800 s) for the pod to end, writes the timestamped
+  `apply --stdin`), waits at most `APPLY_POD_WAIT` (1800 s) from the send, attach included, for
+  the pod to end (on a timeout or a pod that is not Ready in 300 s it saves `kubectl describe pod`
+  to `$EVIDENCE_DIR/apply-pod-<TS>.txt` and the log first), writes the timestamped
   log to `$SECRET_DIR/apply.log` and a copy with addresses masked to
   `$EVIDENCE_DIR/apply-<TS>.log`, prints `apply: pod/<name> exit=<n> errors=<n> requests=<n>
   longest request <s>s` from the CLI's `--debug` request lines (`apply_requests.py`), and
-  deletes the pod, also on a failure or an interrupt. No Service changes. The path: the
+  deletes the pod, also on a failure or an interrupt. No Service changes. The reads after it
+  (admin account id, account ids) run from the workstation through the checked port-forward,
+  which the step opens after the apply. The path: the
   SecurityGroupPolicy `stalwart-config-applier` (tb-prod settings directory, PR 195) gives the
   pod the Stalwart server security group, which the Stalwart pods carry too (`stalwart-server`),
   and that group admits TCP 8080 from itself (rule `stalwart_mgmt` in platform-infrastructure

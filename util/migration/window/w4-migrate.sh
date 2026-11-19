@@ -586,14 +586,25 @@ incluster_apply() {
   return "$rc"
 }
 
+apply_diag() {
+  ( umask 077
+    "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" > "$S/apply.log" 2>&1 || true
+    "${KS[@]}" "${NS[@]}" describe pod "$1" > "$EVIDENCE_DIR/apply-pod-$TS.txt" 2>&1 || true
+    sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log" )
+  echo "pod/$1 status and events in $EVIDENCE_DIR/apply-pod-$TS.txt, its log in $S/apply.log"
+}
+
 incluster_apply_run() {
-  local name=$1 url=$2 code req longest arc=0 plan want
+  local name=$1 url=$2 code req longest arc=0 plan want end left
   sed -e "s|__NAME__|$name|" -e "s|__STALWART_URL__|$url|" "$MIG_DIR/apply-pod.yaml" | "${KS[@]}" "${NS[@]}" create -f - >/dev/null || { echo "could not create pod/$name"; return 1; }
-  "${KS[@]}" "${NS[@]}" wait --for=condition=Ready "pod/$name" --timeout=300s >/dev/null || { echo "pod/$name not Ready within 300s (image pull, scheduling or the security group of the pod)"; return 1; }
+  "${KS[@]}" "${NS[@]}" wait --for=condition=Ready "pod/$name" --timeout=300s >/dev/null || { echo "pod/$name not Ready within 300s (image pull, scheduling or the security group of the pod)"; apply_diag "$name"; return 1; }
   echo "pod/$name Ready; sending $(wc -c < "$S/export.json") bytes of export over stdin to $url"
   mark apply-start pod "$name"
-  "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?
-  until_ok "$APPLY_POD_WAIT" apply_pod_ended "$name" || { echo "pod/$name still $(apply_pod_phase "$name") after ${APPLY_POD_WAIT}s"; return 1; }
+  end=$(( $(date +%s) + APPLY_POD_WAIT ))
+  timeout "$APPLY_POD_WAIT" "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?
+  left=$(( end - $(date +%s) ))
+  [ "$left" -gt 0 ] || left=1
+  until_ok "$left" apply_pod_ended "$name" || { echo "pod/$name still $(apply_pod_phase "$name") ${APPLY_POD_WAIT}s after the export was sent"; apply_diag "$name"; return 1; }
   ( umask 077; "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$name" > "$S/apply.log" ) || { echo "could not read the log of pod/$name"; return 1; }
   sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log"
   code=$("${KS[@]}" "${NS[@]}" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')
@@ -608,15 +619,18 @@ incluster_apply_run() {
 }
 
 prod_apply() {
-  local a p s
+  local a p s done=0
   a=$(cut_line export-applied) p=$(cut_line pre-delete) s=$(cut_line apply-start)
-  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; return 0; fi
-  if [ "$APPLY" = 1 ] && [ -n "$s" ] && [ -n "$p" ] && [ "$s" -gt "$p" ]; then
+  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; done=1
+  elif [ "$APPLY" = 1 ] && [ -n "$s" ] && [ -n "$p" ] && [ "$s" -gt "$p" ]; then
     echo "an apply started after this pre-delete and did not finish (apply-start row): its earlier batches are committed, so a second apply would collide. Retry: revert the recovery-mode PR, then bash $0 --phase reset --apply --go '<words>' (about 20 to 25 minutes: revert sync, reset, guard, pre-delete, boot, 555 s apply)"
     return 1
   fi
-  incluster_apply || return 1
-  [ "$APPLY" = 0 ] || mark export-applied errors 0
+  if [ "$done" = 0 ]; then
+    incluster_apply || return 1
+    [ "$APPLY" = 0 ] || mark export-applied errors 0
+  fi
+  [ "$APPLY" = 0 ] || port_forward || { echo "no port-forward to Stalwart for the reads after the apply (admin account id, account ids)"; return 1; }
 }
 
 prod_recovery_hold() {
