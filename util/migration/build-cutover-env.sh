@@ -63,6 +63,12 @@ attempt_guard() {
   for v in $CARRY $WINDOW_CARRY; do
     [ -z "${!v:-}" ] || die "$v is set in this shell (a loaded env file of attempt $p?): a new attempt carries nothing; start a fresh shell and rerun"
   done
+  for v in EVIDENCE_DIR SECRET_DIR TIMING_TSV; do
+    case "${!v:-}/" in
+      /|*/attempt-"$CUTOVER_ATTEMPT"/*) ;;
+      *) die "$v=${!v} has no attempt-$CUTOVER_ATTEMPT part: attempt $CUTOVER_ATTEMPT would share the files of attempt $p; unset it or move it under attempt-$CUTOVER_ATTEMPT" ;;
+    esac
+  done
   PREV_IGNORED=1
   printf 'previous env file %s is attempt %s: nothing is carried from it into attempt %s\n' "$ENV_FILE" "$p" "$CUTOVER_ATTEMPT"
 }

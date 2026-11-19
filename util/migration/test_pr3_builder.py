@@ -521,6 +521,14 @@ class Attempts(Base):
         self.assertEqual(v['CUTOVER_ATTEMPT'], '1', out)
         self.assertEqual(v.get('FREIGHT'), 'f1', out)
 
+    def test_a_new_attempt_refuses_a_path_without_its_attempt_part(self):
+        self.build_ns()
+        shared = self.t / 'custom-evidence'
+        rc, out = self.build_ns(CUTOVER_ATTEMPT='2', EVIDENCE_DIR=str(shared))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('EVIDENCE_DIR=%s has no attempt-2 part' % shared, out)
+        self.assertEqual(self.values()['CUTOVER_ATTEMPT'], '1')
+
     def test_a_shell_value_of_the_old_attempt_refuses_a_new_one(self):
         self.build_ns()
         rc, out = self.build_ns(CUTOVER_ATTEMPT='2', FREIGHT='f1')

@@ -62,6 +62,14 @@ def last_rows(progress):
     return rows
 
 
+def replay(piece, batch, d):
+    bd = d if piece == 'buckets' else d / batch
+    for check in PIECES[piece]:
+        out = bd / f'check-{check[:-3]}.txt'
+        if out.exists():
+            shutil.copy(out, f'{OUT}/check-{piece}-{batch}-{check[:-3]}.txt')
+
+
 def run_batch(piece, batch, d, resume):
     bd = d if piece == 'buckets' else d / batch
     bd.mkdir(parents=True, exist_ok=True)
@@ -126,6 +134,7 @@ def main(argv):
     start, longest, failed_now = time.time(), 0.0, 0
     for i, b in enumerate(batches, 1):
         if rows.get(b) == 'pass':
+            replay(piece, b, d)
             continue
         used = time.time() - start
         if used + longest > budget or (longest == 0 and budget <= 0):
