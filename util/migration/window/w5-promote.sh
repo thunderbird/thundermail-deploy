@@ -10,7 +10,10 @@ PHASE=1
 [ "$APPLY" = 1 ] && [ -n "$GO" ] && PHASE=2
 PROMOTION=$EVIDENCE_DIR/promotion-configs-$TS.yaml
 PROMOTION_RESTORE=$EVIDENCE_DIR/promotion-configs-restore$SUF-$TS.yaml
+DROPPED_DOMAINS_ARG=()
+[ "$TARGET_ENV" != tb-prod ] || DROPPED_DOMAINS_ARG=(--dropped-domains "$S/domains-dropped.json")
 UNMIGRATED=("$PY" "$MIG_DIR/apply_unmigrated.py" --settings "$S/settings.json" --principals "$S/principals.json" --expect-hostname "$MAIL_HOST"
+  ${DROPPED_DOMAINS_ARG[@]+"${DROPPED_DOMAINS_ARG[@]}"}
   --skip WebHook --skip AllowedIp --skip MtaSts --skip MtaQueueQuota --skip Security --skip Calendar --skip AddressBook --skip Http)
 
 snap_settings() {
@@ -49,12 +52,12 @@ snap_settings() {
 }
 
 resolve_t6() {
-  local sha
+  local sha pr=${T6_PR:-${T6_PR_DEFAULT:-}}
   [ -z "${T6_SHA:-}" ] || return 0
-  [ -n "${T6_PR:-}" ] || { echo "T6_SHA and T6_PR are empty in $ENV_FILE"; return 1; }
-  sha=$(gh pr view "$T6_PR" -R thunderbird/thundermail-deploy --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
-  [ -n "$sha" ] || { echo "PR $T6_PR has no merge commit"; return 1; }
-  echo "T6_SHA from PR $T6_PR: $sha"
+  [ -n "$pr" ] || { echo "T6_SHA and T6_PR are empty in $ENV_FILE"; return 1; }
+  sha=$(gh pr view "$pr" -R thunderbird/thundermail-deploy --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
+  [ -n "$sha" ] || { echo "PR $pr has no merge commit"; return 1; }
+  if [ -n "${T6_PR:-}" ]; then echo "T6_SHA from PR $pr: $sha"; else echo "T6_SHA from PR $pr (T6_PR_DEFAULT of targets/$TARGET_ENV.sh): $sha"; fi
   T6_SHA=$sha
   setenv T6_SHA "$sha"
 }

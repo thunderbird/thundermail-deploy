@@ -59,6 +59,9 @@ elif svc == 'ssm' and op == 'get-command-invocation':
     assert val('--command-id') == st['sent']['cid']
     seq = st['inv'][i]
     r = seq.pop(0) if len(seq) > 1 else seq[0]
+    if r == 'ok':
+        c = st['sent']['params']['commands'][0]
+        r = ['Success', 0, 'active\n' if c.endswith('systemctl is-active thundermail') else '']
     if r == 'missing':
         json.dump(st, open(os.environ['AWS_STATE'], 'w'))
         sys.stderr.write('InvocationDoesNotExist\n'); sys.exit(254)
@@ -93,12 +96,16 @@ NODES = {
 }
 MAIL = sorted(i for i, (_, s) in NODES.items() if s != 'management')
 ALL = sorted(NODES)
-OK = ['Success', 0, '']
+OK = 'ok'
 STOPPED = ['Success', 0, 'inactive\ndisabled\n']
 RUNNING = ['Success', 0, 'active\nenabled\n']
+CUT = ['cut-ecs', '2026-11-19T04:00:00Z', '2026-11-19T04:00:00Z', 'tasks', '0']
+DRAINED = ['queue-drain', '2026-11-19T04:40:00Z', '2026-11-19T04:40:00Z', 'queued', '0']
+READ_DONE = ['w4-read-done', '2026-11-19T04:41:00Z', '2026-11-19T04:41:00Z', 'export', 'x']
+START = 'systemctl enable --now thundermail; sleep 5; systemctl is-active thundermail'
 
 
-class LegacyStalwart(unittest.TestCase):
+class Sandbox(unittest.TestCase):
     def setUp(self):
         self.t = pathlib.Path(tempfile.mkdtemp(prefix='.test-legacy-stalwart-', dir=HERE))
         self.addCleanup(shutil.rmtree, self.t, True)
@@ -111,7 +118,8 @@ class LegacyStalwart(unittest.TestCase):
         shutil.copytree(
             HERE / 'verify', mig / 'verify', ignore=shutil.ignore_patterns('*.py', '__pycache__')
         )
-        shutil.copy(HERE / 'window' / 'legacy-stalwart.sh', mig / 'window')
+        for f in ('legacy-stalwart.sh', 'gate.sh'):
+            shutil.copy(HERE / 'window' / f, mig / 'window')
         self.mig = mig
         self.fill_placeholders()
         self.bin = self.t / 'bin'
@@ -188,6 +196,15 @@ class LegacyStalwart(unittest.TestCase):
     def tsv_text(self):
         return self.tsv.read_text() if self.tsv.exists() else ''
 
+    def stop_rows(self):
+        return [
+            x.split('\t')
+            for x in self.tsv_text().splitlines()
+            if x.startswith('stop-legacy-stalwart\t')
+        ]
+
+
+class LegacyStalwart(Sandbox):
     def test_refuses_other_target_and_bad_usage(self):
         rc, out = self.run_tool('read', target='tb-stage')
         self.assertEqual(rc, 64, out)
@@ -273,9 +290,9 @@ class LegacyStalwart(unittest.TestCase):
         self.assertEqual(rc, 0, out)
 
     def test_start_and_stop_commands_on_all_six(self):
-        self.rows(['cut-ecs', 'a', 'b', '', ''], ['queue-drain', 'a', 'b', 'queued', '0'])
+        self.rows(CUT, DRAINED, READ_DONE)
         for mode, cmd in (
-            ('start', 'systemctl enable --now thundermail'),
+            ('start', START),
             ('stop', 'systemctl disable --now thundermail'),
         ):
             rc, out = self.run_tool(mode, '--apply')
@@ -286,58 +303,77 @@ class LegacyStalwart(unittest.TestCase):
             self.assertIn('legacy-stalwart %s apply: done (6 node(s))' % mode, out)
         self.assertNotIn('stop-legacy-stalwart', self.tsv_text())
 
-    def test_stop_gate_needs_a_zero_queue_drain_row_of_this_cut(self):
-        cut = ['cut-ecs', 'a', 'b', '', '']
+    def test_stop_gate_is_window_gate_sh_stop_legacy(self):
+        q3 = ['queue-drain', 'a', 'b', 'queued', '3']
+        w4stop = ['stop-W4', 'a', 'b', 'reason', 'x']
+        rerun = ['w4-read-start', 'a', 'b', 'export', 'x']
         refused = (
-            (),
-            (cut,),
-            (cut, ['queue-drain', 'a', 'b', 'queued', '3']),
-            (cut, ['queue-drain', 'a', 'b', 'queued', '0'], ['stop-W4', 'a', 'b', 'reason', 'x']),
-            (['queue-drain', 'a', 'b', 'queued', '0'], cut),
-            (cut, ['dryrun-queue-drain', 'a', 'b', 'queued', '0']),
-            (
-                cut,
-                ['queue-drain', 'a', 'b', 'queued', '0'],
-                ['queue-drain', 'a', 'b', 'queued', '2'],
-            ),
+            ((), 'no timing file'),
+            ((CUT,), 'no w4-read-done row after the last cut-ecs row'),
+            ((DRAINED,), 'no cut-ecs row'),
+            ((DRAINED, READ_DONE), 'no cut-ecs row'),
+            ((CUT, DRAINED), 'no w4-read-done row'),
+            ((CUT, q3, READ_DONE), 'the last queue-drain row has value 3, not 0'),
+            ((DRAINED, READ_DONE, CUT), 'no w4-read-done row'),
+            ((CUT, READ_DONE, DRAINED), 'no queue-drain row before the w4-read-done row'),
+            ((CUT, DRAINED, READ_DONE, rerun, w4stop), 'a read phase started at'),
         )
-        for rows in refused:
-            self.rows(*rows)
+        for rows, why in refused:
+            if rows:
+                self.rows(*rows)
+            elif self.tsv.exists():
+                self.tsv.unlink()
             rc, out = self.run_tool('stop', '--apply')
             self.assertEqual(rc, 2, (rows, out))
-            self.assertIn('NEED  the last queue-drain row of this cut', out)
+            self.assertIn('gate: WAIT  stop-legacy: ', out)
+            self.assertIn(why, out)
+            self.assertIn('NEED  window/gate.sh stop-legacy does not pass', out)
             self.assertIsNone(self.sent(), rows)
             rc, out = self.run_tool('stop')
             self.assertEqual(rc, 2, (rows, out))
             self.assertIn('legacy-stalwart stop dry-run: 1 NEED item(s) above', out)
-        self.rows(
-            cut,
-            ['queue-drain', 'a', 'b', 'queued', '3'],
-            ['stop-W4', 'a', 'b', 'reason', 'x'],
-            ['queue-drain', 'a', 'b', 'queued', '0'],
-        )
+        self.rows(CUT, DRAINED, READ_DONE, w4stop)
         rc, out = self.run_tool('stop', '--apply')
         self.assertEqual(rc, 0, out)
-        self.assertIn('gate: the last queue-drain row of this cut reads 0', out)
+        self.assertIn(
+            'gate: GO    stop-legacy: queue-drain 0 at 2026-11-19T04:40:00Z, w4-read-done at '
+            '2026-11-19T04:41:00Z; legacy Stalwart may be stopped',
+            out,
+        )
         self.assertEqual(sorted(self.sent()['ids']), ALL)
 
+    def test_stop_before_the_window_sends_nothing(self):
+        self.rows(DRAINED)
+        rc, out = self.run_tool('stop', '--apply')
+        self.assertEqual(rc, 2, out)
+        self.assertIsNone(self.sent())
+        self.assertEqual(self.calls('send-command'), [])
+
     def test_read_writes_the_stop_row_only_when_all_six_are_stopped(self):
+        self.rows(CUT, DRAINED, READ_DONE)
         rc, out = self.run_tool('read', '--apply')
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 3, out)
         self.assertIn('summary: /=6', out)
         self.assertIn('no stop-legacy-stalwart row', out)
         self.state({}, inv={i: [STOPPED] for i in ALL[:5]} | {ALL[5]: [RUNNING]})
         rc, out = self.run_tool('read', '--apply')
-        self.assertEqual(rc, 0, out)
-        self.assertIn('1 of 6 node(s) not inactive and disabled: no stop-legacy-stalwart row', out)
-        self.assertEqual(self.tsv_text(), '')
+        self.assertEqual(rc, 3, out)
+        self.assertIn(
+            '1 of 6 node(s) not inactive (or failed) and disabled: no stop-legacy-stalwart row', out
+        )
+        self.assertIn(
+            'legacy-stalwart read apply: mixed, the 6 node(s) are neither all stopped nor all '
+            'active and enabled',
+            out,
+        )
+        self.assertEqual(self.stop_rows(), [])
         self.state(
             {},
             inv={i: [STOPPED] for i in ALL[:5]} | {ALL[5]: [['Success', 0, 'inactive\nenabled\n']]},
         )
         rc, out = self.run_tool('read', '--apply')
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.tsv_text(), '')
+        self.assertEqual(rc, 3, out)
+        self.assertEqual(self.stop_rows(), [])
         self.state({}, inv={i: [STOPPED] for i in ALL})
         rc, out = self.run_tool('read', '--apply')
         self.assertEqual(rc, 0, out)
@@ -347,18 +383,56 @@ class LegacyStalwart(unittest.TestCase):
             s['params']['commands'],
             ['systemctl is-active thundermail; systemctl is-enabled thundermail; exit 0'],
         )
+        self.assertIn('gate: GO    stop-legacy: ', out)
         self.assertIn(
             'node mailstrom-prod-stalwart-61 i-0000000000000a061 Success rc=0 inactive disabled',
             out,
         )
         self.assertIn('summary: inactive/disabled=6', out)
-        self.assertIn('all 6 nodes inactive and disabled: stop-legacy-stalwart row written', out)
-        rows = [ln.split('\t') for ln in self.tsv_text().splitlines()]
+        self.assertIn(
+            'all 6 nodes inactive (or failed) and disabled: stop-legacy-stalwart row written', out
+        )
+        self.assertIn('legacy-stalwart read apply: done (6 node(s))', out)
+        rows = self.stop_rows()
         self.assertEqual(len(rows), 1, rows)
-        self.assertEqual(rows[0][0], 'stop-legacy-stalwart')
         self.assertEqual(rows[0][3:], ['nodes', '6'])
         for t in rows[0][1:3]:
             self.assertRegex(t, r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$')
+
+    def test_read_counts_a_failed_disabled_unit_as_stopped(self):
+        self.rows(CUT, DRAINED, READ_DONE)
+        failed = ['Success', 0, 'failed\ndisabled\n']
+        self.state({}, inv={i: [STOPPED] for i in ALL[:5]} | {ALL[5]: [failed]})
+        rc, out = self.run_tool('read', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('summary: failed/disabled=1 inactive/disabled=5', out)
+        self.assertEqual(len(self.stop_rows()), 1)
+
+    def test_read_writes_no_row_while_the_gate_waits(self):
+        self.state({}, inv={i: [STOPPED] for i in ALL})
+        for rows in ((), (CUT,), (CUT, DRAINED), (DRAINED, READ_DONE)):
+            self.rows(*rows)
+            rc, out = self.run_tool('read', '--apply')
+            self.assertEqual(rc, 0, (rows, out))
+            self.assertIn('gate: WAIT  stop-legacy: ', out)
+            self.assertIn(
+                'all 6 nodes inactive (or failed) and disabled, but window/gate.sh stop-legacy '
+                'waits: no stop-legacy-stalwart row',
+                out,
+            )
+            self.assertEqual(self.stop_rows(), [], rows)
+
+    def test_read_exit_code_tells_mixed_from_uniform(self):
+        for inv, rc_want in (
+            ({i: [RUNNING] for i in ALL}, 0),
+            ({i: [STOPPED] for i in ALL}, 0),
+            ({i: [RUNNING] for i in ALL[:5]} | {ALL[5]: [['Success', 0, 'failed\nenabled\n']]}, 3),
+            ({i: [RUNNING] for i in ALL[:5]} | {ALL[5]: [STOPPED]}, 3),
+        ):
+            self.state({}, inv=inv)
+            rc, out = self.run_tool('read', '--apply')
+            self.assertEqual(rc, rc_want, (inv, out))
+        self.assertIn('summary: active/enabled=5 inactive/disabled=1', out)
 
     def test_read_prints_active_enabled_for_the_rollback_check(self):
         self.state({}, inv={i: [RUNNING] for i in ALL})
@@ -384,6 +458,7 @@ class LegacyStalwart(unittest.TestCase):
             )
             self.assertEqual(self.tsv_text(), '', inv)
         self.assertIn('node mailstrom-prod-stalwart-12 i-0000000000000a012 no-answer rc=-', out)
+        self.rows(CUT, DRAINED, READ_DONE)
         self.state(
             {},
             inv={i: [STOPPED] for i in ALL}
@@ -395,11 +470,12 @@ class LegacyStalwart(unittest.TestCase):
 
     def test_read_with_extra_output_writes_no_row(self):
         extra = ['Success', 0, 'inactive\ndisabled\nwarning\n']
+        self.rows(CUT, DRAINED, READ_DONE)
         self.state({}, inv={i: [STOPPED] for i in ALL} | {ALL[3]: [extra]})
         rc, out = self.run_tool('read', '--apply')
-        self.assertEqual(rc, 0, out)
-        self.assertIn('1 of 6 node(s) not inactive and disabled', out)
-        self.assertEqual(self.tsv_text(), '')
+        self.assertEqual(rc, 3, out)
+        self.assertIn('1 of 6 node(s) not inactive (or failed) and disabled', out)
+        self.assertEqual(self.stop_rows(), [])
 
     def test_apply_prints_the_invocation_read(self):
         self.state({'cid': '01234567-89ab-cdef-0123-456789abcdef'})
@@ -469,6 +545,79 @@ class LegacyStalwart(unittest.TestCase):
         rc, out = self.run_tool('restart', '--apply')
         self.assertEqual(rc, 2, out)
 
+    def test_start_sends_to_the_reachable_nodes_then_stops_naming_the_rest(self):
+        lost = ALL[1]
+        for st, why in (
+            (
+                {'nodes': {lost: {'ping': 'ConnectionLost'}}},
+                'SSM PingStatus ConnectionLost, not Online',
+            ),
+            ({'nodes': {lost: {'ping': 'absent'}}}, 'SSM PingStatus absent, not Online'),
+            (
+                {'nodes': {lost: {'state': 'stopped', 'ping': 'absent'}}},
+                'instance state stopped, not running; SSM PingStatus absent, not Online',
+            ),
+        ):
+            self.state(st)
+            rc, out = self.run_tool('start')
+            self.assertEqual(rc, 0, out)
+            self.assertIn(
+                'node mailstrom-prod-stalwart-11 %s mail unreachable (%s)' % (lost, why), out
+            )
+            self.assertIn(
+                'not reachable: mailstrom-prod-stalwart-11 %s; --apply sends to the other 5 '
+                'node(s), then exits 1 naming these' % lost,
+                out,
+            )
+            self.assertIsNone(self.sent())
+            rc, out = self.run_tool('start', '--apply')
+            self.assertEqual(rc, 1, (st, out))
+            self.assertEqual(sorted(self.sent()['ids']), [i for i in ALL if i != lost])
+            self.assertEqual(self.sent()['params']['commands'], [START])
+            self.assertEqual(
+                len(re.findall(r'(?m)^node \S+ \S+ Success rc=0 active$', out)), 5, out
+            )
+            self.assertIn('thundermail active on all 5 node(s) sent to', out)
+            self.assertIn(
+                'STOP legacy-stalwart start (apply): not sent to 1 of 6 node(s) SSM cannot reach: '
+                'mailstrom-prod-stalwart-11 %s; thundermail stays disabled there and a reboot does '
+                'not start it: run systemctl enable --now thundermail on each by other means'
+                % lost,
+                out,
+            )
+            self.assertNotIn('apply: done', out)
+            row = [x.split('\t') for x in self.tsv_text().splitlines()][-1]
+            self.assertEqual((row[0], row[3:]), ('start-legacy-stalwart', ['nodes', '5']))
+
+    def test_start_refuses_when_ssm_reaches_no_node(self):
+        self.state({'nodes': {i: {'ping': 'ConnectionLost'} for i in ALL}})
+        rc, out = self.run_tool('start', '--apply')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STOP legacy-stalwart start (apply): SSM reaches none of the 6 nodes', out)
+        self.assertIsNone(self.sent())
+
+    def test_start_exit_code_proves_every_node_active(self):
+        cases = (
+            {ALL[3]: [['Failed', 3, 'inactive\n']]},
+            {ALL[3]: [['Failed', 3, 'failed\n']]},
+            {ALL[3]: [['Success', 0, 'activating\n']]},
+            {ALL[3]: [['Success', 0, '']]},
+        )
+        for inv in cases:
+            self.state({}, inv=inv)
+            rc, out = self.run_tool('start', '--apply')
+            self.assertEqual(rc, 1, (inv, out))
+            self.assertIn(
+                'STOP legacy-stalwart start (apply): 1 of 6 node(s) failed or did not answer', out
+            )
+            self.assertNotIn('thundermail active on all', out)
+        self.state({})
+        rc, out = self.run_tool('start', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(re.findall(r'(?m)^node \S+ \S+ Success rc=0 active$', out)), 6, out)
+        self.assertIn('thundermail active on all 6 node(s) sent to', out)
+        self.assertIn('legacy-stalwart start apply: done (6 node(s))', out)
+
     def test_send_failure_stops(self):
         self.state({'send_fail': True})
         rc, out = self.run_tool('start', '--apply')
@@ -492,14 +641,15 @@ class LegacyStalwart(unittest.TestCase):
             ({'session': False}, 'no AWS session for mzla-legacy'),
         )
         for st, msg in cases:
-            self.state(st)
-            rc, out = self.run_tool('start', '--apply')
-            self.assertEqual(rc, 2, (st, out))
-            self.assertIn('NEED  ', out)
-            self.assertIn(msg, out)
-            self.assertIsNone(self.sent(), st)
-        self.state({})
-        rc, out = self.run_tool('start', '--apply')
+            for mode in ('read', 'stop', 'restart'):
+                self.state(st)
+                rc, out = self.run_tool(mode, '--apply')
+                self.assertEqual(rc, 2, (mode, st, out))
+                self.assertIn('NEED  ', out)
+                self.assertIn(msg, out)
+                self.assertIsNone(self.sent(), (mode, st))
+        self.state({}, inv={i: [RUNNING] for i in ALL})
+        rc, out = self.run_tool('read', '--apply')
         self.assertEqual(rc, 0, out)
 
     def test_needs_six_node_ids_from_the_env_file(self):
@@ -515,6 +665,7 @@ class LegacyStalwart(unittest.TestCase):
             self.assertIn('NEED  LEGACY_STALWART_NODE_IDS', out)
             self.assertEqual(self.calls(), [])
         self.envfile()
+        self.state({}, inv={i: [RUNNING] for i in ALL})
         rc, out = self.run_tool('read', '--apply')
         self.assertEqual(rc, 0, out)
 

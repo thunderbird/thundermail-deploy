@@ -23,7 +23,7 @@ POLL=${LEGACY_SSM_POLL:-5}
 case $MODE in
   restart) CMD='systemctl restart thundermail' ;;
   stop) CMD='systemctl disable --now thundermail' ;;
-  start) CMD='systemctl enable --now thundermail' ;;
+  start) CMD='systemctl enable --now thundermail; sleep 5; systemctl is-active thundermail' ;;
   read) CMD='systemctl is-active thundermail; systemctl is-enabled thundermail; exit 0' ;;
 esac
 LOG=$EVIDENCE_DIR/legacy-stalwart-$MODE-$(mode)-$TS.log
@@ -38,6 +38,8 @@ end_needs() {
   exit 2
 }
 q() { printf '%q ' "$@" | sed 's/ $//'; }
+GATE_SH=$(dirname "${BASH_SOURCE[0]}")/gate.sh
+gate() { TARGET_ENV=$TARGET_ENV TIMING_TSV=$TIMING_TSV bash "$GATE_SH" stop-legacy 2>&1; }
 
 printf 'legacy-stalwart %s (%s): TARGET_ENV=%s profile=%s region=%s\n' "$MODE" "$(mode)" "$TARGET_ENV" "$LEGACY_AWS_PROFILE" "$AWS_REGION"
 printf 'command on each node: %s\n' "$CMD"
@@ -66,35 +68,50 @@ desc=$(aws_legacy ec2 describe-instances --instance-ids "${IDS[@]}" --query "Res
 printf '  read: %s\n' "$(q aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" ssm describe-instance-information --filters "Key=InstanceIds,Values=$(IFS=,; echo "${IDS[*]}")" --query 'InstanceInformationList[].[InstanceId,PingStatus]' --output text)"
 ping=$(aws_legacy ssm describe-instance-information --filters "Key=InstanceIds,Values=$(IFS=,; echo "${IDS[*]}")" --query 'InstanceInformationList[].[InstanceId,PingStatus]' --output text 2>&1) || { need_line "ssm describe-instance-information failed: $(tail -1 <<<"$ping")"; end_needs; }
 
-declare -A NAME ROLE
+declare -A NAME ROLE WHY
 TARGETS=()
+UNREACHED=()
 for i in "${IDS[@]}"; do
   line=$(awk -F'\t' -v i="$i" '$1 == i' <<<"$desc")
   [ "$(grep -c . <<<"$line")" = 1 ] || { need_line "$i: ec2 describe-instances returned $(grep -c . <<<"$line") row(s) for it"; continue; }
   IFS=$'\t' read -r _ state name svc <<<"$line"
   case $name in $LEGACY_NODE_NAME_FILTER) ;; *) need_line "$i: Name tag '$name' does not match $LEGACY_NODE_NAME_FILTER"; continue ;; esac
-  [ "$state" = running ] || need_line "$name $i: instance state $state, not running"
   [ -n "$svc" ] && [ "$svc" != None ] || { need_line "$name $i: no $TAG tag"; continue; }
   p=$(awk -F'\t' -v i="$i" '$1 == i {print $2}' <<<"$ping")
-  [ "$p" = Online ] || need_line "$name $i: SSM PingStatus ${p:-absent}, not Online"
+  why=""
+  [ "$state" = running ] || why="instance state $state, not running"
+  [ "$p" = Online ] || why="${why:+$why; }SSM PingStatus ${p:-absent}, not Online"
   NAME[$i]=$name
   ROLE[$i]=$([ "$svc" = management ] && echo management || echo mail)
+  if [ -n "$why" ]; then
+    if [ "$MODE" = start ]; then UNREACHED+=("$i"); WHY[$i]=$why; else need_line "$name $i: $why"; fi
+    continue
+  fi
   if [ "$MODE" != restart ] || [ "${ROLE[$i]}" = mail ]; then TARGETS+=("$i"); fi
 done
 end_needs
 for i in "${IDS[@]}"; do printf '%s\n' "${NAME[$i]} $i ${ROLE[$i]}"; done | sort | while read -r n i r; do
   t=skip; for x in "${TARGETS[@]}"; do [ "$x" != "$i" ] || t=target; done
+  [ -z "${WHY[$i]:-}" ] || t="unreachable (${WHY[$i]})"
   printf 'node %s %s %s %s\n' "$n" "$i" "$r" "$t"
 done
+UNSENT=""
+for i in "${UNREACHED[@]+"${UNREACHED[@]}"}"; do UNSENT="$UNSENT, ${NAME[$i]} $i"; done
+UNSENT=${UNSENT#, }
+[ "$MODE" != start ] || [ "${#TARGETS[@]}" -gt 0 ] || halt "SSM reaches none of the ${#IDS[@]} nodes: nothing sent"
 [ "${#TARGETS[@]}" -gt 0 ] || halt "no node carries mail ($TAG other than management)"
 
 if [ "$MODE" = restart ] && [ -n "$(awk -F'\t' '$1 == "cut-ecs" || $1 == "start-legacy-stalwart" {v = ""} $1 == "stop-legacy-stalwart" {v = $0} END {print v}' "$TIMING_TSV" 2>/dev/null)" ]; then
   need_line "a stop-legacy-stalwart row follows the last cut-ecs row in $TIMING_TSV: restart would start the stopped nodes; start is the Rollback mode"
 fi
-if [ "$MODE" = stop ]; then
-  qd=$(awk -F'\t' '$1 == "cut-ecs" {v = ""} $1 == "queue-drain" {v = $5} $1 == "stop-W4" {v = "stop"} END {print v}' "$TIMING_TSV" 2>/dev/null || true)
-  if [ "$qd" = 0 ]; then echo "gate: the last queue-drain row of this cut reads 0 in $TIMING_TSV"
-  else need_line "the last queue-drain row of this cut in $TIMING_TSV reads '${qd:-<none>}', not 0 (a stop-W4 row after it reads 'stop'): run window/w4-migrate.sh --phase read --apply until it passes (W 4.2)"; fi
+GATE_OK=0
+if [ "$MODE" = stop ] || [ "$MODE" = read ]; then
+  printf '  + bash %s stop-legacy\n' "$GATE_SH"
+  if g=$(gate); then GATE_OK=1; printf 'gate: %s\n' "$g"; else printf 'gate: %s\n' "$g"; fi
+  if [ "$MODE" = stop ] && [ "$GATE_OK" != 1 ]; then
+    need_line "window/gate.sh stop-legacy does not pass: stop legacy Stalwart only after W 4.2 (a queue-drain 0 row, then a w4-read-done row, after the last cut-ecs row)"
+  fi
+  if [ "$MODE" = read ] && [ "$GATE_OK" != 1 ]; then echo "the read writes no stop-legacy-stalwart row while window/gate.sh stop-legacy waits"; fi
 fi
 
 PARAMS=$(jq -cn --arg c "$CMD" '{commands: [$c], executionTimeout: ["300"]}')
@@ -102,7 +119,8 @@ SEND=(ssm send-command --document-name AWS-RunShellScript --instance-ids "${TARG
 if [ "$APPLY" != 1 ]; then
   printf '  + %s\n' "$(q aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" "${SEND[@]}")"
   printf '  + %s   (each of the %d node(s), every %s s, up to %s s)\n' "$(q aws --profile "$LEGACY_AWS_PROFILE" --region "$AWS_REGION" ssm get-command-invocation --command-id '<CommandId>' --instance-id '<node>' --output json)" "${#TARGETS[@]}" "$POLL" "$WAIT"
-  [ "$MODE" != read ] || printf '  + append row stop-legacy-stalwart <sent> <read> nodes %d to %s, only when all %d nodes read inactive and disabled\n' "${#IDS[@]}" "$TIMING_TSV" "${#IDS[@]}"
+  [ "$MODE" != read ] || printf '  + append row stop-legacy-stalwart <sent> <read> nodes %d to %s, only when the gate passes and all %d nodes read inactive (or failed) and disabled\n' "${#IDS[@]}" "$TIMING_TSV" "${#IDS[@]}"
+  [ -z "$UNSENT" ] || printf 'not reachable: %s; --apply sends to the other %d node(s), then exits 1 naming these\n' "$UNSENT" "${#TARGETS[@]}"
   end_needs
   printf 'legacy-stalwart %s dry-run: done (%d node(s))\n' "$MODE" "${#TARGETS[@]}"
   exit 0
@@ -145,18 +163,30 @@ LINES=$(for i in "${TARGETS[@]}"; do
 done | sort)
 printf '%s\n' "$LINES" | sed 's/ *$//'
 for i in "${TARGETS[@]}"; do [ -z "${ERR[$i]:-}" ] || printf 'stderr %s %s: %s\n' "${NAME[$i]}" "$i" "${ERR[$i]}"; done
-fails=$(grep -vc '^node [^ ]* [^ ]* Success ' <<<"$LINES" || true)
-[ "$fails" = 0 ] || halt "$fails of ${#TARGETS[@]} node(s) failed or did not answer within $WAIT s (command id $cid)"
+fails=$(awk -v m="$MODE" '$4 != "Success" || (m == "start" && $NF != "active")' <<<"$LINES" | grep -c . || true)
+msg=""
+[ "$fails" = 0 ] || msg="$fails of ${#TARGETS[@]} node(s) failed or did not answer within $WAIT s (command id $cid)"
+[ "$MODE" != start ] || [ "$fails" != 0 ] || echo "thundermail active on all ${#TARGETS[@]} node(s) sent to"
+[ -z "$UNSENT" ] || msg="${msg:+$msg; }not sent to ${#UNREACHED[@]} of ${#IDS[@]} node(s) SSM cannot reach: $UNSENT; thundermail stays disabled there and a reboot does not start it: run systemctl enable --now thundermail on each by other means"
+[ -z "$msg" ] || halt "$msg"
 
 if [ "$MODE" = read ]; then
   DONE=$(date -u +%FT%TZ)
-  bad=$(awk '$5 != "rc=0" || $6 != "inactive" || $7 != "disabled" || NF != 7' <<<"$LINES" | grep -c . || true)
+  bad=$(awk '$5 != "rc=0" || ($6 != "inactive" && $6 != "failed") || $7 != "disabled" || NF != 7' <<<"$LINES" | grep -c . || true)
+  up=$(awk '$5 != "rc=0" || $6 != "active" || $7 != "enabled" || NF != 7' <<<"$LINES" | grep -c . || true)
   printf 'summary:'; awk '{print $6 "/" $7}' <<<"$LINES" | sort | uniq -c | awk '{printf " %s=%s", $2, $1}'; printf '\n'
-  if [ "$bad" = 0 ] && [ "${#TARGETS[@]}" = "${#IDS[@]}" ]; then
+  if [ "$bad" = 0 ] && [ "$GATE_OK" = 1 ]; then
     printf 'stop-legacy-stalwart\t%s\t%s\tnodes\t%d\n' "$SENT" "$DONE" "${#IDS[@]}" >> "$TIMING_TSV"
-    echo "all ${#IDS[@]} nodes inactive and disabled: stop-legacy-stalwart row written to $TIMING_TSV"
+    echo "all ${#IDS[@]} nodes inactive (or failed) and disabled: stop-legacy-stalwart row written to $TIMING_TSV"
+  elif [ "$bad" = 0 ]; then
+    echo "all ${#IDS[@]} nodes inactive (or failed) and disabled, but window/gate.sh stop-legacy waits: no stop-legacy-stalwart row"
   else
-    echo "$bad of ${#IDS[@]} node(s) not inactive and disabled: no stop-legacy-stalwart row"
+    echo "$bad of ${#IDS[@]} node(s) not inactive (or failed) and disabled: no stop-legacy-stalwart row"
+  fi
+  if [ "$bad" != 0 ] && [ "$up" != 0 ]; then
+    printf 'legacy-stalwart read apply: mixed, the %d node(s) are neither all stopped nor all active and enabled\n' "${#IDS[@]}"
+    printf 'evidence: %s\n' "$LOG"
+    exit 3
   fi
 fi
 printf 'legacy-stalwart %s apply: done (%d node(s))\n' "$MODE" "${#TARGETS[@]}"

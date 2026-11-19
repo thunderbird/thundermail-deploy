@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
 """02: directory. Accounts, ids, names, addresses, aliases, catch-alls and quota limits: source dump vs target."""
+import json
+import os
+
 from common import principals, x_all, dec, Report, short, norm_addr, norm_domain, strings, unwrap_int, unwrap_str
 
 r = Report("02 directory")
+dropped, dkim_kept = set(), None
+if os.environ.get("DROPPED_DOMAINS"):
+    try:
+        with open(os.environ["DROPPED_DOMAINS"], encoding="utf-8") as fh:
+            listed = json.load(fh)
+        dropped = {norm_domain(x) for x in listed["domains"]}
+        dkim_kept = int(listed["dkim_kept"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        r.fail(f"dropped-domain list {os.environ['DROPPED_DOMAINS']} unreadable ({type(e).__name__}): run the domains step of w4-migrate.sh")
+    else:
+        r.ok(f"domains dropped before the apply (domain_fix.py), left out of the source set: {len(listed['domains'])}")
 src, items = principals()
 doms = {d["id"]: d for d in x_all("Domain")}
 dname = {i: norm_domain(d["name"]) for i, d in doms.items()}
@@ -40,6 +54,8 @@ for lid, l in src.items():
     want = set(emails)
     primary = next((e for e in emails if not e.startswith("@")), lname)
     for miss in want - addresses(a):
+        if miss.startswith("@") and norm_domain(miss[1:]) in dropped:
+            continue
         if miss.startswith("@"):
             if catch_all.get(miss[1:]) != primary:
                 missing_catchall.append(f"{short(lname)} {miss} -> {catch_all.get(miss[1:])!r}")
@@ -54,8 +70,14 @@ r.check(quotas == 0, f"quota limits mismatched: {quotas}")
 
 src_domains = {norm_domain(unwrap_str(x.get("name"))) for x in items if unwrap_str(x.get("type")) == "domain"}
 src_domains |= {norm_addr(e).rpartition("@")[2] for l in src.values() for e in strings(l.get("emails")) if "@" in e}
+src_domains -= dropped
 r.check(src_domains <= set(dname.values()), f"domains used on source present on target: missing {sorted(src_domains - set(dname.values()))}")
 dk = x_all("DkimSignature")
+if dkim_kept is not None:
+    if len(dk) > dkim_kept:
+        r.warn(f"DkimSignature count: target {len(dk)} is above the export after the drop ({dkim_kept})")
+    else:
+        r.check(len(dk) == dkim_kept, f"DkimSignature count: target {len(dk)}, export after the drop {dkim_kept}")
 no_dkim = sorted(set(dname.values()) - {dname.get(d.get("domainId")) for d in dk})
 r.check(not no_dkim, f"every domain has a DKIM key ({len(dk)} keys); without: {no_dkim}", warn_only=True)
 r.done()

@@ -17,6 +17,7 @@ KARGO_STAGE_ACCOUNTS=tb-prod
 KARGO_PROJECT_CONFIGS=tb-stalwart-configs
 KARGO_STAGE_CONFIGS=deploy-thundermail-tb-prod01
 KARGO_WAREHOUSE_CONFIGS=deploy-thundermail-tb-prod01-git
+T6_PR_DEFAULT=195
 MAIL_ZONE=thundermail.com
 TBPRO_ZONE=tb.pro
 MAIL_HOST=mail.thundermail.com

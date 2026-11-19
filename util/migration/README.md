@@ -268,7 +268,7 @@ the keying for the real hosts.
   reserved names 0.16 accepts), and both entries of a name present in Unicode and in punycode
   (compared after NFKC and punycode, as 0.16 reads them). It prints one
   `warning:` line per dropped Domain and DkimSignature, and the step reports their count without
-  stopping. A dropped Domain that an account, list or setting still uses stops it.
+  stopping. A dropped Domain that an account, list or setting of the export still uses stops it, and so does an address of `principals.json` on a dropped Domain. A catch-all there (`@<domain>`, which `convert` leaves out and W5 puts back) is a `warning:` line instead: `apply_unmigrated.py --dropped-domains` (W5 on tb-prod) skips it and prints the count. `domain_fix.py --dropped-list` writes the list that `verify/02_directory.py` reads (`DROPPED_DOMAINS`). Names are compared in the punycode form 0.16 stores (`shapes.norm_domain`).
   `dup_check.py` reports the same two kinds as `class Domain:idna-duplicate` and
   `class Domain:refused-by-0.16` lines, and the names convert drops itself as
   `class Domain:dropped-by-convert`, without changing its exit code. It writes `$SECRET_DIR` and the
@@ -278,8 +278,10 @@ the keying for the real hosts.
   row, or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
   `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
-  `STALWART_SOURCE_PG_*` of the env file. It then checks that both branches are `ready`, later
-  than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
+  `STALWART_SOURCE_PG_*` of the env file, created at the `parent_lsn` the reset returned (row
+  `reset-lsn`), so a `production` that moves between the two calls does not stop a good reset;
+  the reset proof fails when `parent_lsn` did not change. It then checks that both branches are
+  `ready`, later than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
   credentials log in on their branch, and the production endpoint answers `password
   authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
@@ -288,18 +290,79 @@ the keying for the real hosts.
   applies the export. A second reset needs `--go`. `--phase boot` resumes an expired wait
   without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
   restore or blob step.
-- W 4.3 records the stop of legacy Stalwart, once no process is left on the six nodes, with
-  `t=$(date -u +%FT%TZ); printf 'stop-legacy-stalwart\t%s\t%s\tnodes\t6\n' "$t" "$t" >> "$TIMING_TSV"`;
-  the reset phase and `blob_compare.py` read that row.
+- `window/legacy-stalwart.sh restart|stop|start|read [--dry-run | --apply]` (tb-prod only, dry run
+  by default) sends one SSM Run Command (`AWS-RunShellScript`) to the nodes of
+  `LEGACY_STALWART_NODE_IDS`, after it checks that there are six distinct ids, an `mzla-legacy`
+  session, and that each node is `running`, `Online` in SSM, named `mailstrom-prod-stalwart-*` and
+  tagged `postboot.stalwart.node_services`. `restart` (W 2.3) runs `systemctl restart thundermail`
+  on the four mail nodes and refuses after a `stop-legacy-stalwart` row of this cut. `stop` (W 4.3)
+  runs `systemctl disable --now thundermail` on all six and refuses unless `window/gate.sh
+  stop-legacy` passes. `start` (Rollback) writes a `start-legacy-stalwart` row, which voids an
+  earlier stop row for the W4 reset, then runs `systemctl enable --now thundermail; sleep 5;
+  systemctl is-active thundermail` and passes only when every node prints `active`. It also sends
+  to the reachable nodes when some are not `running` or not `Online`, then exits 1 naming the rest;
+  the other modes refuse unless all six are reachable. `read` (W 4.3 after the stop, W 6.4,
+  Rollback) asks for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
+  `node <name> <id> <Status> rc=<code> <active> <enabled>` line each and a `summary:`, and writes
+  the `stop-legacy-stalwart` row only when `window/gate.sh stop-legacy` passes and all six report
+  `inactive` (or `failed`) and `disabled`. The reset phase and `blob_compare.py` read that row.
+  Exit codes: 0 done (for `read`: all six stopped, or all six `active` and `enabled`), 1 `STOP`
+  (a node failed, did not answer within `LEGACY_SSM_WAIT`, or `start` could not reach a node), 2
+  `NEED` (nothing sent), 3 `read` found mixed states, 64 usage.
+- On tb-prod a step that fails writes no timing row, so every row a gate reads means a pass:
+  `queue-drain` (value 0), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
+  `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
+  A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
+  verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)
+  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` 0 row before a
+  `w4-read-done` row and no later `w4-read-start` (every `--phase read --apply` writes one, so a
+  failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
+  `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
+  `verify-compare` wants both rows at 0 and no later `stop-W6`.
+- `window/keep.sh save` encrypts the files of `$SECRET_DIR` that a reboot would lose
+  (`export.json`, `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
+  `duplicates.txt`, `source-branch.env`) with gpg for `KEEP_GPG_RECIPIENT` (operator file) into
+  `$EVIDENCE_DIR/keep/` with a sha256 manifest; W4 runs it in every read phase, a rerun that
+  reuses the export too, and after the source branch. After a reboot: `build-cutover-env.sh --rebuild` (it names each kept file that is
+  missing), `window/keep.sh restore --apply` (gpg asks for the key), `--rebuild` again, which takes
+  `STALWART_SOURCE_PG_*` from the restored `source-branch.env`.
+- `verify/02_directory.py` reads `DROPPED_DOMAINS` (`$SECRET_DIR/domains-dropped.json`, written by
+  `domain_fix.py --dropped-list`): it leaves exactly those Domains out of the source set, prints
+  their count, and compares the DkimSignature count of tb-prod with the export after the drop
+  (fewer is a failure, more a warning on the expected list).
+- On tb-prod `window/w5-promote.sh` takes `T6_SHA` from the merge commit of PR 195
+  (`T6_PR_DEFAULT` in `targets/tb-prod.sh`) when the env file has neither `T6_SHA` nor `T6_PR`.
+- `window/freight-for.sh <commit on main>` prints the newest Freight of `KARGO_WAREHOUSE_CONFIGS`
+  whose preview commit holds the settings trees of that commit (`Freight <name> (preview commit
+  <sha>) matches <commit>`), the same match `w5-promote.sh` uses; the Warehouse follows the
+  preview branch, so a merge commit on `main` is never a Freight commit itself.
+- `gate-keycloak-version.sh --pull[=IMAGE]` runs the image once before the window and prints
+  `image <ref> cached: Keycloak <version>`; the gate prints the podman error when the image gives
+  no version.
 - `blob_compare.py wait` and `compare` (tb-prod, W 4.6) need the `stop-legacy-stalwart` row after
   the last `cut-ecs` row. `wait --apply` polls rule `tb-prod-cutover` until both pending metrics
   read 0 three times after the stop and the failed operations since `REPL_FAILED_SINCE` sum to 0,
-  then writes a `blob-replication-wait` row. `compare` lists both buckets in parallel by key range
-  (current versions; a delete marker or an absent key in tb-prod is missing), compares size and
-  ETag, and with `--apply` copies each difference from legacy and writes a `blob-compare left N`
-  row. It deletes nothing. `STALWART_WEBADMIN`, `SPAM_TRAINER_KEY` and `SPAM_CLASSIFIER_KEY` must
-  match by checksum, or the run stops. Listings stay under `$EVIDENCE_DIR/blob-compare`, copies in
-  transit under `$SECRET_DIR`.
+  then writes a `blob-replication-wait` row. `compare --apply` without that row runs the same
+  wait first (same `--timeout` and `--interval`, the row written only on a pass) and compares
+  only after a pass; a timeout stops with exit 1, no row and no copy. `compare` lists both buckets
+  in parallel by key range (current versions; a delete marker or an absent key in tb-prod is
+  missing), compares size and ETag, and with `--apply` copies each difference from legacy and
+  writes a `blob-compare left N` row. It deletes nothing. The blobs `STALWART_WEBADMIN`,
+  `STALWART_SPAM_TRAIN_DATA.lz4` and `STALWART_SPAM_CLASSIFIER_MODEL.lz4` must match by checksum,
+  or the run stops; Stalwart stores them under the base32 of the blob key in its own alphabet
+  (`knkectcxifjfix7xivbecrcnjfha` and so on), which is what the compare looks up and prints beside
+  the name. `--workers` defaults to 48 (one `aws` process per page, PR 204: a review measured 16
+  minutes for the dry run and 9 for the relist of `--apply` at 48). Listings stay under
+  `$EVIDENCE_DIR/blob-compare`, copies in transit under `$SECRET_DIR`.
+- The listing does not start the aws CLI per page. Each shard keeps one HTTPS connection to
+  `<bucket>.s3.eu-central-1.amazonaws.com` and signs `ListObjectVersions` (SigV4) with credentials
+  from `aws configure export-credentials`, fetched once per read-only profile and again when they
+  expire within 5 minutes. Copies still use the CLI. After the listing it prints
+  `listed <side> pages=<n> versions=<n> in <s>s (<w> workers, one connection per shard)` for each
+  side. A page on a kept-alive connection is estimated, not measured, at 0.3 to 0.6 s (the CLI took
+  1.7 to 1.8 s), so the about 21,800 pages of both buckets at 16 workers take about 7 to 14
+  minutes; `## Done when` step 8 of the Tooling issue measures it. `BLOB_S3_ENDPOINT` is for the
+  tests only (`BLOB_TEST=1` and a loopback `http://` address).
 - `setenv`, `setenv_secret` and the env file edits of W4 hold `flock` on `$ENV_FILE.lock`;
   `check-prereqs.sh` reads the env file under the same lock, shared.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and

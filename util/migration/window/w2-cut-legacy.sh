@@ -13,7 +13,7 @@ snap_sg() {
   printf '%s\n' "$out"
   SG_SNAP=$(tail -1 <<<"$out")
   for id in "${RULES[@]}"; do
-    jq -e --arg id "$id" 'any(.rules[]; .SecurityGroupRuleId == $id and .IsEgress == false)' "$SG_SNAP" >/dev/null || { echo "rule $id is not an ingress rule of $LEGACY_PUB_SG"; return 1; }
+    jq -e --arg id "$id" 'any(.rules[]; .SecurityGroupRuleId == $id and .IsEgress == false)' "$SG_SNAP" >/dev/null || { echo "rule $id is not an ingress rule of $LEGACY_PUB_SG"; [ "$TARGET_ENV" != tb-prod ] || echo "a rollback puts the rules back with new ids: build the env file again (build-cutover-env.sh reads LEGACY_PUB_SG_RULE_IDS live), then rerun"; return 1; }
   done
   jq -r '.rules[] | select(.IsEgress == false) | "  \(.SecurityGroupRuleId) \(.IpProtocol) \(.FromPort)-\(.ToPort) \(.CidrIpv4 // .CidrIpv6 // .ReferencedGroupInfo.GroupId // .PrefixListId)"' "$SG_SNAP"
   VALUE=$(jq '[.rules[] | select(.IsEgress == false)] | length' "$SG_SNAP")

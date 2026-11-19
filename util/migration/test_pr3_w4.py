@@ -145,7 +145,7 @@ class Prod(Harness):
         super().setUp()
         b = self.t / 'bin'
         b.mkdir()
-        for name, src in (('kubectl', KUBE), ('nb', NB)):
+        for name, src in (('kubectl', KUBE), ('nb', NB), ('gpg', '#!/bin/sh\nexit 0\n')):
             (b / name).write_text(src.format(py=sys.executable))
             (b / name).chmod(0o755)
         if shutil.which('yq'):
@@ -223,8 +223,8 @@ class ReadPhase(Prod):
     BODY = (
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
-        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }\n'
-        'mkdir -p "$S"; echo "{}" > "$S/export.json"\n'
+        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }; keep_copy() { echo KEEP; }\n'
+        'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
     def test_order_marks_and_a_queue_rerun_reads_the_queue_only(self):
@@ -239,7 +239,30 @@ class ReadPhase(Prod):
         self.assertIn('w4-read-done', names)
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
         self.assertIn('reusing the export of this cut', out)
-        self.assertEqual([x for x in out.split() if x in ('DUMP', 'QUEUE')], ['QUEUE'])
+        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['KEEP', 'QUEUE'])
+        self.assertEqual([r[0] for r in self.timing()].count('w4-read-start'), 2)
+        out = self.w4(self.BODY + 'queue_drain() { echo QUEUE; return 1; }\nread_phase')
+        gate = subprocess.run(
+            ['bash', str(HERE / 'window' / 'gate.sh'), 'stop-legacy'],
+            capture_output=True,
+            text=True,
+            env={
+                'PATH': '/usr/bin:/bin',
+                'HOME': str(self.t),
+                'TARGET_ENV': 'tb-stage',
+                'CUTOVER_ENV': str(self.t / 'none.env'),
+                'TIMING_TSV': str(self.t / 'ev' / 'timing.tsv'),
+            },
+            timeout=60,
+        )
+        self.assertEqual(gate.returncode, 2, gate.stdout)
+        self.assertIn('a read phase started at', gate.stdout)
+        rows = self.timing()
+        self.assertEqual([r[3] for r in rows if r[0] == 'w4-export'], ['sha256'])
+        (self.t / 'secret' / 'export.json').write_text('{"older": 1}\n')
+        out = self.w4(self.BODY.replace('echo "{}" > "$S/export.json"; ', '') + 'read_phase; echo "rc=$?"')
+        self.assertNotIn('reusing the export of this cut', out)
+        self.assertIn('DUMP', out.split())
         out = self.w4(self.BODY + 'GO=again\nconvert() { echo CONVERT; return 1; }\nread_phase')
         self.assertIn('DUMP', out.split())
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
@@ -305,11 +328,34 @@ class ResetPhase(Prod):
         rows = {r[0]: r[4] for r in self.timing()}
         self.assertEqual(rows['reset'], '2026-11-19T05:00:00Z')
         self.assertEqual(rows['source-branch'], '2026-11-19T05:00:05Z')
+        kept = (self.t / 'ev' / 'window-values.tsv').read_text()
+        self.assertIn('STALWART_SOURCE_PG_HOST\tsrc.example.test\n', kept)
+        self.assertIn('STALWART_SOURCE_PG_USER\tstalwart_owner\n', kept)
+        self.assertIn('STALWART_SOURCE_PG_DB\tstalwart\n', kept)
+        self.assertNotIn('src-pw-123', kept)
         self.nb({'reset_at': '2026-11-19T05:00:00Z', 'reset_rc': 1})
         (self.t / 'ev' / 'timing.tsv').unlink()
         out = self.w4('APPLY_ARG=(--apply); STOP_AT=x\nneon_reset; echo "rc=$?"')
         self.assertIn('rc=1', out)
         self.assertNotIn('reset', [r[0] for r in self.timing()])
+
+    def test_the_source_branch_is_created_at_the_lsn_of_the_reset(self):
+        (self.t / 'cutover.env').write_text('')
+        out = self.w4(
+            'APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\n'
+            'neon_reset; echo "rc=$?"; source_branch; echo "rc=$?"'
+        )
+        self.assertEqual(out.count('rc=0'), 2, out)
+        src = [c for c in self.calls('nb') if ' source ' in c]
+        self.assertEqual(len(src), 1, src)
+        self.assertIn(' --lsn 0/9 ', src[0] + ' ')
+        self.assertIn(['reset-lsn', 'parent_lsn', '0/9'], [[r[0], r[3], r[4]] for r in self.timing()])
+        out = self.w4('APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\nsource_branch; echo "rc=$?"')
+        self.assertIn('rc=0', out)
+        self.assertIn(' --lsn 0/9 ', [c for c in self.calls('nb') if ' source ' in c][-1] + ' ')
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.w4('APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\nsource_branch; echo "rc=$?"')
+        self.assertIn('is created only at the reset point\nrc=1', out)
 
     def test_schema_other_than_5_after_the_reset_stops(self):
         self.kube({'schema': '00000006'})
@@ -418,9 +464,27 @@ class BootPhase(Prod):
     def test_an_applied_export_is_not_applied_again_on_resume(self):
         a = ['export-applied', '2026-11-19T05:30:00Z', '2026-11-19T05:30:00Z', 'errors', '0']
         self.rows([CUT, self.PRE, a])
-        out = self.w4('apply_export() { echo APPLIED; }\nprod_apply; echo "rc=$?"')
+        out = self.w4(
+            'apply_export() { echo APPLIED; }; port_forward() { echo PF-OK; }\nprod_apply; echo "rc=$?"'
+        )
         self.assertIn('the export is already applied after this pre-delete', out)
         self.assertNotIn('APPLIED', out)
+        self.assertIn('PF-OK\nrc=0', out)
+
+    def test_a_reset_that_was_sent_and_did_not_finish_is_not_resumed(self):
+        r = ['reset', '2026-11-19T05:00:00Z', '2026-11-19T05:00:00Z', 'last_reset_at', 'x']
+        g = ['guard', '2026-11-19T05:05:00Z', '2026-11-19T05:05:00Z', 'result', 'pass']
+        sent = ['reset-sent', '2026-11-19T05:40:00Z', '2026-11-19T05:40:00Z', 'branch', 'b']
+        self.rows([CUT, sent[:1] + ['2026-11-19T04:59:00Z'] * 2 + sent[3:], r, g, self.PRE])
+        self.assertIn('resuming after the pre-delete', self.w4('boot_resume'))
+        self.rows([CUT, r, g, self.PRE, sent])
+        out = self.w4('boot_resume; echo "rc=$?"')
+        self.assertIn('the last reset was sent (2026-11-19T05:40:00Z) and did not finish', out)
+        self.assertIn('rc=1', out)
+        self.nb({'reset_at': '2026-11-19T05:00:00Z', 'reset_rc': 1})
+        self.rows([CUT])
+        self.w4('APPLY_ARG=(--apply); STOP_AT=x\nneon_reset; echo "rc=$?"')
+        self.assertEqual([x[0] for x in self.timing()][-1], 'reset-sent')
 
 
 class Script(Prod):

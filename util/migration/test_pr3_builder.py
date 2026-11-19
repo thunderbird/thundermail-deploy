@@ -529,6 +529,15 @@ class Attempts(Base):
         self.assertIn('EVIDENCE_DIR=%s has no attempt-2 part' % shared, out)
         self.assertEqual(self.values()['CUTOVER_ATTEMPT'], '1')
 
+    def test_a_carried_name_in_the_operator_file_does_not_refuse_a_new_attempt(self):
+        self.build_ns()
+        op = self.t / 'home' / 'op-carried.env'
+        op.write_text("TARGET_ENV=tb-prod\nWINDOW_END='2026-11-20T06:00:00Z'\n")
+        op.chmod(0o600)
+        rc, out = self.build_ns(CUTOVER_ATTEMPT='2', OPERATOR_ENV=str(op))
+        self.assertNotIn('is set in this shell', out)
+        self.assertEqual(self.values()['CUTOVER_ATTEMPT'], '2', out)
+
     def test_a_shell_value_of_the_old_attempt_refuses_a_new_one(self):
         self.build_ns()
         rc, out = self.build_ns(CUTOVER_ATTEMPT='2', FREIGHT='f1')
@@ -592,6 +601,28 @@ class Attempts(Base):
         self.assertEqual(v['STALWART_SOURCE_PG_HOST'], 'src.example.test')
         self.assertNotIn('STALWART_SOURCE_PG_PASSWORD', v)
         self.assertNotIn('leaked', self.text())
+
+    def test_rebuild_after_a_reboot_takes_the_source_branch_from_its_restored_file(self):
+        sec = self.t / 'sec' / 'attempt-1' / 'secret-artifacts'
+        sec.mkdir(parents=True, mode=0o700)
+        self.build_ns(SECRET_DIR=str(sec))
+        (sec / 'source-branch.env').write_text(
+            'STALWART_SOURCE_PG_HOST=src.example.test\nSTALWART_SOURCE_PG_DB=stalwart\n'
+            'STALWART_SOURCE_PG_USER=reader\nSTALWART_SOURCE_PG_PASSWORD=pw-kept\n'
+        )
+        keep = self.state / 'attempt-1' / 'keep'
+        keep.mkdir(parents=True)
+        (keep / 'manifest.tsv').write_text('export.json\tabc\nsource-branch.env\tdef\n')
+        rc, out = self.build_ns('--rebuild', SECRET_DIR=str(sec))
+        v = self.values()
+        self.assertEqual(v['STALWART_SOURCE_PG_PASSWORD'], 'pw-kept')
+        self.assertEqual(v['STALWART_SOURCE_PG_HOST'], 'src.example.test')
+        self.assertNotIn('pw-kept', out)
+        self.assertIn('STALWART_SOURCE_PG_PASSWORD    from %s/source-branch.env' % sec, out)
+        self.assertIn(
+            'export.json is missing from %s: bash %s/window/keep.sh restore --apply' % (sec, HERE), out
+        )
+        self.assertNotIn('source-branch.env is missing', out)
 
     def test_the_timing_file_default_is_the_attempt_directory(self):
         rc, out = self.run_ns(

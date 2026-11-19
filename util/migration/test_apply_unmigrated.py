@@ -1,3 +1,11 @@
+import http.server
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import threading
 import importlib.util, pathlib, unittest
 
 spec = importlib.util.spec_from_file_location("apply_unmigrated", pathlib.Path(__file__).with_name("apply_unmigrated.py"))
@@ -57,6 +65,73 @@ class Quotas(unittest.TestCase):
     def test_skip_drops_the_refusal(self):
         steps = au.plan({"queue.quota.sender.match": "x", "server.blocked-ip.192.0.2.1": ""})
         self.assertEqual(sorted({st[0] for st in steps if au.wanted(st[0], set(), ["MtaQueueQuota"])}), ["BlockedIp"])
+
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+class _Fake(http.server.BaseHTTPRequestHandler):
+    domains = []
+
+    def log_message(self, *a):
+        pass
+
+    def send(self, body):
+        raw = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_GET(self):
+        self.send({"primaryAccounts": {"urn:stalwart:jmap": "a"}, "accounts": {"a": {}}})
+
+    def do_POST(self):
+        name, args, tag = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["methodCalls"][0]
+        if name == "x:SystemSettings/get":
+            res = {"list": [{"defaultHostname": "mail.example.test"}]}
+        elif name == "x:BlobStore/get":
+            res = {"list": [{"bucket": "b"}]}
+        elif name == "x:Domain/query":
+            res = {"ids": [d["id"] for d in self.domains][args.get("position", 0):], "total": len(self.domains)}
+        elif name.endswith("/query"):
+            res = {"ids": [], "total": 0}
+        else:
+            res = {"list": [d for d in self.domains if d["id"] in args["ids"]]}
+        self.send({"methodResponses": [[name, res, tag]]})
+
+
+class CatchAllsOnDroppedOrUnicodeDomains(unittest.TestCase):
+    def test_a_dropped_domain_is_skipped_and_a_unicode_name_found_in_punycode(self):
+        t = pathlib.Path(tempfile.mkdtemp())
+        _Fake.domains = [
+            {"id": "d1", "name": "a.example.com", "catchAllAddress": None},
+            {"id": "d2", "name": "xn--mnchen-3ya.example.com", "catchAllAddress": None},
+        ]
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Fake)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        (t / "settings.json").write_text("{}")
+        (t / "principals.json").write_text(json.dumps([
+            {"id": 1, "type": "individual", "name": "u", "emails": ["u@a.example.com", "@a.example.com"]},
+            {"id": 2, "type": "individual", "name": "v", "emails": ["v@a.example.com", "@mail.example.notatld"]},
+            {"id": 3, "type": "individual", "name": "w", "emails": ["w@a.example.com", "@m\u00fcnchen.example.com"]},
+        ], ensure_ascii=False))
+        (t / "dropped.json").write_text(json.dumps({"domains": ["mail.example.notatld"], "dkim_dropped": 0, "dkim_kept": 0}))
+        env = dict(os.environ, STALWART_URL="http://127.0.0.1:%d" % srv.server_port, STALWART_USER="a", STALWART_PASSWORD="p")
+        env.pop("OLD_STALWART_URL", None)
+        p = subprocess.run(
+            [sys.executable, str(HERE / "apply_unmigrated.py"), "--settings", str(t / "settings.json"),
+             "--principals", str(t / "principals.json"), "--dropped-domains", str(t / "dropped.json"),
+             "--expect-hostname", "mail.example.test", "--only", "Domain"],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        self.assertNotIn("FAILED", p.stdout, p.stdout + p.stderr)
+        self.assertIn("skip   catch-alls on Domains dropped before the apply (domain_fix.py): 1", p.stdout)
+        self.assertIn("update catch-all @xn--mnchen-3ya.example.com", p.stdout)
+        self.assertIn("update catch-all @a.example.com", p.stdout)
 
 
 if __name__ == "__main__":

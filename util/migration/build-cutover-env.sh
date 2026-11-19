@@ -11,6 +11,7 @@ for a in "$@"; do
   esac
 done
 BUILDING_ENV=1
+SHELL_NAMES=" $(compgen -e | tr '\n' ' ')"
 if [ -z "${CUTOVER_ATTEMPT:-}" ] && [ "${TARGET_ENV:-}" = tb-prod ] && [ -f "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" ]; then
   CUTOVER_ATTEMPT=$(sed -n "s/^CUTOVER_ATTEMPT='\([1-9][0-9]*\)'$/\1/p" "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" | tail -1)
   [ -n "$CUTOVER_ATTEMPT" ] || unset CUTOVER_ATTEMPT
@@ -30,7 +31,7 @@ PROD_OPERATOR_REQUIRED="TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_US
 PREV_IGNORED=0
 if [ "$TARGET_ENV" = tb-prod ]; then
   SECRET_VARS=${SECRET_VARS/ STALWART_LEGACY_PG_PASSWORD/}
-  WINDOW_OPERATOR_VARS=${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/}
+  WINDOW_OPERATOR_VARS="${WINDOW_OPERATOR_VARS/ W4_DUMP_MAX_AGE/} KEEP_GPG_RECIPIENT"
 fi
 
 try() { ( "$@" ) 2>/dev/null || true; }
@@ -61,6 +62,7 @@ attempt_guard() {
   [ -n "$p" ] && [ "$p" != "$CUTOVER_ATTEMPT" ] || return 0
   [ "$p" -lt "$CUTOVER_ATTEMPT" ] || die "$ENV_FILE is attempt $p: CUTOVER_ATTEMPT=$CUTOVER_ATTEMPT would replace it with an earlier attempt"
   for v in $CARRY $WINDOW_CARRY; do
+    case "$SHELL_NAMES" in *" $v "*) ;; *) continue ;; esac
     [ -z "${!v:-}" ] || die "$v is set in this shell (a loaded env file of attempt $p?): a new attempt carries nothing; start a fresh shell and rerun"
   done
   for v in EVIDENCE_DIR SECRET_DIR TIMING_TSV; do
@@ -331,6 +333,7 @@ build() {
     case "${PUT:- }" in *" $name "*) continue ;; esac
     local v; v=$(op "$name")
     case "$name" in TEST_SENDER_APP_PASSWORD|STALWART_SOURCE_PG_*|STALWART_ADMIN_ACCOUNT_ID) [ -z "$(prev "$name")" ] || v=$(prev "$name") ;; esac
+    case "$TARGET_ENV:$name" in tb-prod:STALWART_SOURCE_PG_*) [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || [ ! -s "$SECRET_DIR/source-branch.env" ] || { v=$(sed -n "s/^$name=//p" "$SECRET_DIR/source-branch.env" | tail -1); [ -z "$v" ] || printf '%-30s from %s\n' "$name" "$SECRET_DIR/source-branch.env"; } ;; esac
     if [ -z "$v" ] && [ "${REBUILD:-0}" = 1 ]; then
       case " $SECRET_VARS TEST_SENDER_APP_PASSWORD STALWART_SOURCE_PG_PASSWORD " in *" $name "*) ;; *) v=$(window_values "$name") ;; esac
       [ -n "$v" ] || printf '%-30s not restored: no copy in %s\n' "$name" "$EVIDENCE_DIR/window-values.tsv"
@@ -344,6 +347,12 @@ build() {
   mv "$tmp" "$ENV_FILE"
   exec 9>&-
   printf 'written %s (mode %s) vars=%s missing=%s\n' "$ENV_FILE" "$(stat -c %a "$ENV_FILE")" "$count" "$missing"
+  if [ "$TARGET_ENV" = tb-prod ] && [ -s "$EVIDENCE_DIR/keep/manifest.tsv" ]; then
+    local f
+    while IFS=$'\t' read -r f _; do
+      [ -z "$f" ] || [ -s "$SECRET_DIR/$f" ] || printf '%s is missing from %s: bash %s/window/keep.sh restore --apply, then build-cutover-env.sh --rebuild again\n' "$f" "$SECRET_DIR" "$MIG_DIR"
+    done < "$EVIDENCE_DIR/keep/manifest.tsv"
+  fi
   old=$HOME/.local/state/talos/cutover-$TARGET_ENV.env
   [ "$old" = "$ENV_FILE" ] || [ ! -e "$old" ] || { printf 'old env file %s is on persistent disk: delete it\n' "$old"; missing=$((missing + 1)); }
   [ "$missing" = 0 ]

@@ -339,13 +339,22 @@ neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon r
 
 domain_fix_step() {
   local rc=0
-  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" || rc=$?
+  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --principals "$S/principals.json" --dropped-list "$S/domains-dropped.json" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
   grep '^warning: ' "$S/domain-fix.txt" > "$S/domain-fixed.txt" || true
   VALUE=$(grep -c . "$S/domain-fixed.txt" || true)
   echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature ($S/domain-fixed.txt)"
+}
+
+keep_copy() {
+  local out rc=0
+  out=$(bash "$MIG_DIR/window/keep.sh" save "$(apply_flag)" 2>&1) || rc=$?
+  grep -E '^(kept|keep:|NEED|KEEP_GPG_RECIPIENT|gpg|STOP)' <<<"$out" || true
+  [ "$APPLY" = 1 ] || { grep -q '^NEED' <<<"$out" && NEEDS=$((NEEDS + 1)); return 0; }
+  VALUE=$(sed -n 's/^keep: \([0-9]*\) file.*/\1/p' <<<"$out")
+  [ "$rc" = 0 ]
 }
 
 read_done() {
@@ -355,12 +364,15 @@ read_done() {
 }
 
 export_ok() {
-  local e s
+  local e s want
   e=$(cut_line w4-export) s=$(cut_line w4-export-start)
-  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ]
+  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ] || return 1
+  want=$(cut_row w4-export | awk -F'\t' '$5 == "sha256" {print $6}')
+  [ -z "$want" ] || [ "$(sha256sum "$S/export.json" | cut -d' ' -f1)" = "$want" ]
 }
 
 read_phase() {
+  [ "$APPLY" = 0 ] || mark w4-read-start export "$S/export.json"
   if [ "$APPLY" = 1 ] && [ -z "$GO" ] && export_ok; then
     echo "reusing the export of this cut (w4-export row, $S/export.json): only queue-drain runs; --go '<words>' dumps again"
   else
@@ -374,8 +386,9 @@ read_phase() {
     fi
     step domains changes domain_fix_step
     step retarget "" retarget
-    [ "$APPLY" = 0 ] || mark w4-export file "$S/export.json"
+    [ "$APPLY" = 0 ] || mark w4-export sha256 "$(sha256sum "$S/export.json" | cut -d' ' -f1)"
   fi
+  step keep files keep_copy
   step queue-drain queued queue_drain
   [ "$APPLY" = 0 ] || step read-done "" read_done
 }
@@ -411,13 +424,17 @@ reset_preflight() {
 neon_reset() {
   local out rc=0
   printf '  + %s reset --branch %s --after %s %s\n' "$(shq "${NB[@]}")" "$CUTOVER_BRANCH" "$STOP_AT" "$(apply_flag)"
+  [ "$APPLY" = 0 ] || mark reset-sent branch "$CUTOVER_BRANCH"
   out=$("${NB[@]}" reset --branch "$CUTOVER_BRANCH" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
   printf '%s\n' "$out"
   neon_need "$rc" "neon_branch.py reset"
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || return 1
   VALUE=$(sed -n 's/^after: .* last_reset_at=\([^ ]*\) .*/\1/p' <<<"$out")
+  RESET_LSN=$(sed -n 's/^after: .* parent_lsn=\([0-9A-Fa-f]*\/[0-9A-Fa-f]*\) .*/\1/p' <<<"$out")
+  [ -n "$RESET_LSN" ] || { echo "the reset printed no parent_lsn: $SOURCE_BRANCH cannot be created at the reset point"; return 1; }
   mark reset last_reset_at "$VALUE"
+  mark reset-lsn parent_lsn "$RESET_LSN"
 }
 
 branch_check() {
@@ -433,8 +450,11 @@ branch_check() {
 
 source_branch() {
   local out rc=0 f=$S/source-branch.env n v
-  printf '  + %s source --name %s --role %s --db %s --out %s --after %s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "$(apply_flag)"
-  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
+  local lsn=() at=${RESET_LSN:-$(cut_row reset-lsn | cut -f6)}
+  [ -z "$at" ] || lsn=(--lsn "$at")
+  [ "$APPLY" = 0 ] || [ -n "$at" ] || { echo "no parent_lsn of the reset in this run or in a reset-lsn row: $SOURCE_BRANCH is created only at the reset point"; return 1; }
+  printf '  + %s source --name %s --role %s --db %s --out %s --after %s%s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "${at:+ --lsn $at}" "$(apply_flag)"
+  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${lsn[@]+"${lsn[@]}"}" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
   printf '%s\n' "$out"
   neon_need "$rc" "neon_branch.py source"
   if [ "$APPLY" = 0 ]; then
@@ -448,6 +468,7 @@ source_branch() {
     printf -v "$n" '%s' "$v"
   done
   env_locked source_env_write || { echo "could not replace STALWART_SOURCE_PG_* in $ENV_FILE"; return 1; }
+  for n in STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER; do window_value "$n" "${!n}" || true; done
   printf '  + replaced STALWART_SOURCE_PG_HOST=%s STALWART_SOURCE_PG_DB=%s STALWART_SOURCE_PG_USER=%s STALWART_SOURCE_PG_PASSWORD (len=%s) in %s\n' "$STALWART_SOURCE_PG_HOST" "$STALWART_SOURCE_PG_DB" "$STALWART_SOURCE_PG_USER" "${#STALWART_SOURCE_PG_PASSWORD}" "$ENV_FILE"
   export STALWART_SOURCE_PG_HOST STALWART_SOURCE_PG_DB STALWART_SOURCE_PG_USER STALWART_SOURCE_PG_PASSWORD
   VALUE=$(sed -n 's/^created: .* created_at=\([^ ]*\) .*/\1/p' <<<"$out")
@@ -548,7 +569,7 @@ prod_recovery_boot() {
 prod_apply() {
   local a p
   a=$(cut_line export-applied) p=$(cut_line pre-delete)
-  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; return 0; fi
+  if [ "$APPLY" = 1 ] && [ -n "$a" ] && [ -n "$p" ] && [ "$a" -gt "$p" ]; then echo "the export is already applied after this pre-delete (export-applied row)"; VALUE=0; port_forward; return; fi
   apply_export || return 1
   [ "$APPLY" = 0 ] || mark export-applied errors 0
 }
@@ -563,7 +584,9 @@ prod_recovery_hold() {
 
 boot_resume() {
   local r g p
-  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete)
+  local s
+  r=$(cut_line reset) g=$(cut_line guard) p=$(cut_line pre-delete) s=$(cut_line reset-sent)
+  [ -z "$s" ] || [ -z "$r" ] || [ "$s" -lt "$r" ] || { echo "the last reset was sent ($(cut_time reset-sent)) and did not finish: it may have undone the pre-delete; rerun --phase reset --apply --go '<words>'"; return 1; }
   [ -n "$r" ] && [ -n "$g" ] && [ -n "$p" ] && [ "$g" -gt "$r" ] && [ "$p" -gt "$g" ] || { echo "nothing to resume: want reset, guard and pre-delete rows, in that order, after the last cut-ecs row"; return 1; }
   echo "resuming after the pre-delete of $(cut_time pre-delete); no second reset"
 }
@@ -579,12 +602,13 @@ reset_phase() {
   STOP_AT=""
   [ "$APPLY" = 0 ] || APPLY_ARG=(--apply)
   step reset-preflight "" reset_preflight
-  if [ "$APPLY" = 1 ] && [ -n "$(cut_row reset)" ]; then
+  if [ "$APPLY" = 1 ] && { [ -n "$(cut_row reset)" ] || [ -n "$(cut_row reset-sent)" ]; }; then
     [ -n "$GO" ] || stop "$CUTOVER_BRANCH was already reset in this cut: a second reset needs the operator's confirmation (--go); after an expired pod wait use --phase boot"
     go_gate
   fi
   step neon-reset reset_at neon_reset
   step source-branch-create created_at source_branch
+  step keep-source files keep_copy
   step branch-check parent_lsn branch_check
   step schema-before schema schema_before
   step guard-check "" guard
@@ -603,11 +627,11 @@ prod_main() {
   case "$PHASE" in
     read)
       GATE_ID=go-W4-read prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh window/keep.sh gpg "$PY"
       read_phase ;;
     reset|boot)
       GATE_ID=go-W4-reset prereqs
-      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      helpers neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env window/keep.sh gpg stalwart-cli python3 "$PY"
       need_recovery_pr
       if [ "$PHASE" = reset ]; then reset_phase; else [ "$APPLY" = 0 ] || boot_resume || stop "--phase boot has nothing to resume"; fi
       boot_phase ;;
@@ -615,7 +639,7 @@ prod_main() {
       [ "$APPLY" = 0 ] || { echo "on tb-prod --apply needs --phase read, --phase reset or --phase boot"; exit 64; }
       GATE_ID=go-W4-read prereqs
       GATE_ID=go-W4-reset prereqs
-      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env stalwart-cli python3 "$PY"
+      helpers migrate_v016.py dump_legacy.py dup_check.py domain_fix.py domains.py domain-suffixes.txt dump-check.sh retarget-export.sh neon_branch.py schema-version.sh verify/02_directory.py verify/$TARGET_ENV.env window/keep.sh gpg stalwart-cli python3 "$PY"
       need_recovery_pr
       read_phase
       reset_phase
