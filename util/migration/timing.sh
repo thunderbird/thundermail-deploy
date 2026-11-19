@@ -7,6 +7,7 @@ t() {
   s=$(date -u +%FT%TZ)
   if "$@"; then rc=0; else rc=$?; fi
   e=$(date -u +%FT%TZ)
+  [ "$rc" = 0 ] || [ "$TARGET_ENV" != tb-prod ] || return $rc
   printf '%s\t%s\t%s\t%s\t%s\n' "${STEP:-}" "$s" "$e" "${METRIC:-}" "${VALUE:-}" >> "$TIMING_TSV"
   return $rc
 }

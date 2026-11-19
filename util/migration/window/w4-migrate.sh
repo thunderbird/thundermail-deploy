@@ -348,6 +348,7 @@ domain_fix_step() {
   echo "domains: $VALUE warning line(s), one per dropped Domain and DkimSignature; $(grep -c '^warning: not restoring the catch-all ' "$S/domain-fixed.txt" || true) catch-all(s) not restored ($S/domain-fixed.txt)"
 }
 
+
 read_done() {
   [ -s "$S/export.json" ] || { echo "no $S/export.json"; return 1; }
   mark w4-read-done export "$S/export.json"
@@ -355,12 +356,15 @@ read_done() {
 }
 
 export_ok() {
-  local e s
+  local e s want
   e=$(cut_line w4-export) s=$(cut_line w4-export-start)
-  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ]
+  [ -n "$e" ] && { [ -z "$s" ] || [ "$e" -gt "$s" ]; } && [ -s "$S/export.json" ] || return 1
+  want=$(cut_row w4-export | awk -F'\t' '$5 == "sha256" {print $6}')
+  [ -z "$want" ] || [ "$(sha256sum "$S/export.json" | cut -d' ' -f1)" = "$want" ]
 }
 
 read_phase() {
+  [ "$APPLY" = 0 ] || mark w4-read-start export "$S/export.json"
   if [ "$APPLY" = 1 ] && [ -z "$GO" ] && export_ok; then
     echo "reusing the export of this cut (w4-export row, $S/export.json): only queue-drain runs; --go '<words>' dumps again"
   else
@@ -374,7 +378,7 @@ read_phase() {
     fi
     step domains changes domain_fix_step
     step retarget "" retarget
-    [ "$APPLY" = 0 ] || mark w4-export file "$S/export.json"
+    [ "$APPLY" = 0 ] || mark w4-export sha256 "$(sha256sum "$S/export.json" | cut -d' ' -f1)"
   fi
   step queue-drain queued queue_drain
   [ "$APPLY" = 0 ] || step read-done "" read_done
@@ -417,7 +421,10 @@ neon_reset() {
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || return 1
   VALUE=$(sed -n 's/^after: .* last_reset_at=\([^ ]*\) .*/\1/p' <<<"$out")
+  RESET_LSN=$(sed -n 's/^after: .* parent_lsn=\([0-9A-Fa-f]*\/[0-9A-Fa-f]*\) .*/\1/p' <<<"$out")
+  [ -n "$RESET_LSN" ] || { echo "the reset printed no parent_lsn: $SOURCE_BRANCH cannot be created at the reset point"; return 1; }
   mark reset last_reset_at "$VALUE"
+  mark reset-lsn parent_lsn "$RESET_LSN"
 }
 
 branch_check() {
@@ -433,8 +440,11 @@ branch_check() {
 
 source_branch() {
   local out rc=0 f=$S/source-branch.env n v
-  printf '  + %s source --name %s --role %s --db %s --out %s --after %s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "$(apply_flag)"
-  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
+  local lsn=() at=${RESET_LSN:-$(cut_row reset-lsn | cut -f6)}
+  [ -z "$at" ] || lsn=(--lsn "$at")
+  [ "$APPLY" = 0 ] || [ -n "$at" ] || { echo "no parent_lsn of the reset in this run or in a reset-lsn row: $SOURCE_BRANCH is created only at the reset point"; return 1; }
+  printf '  + %s source --name %s --role %s --db %s --out %s --after %s%s %s\n' "$(shq "${NB[@]}")" "$SOURCE_BRANCH" "$STALWART_TARGET_PG_USER" "$STALWART_TARGET_PG_DB" "$f" "$STOP_AT" "${at:+ --lsn $at}" "$(apply_flag)"
+  out=$("${NB[@]}" source --name "$SOURCE_BRANCH" --role "$STALWART_TARGET_PG_USER" --db "$STALWART_TARGET_PG_DB" --out "$f" --after "$STOP_AT" "${lsn[@]+"${lsn[@]}"}" "${APPLY_ARG[@]+"${APPLY_ARG[@]}"}") || rc=$?
   printf '%s\n' "$out"
   neon_need "$rc" "neon_branch.py source"
   if [ "$APPLY" = 0 ]; then

@@ -18,7 +18,7 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "ep-frosty-leaf-a29hcxyl-pooler.eu-central-1.aws.neon.tech",
+      "host": "ep-still-resonance-b9c8rnw6-pooler.c-7.eu-central-1.aws.neon.tech",
       "port": 5432,
       "database": "neondb",
       "authUsername": "neondb_owner",

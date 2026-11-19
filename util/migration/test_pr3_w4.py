@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -13,6 +14,7 @@ Sandbox = importlib.import_module('test_target').Sandbox
 Harness = importlib.import_module('test_window').Harness
 
 HERE = pathlib.Path(__file__).resolve().parent
+os.umask(0o077)
 KUBE = r"""#!{py}
 import json, os, re, sys
 AUTH = 'psql: error: FATAL:  password authentication failed for user "o"' + chr(10) + 'rc=2'
@@ -226,7 +228,7 @@ class ReadPhase(Prod):
     BODY = (
         'dump() { echo DUMP; }; duplicates() { echo DUP; }\n'
         'convert() { echo CONVERT; DROPPED=0; }\n'
-        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; }\n'
+        'retarget() { echo RETARGET; }; queue_drain() { echo QUEUE; VALUE=0; }\n'
         'mkdir -p "$S"; echo "{}" > "$S/export.json"; echo "[]" > "$S/principals.json"\n'
     )
 
@@ -242,7 +244,30 @@ class ReadPhase(Prod):
         self.assertIn('w4-read-done', names)
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
         self.assertIn('reusing the export of this cut', out)
-        self.assertEqual([x for x in out.split() if x in ('DUMP', 'QUEUE')], ['QUEUE'])
+        self.assertEqual([x for x in out.split() if x in ('DUMP', 'KEEP', 'QUEUE')], ['QUEUE'])
+        self.assertEqual([r[0] for r in self.timing()].count('w4-read-start'), 2)
+        out = self.w4(self.BODY + 'queue_drain() { echo QUEUE; return 1; }\nread_phase')
+        gate = subprocess.run(
+            ['bash', str(HERE / 'window' / 'gate.sh'), 'stop-legacy'],
+            capture_output=True,
+            text=True,
+            env={
+                'PATH': '/usr/bin:/bin',
+                'HOME': str(self.t),
+                'TARGET_ENV': 'tb-stage',
+                'CUTOVER_ENV': str(self.t / 'none.env'),
+                'TIMING_TSV': str(self.t / 'ev' / 'timing.tsv'),
+            },
+            timeout=60,
+        )
+        self.assertEqual(gate.returncode, 2, gate.stdout)
+        self.assertIn('a read phase started at', gate.stdout)
+        rows = self.timing()
+        self.assertEqual([r[3] for r in rows if r[0] == 'w4-export'], ['sha256'])
+        (self.t / 'secret' / 'export.json').write_text('{"older": 1}\n')
+        out = self.w4(self.BODY.replace('echo "{}" > "$S/export.json"; ', '') + 'read_phase; echo "rc=$?"')
+        self.assertNotIn('reusing the export of this cut', out)
+        self.assertIn('DUMP', out.split())
         out = self.w4(self.BODY + 'GO=again\nconvert() { echo CONVERT; return 1; }\nread_phase')
         self.assertIn('DUMP', out.split())
         out = self.w4(self.BODY + 'read_phase; echo "rc=$?"')
@@ -318,6 +343,24 @@ class ResetPhase(Prod):
         out = self.w4('APPLY_ARG=(--apply); STOP_AT=x\nneon_reset; echo "rc=$?"')
         self.assertIn('rc=1', out)
         self.assertNotIn('reset', [r[0] for r in self.timing()])
+
+    def test_the_source_branch_is_created_at_the_lsn_of_the_reset(self):
+        (self.t / 'cutover.env').write_text('')
+        out = self.w4(
+            'APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\n'
+            'neon_reset; echo "rc=$?"; source_branch; echo "rc=$?"'
+        )
+        self.assertEqual(out.count('rc=0'), 2, out)
+        src = [c for c in self.calls('nb') if ' source ' in c]
+        self.assertEqual(len(src), 1, src)
+        self.assertIn(' --lsn 0/9 ', src[0] + ' ')
+        self.assertIn(['reset-lsn', 'parent_lsn', '0/9'], [[r[0], r[3], r[4]] for r in self.timing()])
+        out = self.w4('APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\nsource_branch; echo "rc=$?"')
+        self.assertIn('rc=0', out)
+        self.assertIn(' --lsn 0/9 ', [c for c in self.calls('nb') if ' source ' in c][-1] + ' ')
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.w4('APPLY_ARG=(--apply); STOP_AT=2026-11-19T04:30:00Z\nsource_branch; echo "rc=$?"')
+        self.assertIn('is created only at the reset point\nrc=1', out)
 
     def test_schema_other_than_5_after_the_reset_stops(self):
         self.kube({'schema': '00000006'})

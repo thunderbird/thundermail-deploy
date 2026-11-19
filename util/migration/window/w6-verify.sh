@@ -50,7 +50,7 @@ suite() {
   local out f left
   printf '  + . %s; bash %s > %s/run_all.txt 2>&1\n' "$MIG_DIR/verify/$TARGET_ENV.env" "$MIG_DIR/verify/run_all.sh${RUN_ARGS[*]:+ ${RUN_ARGS[*]}}" "$VERIFY_OUT"
   if [ -n "${SOURCE_MISSING:-}" ]; then
-    [ "$APPLY" = 0 ] || { SUITE_FAILED="verify: empty in $ENV_FILE:${SOURCE_MISSING:-} (branch tb-prod-cutover-source; the reset phase of w4-migrate.sh writes them)"; echo "$SUITE_FAILED"; return 0; }
+    [ "$APPLY" = 0 ] || { SUITE_FAILED="verify: empty in $ENV_FILE:${SOURCE_MISSING:-} (branch tb-prod-cutover-source; the reset phase of w4-migrate.sh writes them)"; echo "$SUITE_FAILED"; [ "$TARGET_ENV" != tb-prod ]; return; }
     printf 'PENDING  %s: the reset phase of w4-migrate.sh writes them; suite not run\n' "${SOURCE_MISSING# }"
     return 0
   fi
@@ -67,6 +67,7 @@ suite() {
   echo "counts:"
   grep -E '^  (PASS|WARN)  .*[0-9]' "$f" | sed -E "s/'[^']*'/<x>/g; s/\"[^\"]*\"/<x>/g; s/[^ ]+@[^ ]+/<addr>/g" || true
   [ "$APPLY" = 0 ] || { [ "${out%% *}" = exit=0 ] && [ "$VALUE" = 0 ] && [ "$UNEXPECTED_WARN" = 0 ]; } || { SUITE_FAILED="verify: run_all ${out%% *} FAIL=$VALUE unexpected WARN=$UNEXPECTED_WARN ($f)"; echo "$SUITE_FAILED${VSTEP_NEXT:-; imap-jmap-folders runs next, then W6 stops}"; }
+  [ -z "$SUITE_FAILED" ] || [ "$TARGET_ENV" != tb-prod ] || return 1
   [ "${W6_MODE:-full}" = piece ] || return 0
   left=$(sed -n "s/^== piece $W6_PIECE: [0-9]* batches; .*, left \([0-9]*\) (resume key .*/\1/p" "$f" | tail -1)
   [ "${left:-1}" = 0 ] && return 0
@@ -108,7 +109,7 @@ if [ "${W6_MODE:-full}" = folders ]; then
   finish
   exit 0
 fi
-[ "${W6_MODE:-full}" = full ] || VSTEP_NEXT="; W6 stops"
+{ [ "${W6_MODE:-full}" = full ] && [ "$TARGET_ENV" != tb-prod ]; } || VSTEP_NEXT="; W6 stops"
 helpers verify/run_all.sh verify/$TARGET_ENV.env verify/expected-warn.txt
 if [ "${W6_MODE:-full}:${W6_PIECE:-}" = piece:buckets ]; then :; elif [ "$APPLY" = 1 ]; then port_forward || stop "no port-forward to Stalwart"; else port_forward || echo "no port-forward to Stalwart: target checks will fail"; fi
 if live verify/$TARGET_ENV.env verify/run_all.sh verify/expected-warn.txt; then

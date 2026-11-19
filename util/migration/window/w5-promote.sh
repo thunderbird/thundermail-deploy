@@ -52,12 +52,12 @@ snap_settings() {
 }
 
 resolve_t6() {
-  local sha
+  local sha pr=${T6_PR:-${T6_PR_DEFAULT:-}}
   [ -z "${T6_SHA:-}" ] || return 0
-  [ -n "${T6_PR:-}" ] || { echo "T6_SHA and T6_PR are empty in $ENV_FILE"; return 1; }
-  sha=$(gh pr view "$T6_PR" -R thunderbird/thundermail-deploy --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
-  [ -n "$sha" ] || { echo "PR $T6_PR has no merge commit"; return 1; }
-  echo "T6_SHA from PR $T6_PR: $sha"
+  [ -n "$pr" ] || { echo "T6_SHA and T6_PR are empty in $ENV_FILE"; return 1; }
+  sha=$(gh pr view "$pr" -R thunderbird/thundermail-deploy --json mergeCommit -q '.mergeCommit.oid // empty') || return 1
+  [ -n "$sha" ] || { echo "PR $pr has no merge commit"; return 1; }
+  if [ -n "${T6_PR:-}" ]; then echo "T6_SHA from PR $pr: $sha"; else echo "T6_SHA from PR $pr (T6_PR_DEFAULT of targets/$TARGET_ENV.sh): $sha"; fi
   T6_SHA=$sha
   setenv T6_SHA "$sha"
 }
