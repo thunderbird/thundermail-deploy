@@ -775,12 +775,6 @@ class ProdBuildBeforeTheWindow(Base):
         shutil.copytree(
             HERE, repo / 'util' / 'migration', ignore=shutil.ignore_patterns('__pycache__')
         )
-        tgt = repo / 'util' / 'migration' / 'targets' / 'tb-prod.sh'
-        tgt.write_text(
-            tgt.read_text()
-            .replace('REPLACE_ME_E2E_USER_SECRET', 'mzla/tb-prod/e2e-user')
-            .replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
-        )
         values = 'blobStoreBucket: tgt-blob\ninMemoryStoreURL: redis://redis.example.test:6379\n'
         self.repo(repo, ('overlays/tb-prod/stalwart-configs/config/values.yaml', values))
         dirs = {}
