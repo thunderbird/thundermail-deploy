@@ -687,7 +687,23 @@ class ProdBuildBeforeTheWindow(Base):
             {'tool': 'kubectl', 'match': 'STALWART_USER', 'out': 'YWRtaW4='},
             {'tool': 'kubectl', 'match': 'STALWART_PASSWORD', 'out': 'cmVjcHcx'},
             {'tool': 'kubectl', 'match': 'get svc nginx', 'out': 'nlb.example.test'},
-            {'tool': 'kubectl', 'match': 'get ingress', 'out': 'alb.example.test'},
+            {
+                'tool': 'kubectl',
+                'match': 'get ingress -o json',
+                'out': json.dumps(
+                    {
+                        'items': [
+                            {
+                                'spec': {'rules': [{'host': host}]},
+                                'status': {
+                                    'loadBalancer': {'ingress': [{'hostname': 'alb.example.test'}]}
+                                },
+                            }
+                            for host in ('auth.tb.pro', 'accounts.tb.pro')
+                        ]
+                    }
+                ),
+            },
             {
                 'tool': 'kubectl',
                 'match': 'get application',
@@ -752,12 +768,6 @@ class ProdBuildBeforeTheWindow(Base):
         repo = t / 'repo'
         shutil.copytree(
             HERE, repo / 'util' / 'migration', ignore=shutil.ignore_patterns('__pycache__')
-        )
-        tgt = repo / 'util' / 'migration' / 'targets' / 'tb-prod.sh'
-        tgt.write_text(
-            tgt.read_text()
-            .replace('REPLACE_ME_E2E_USER_SECRET', 'mzla/tb-prod/e2e-user')
-            .replace('REPLACE_ME_LEGACY_PG_SECRET_NAME', 'legacy-pg')
         )
         values = 'blobStoreBucket: tgt-blob\ninMemoryStoreURL: redis://redis.example.test:6379\n'
         self.repo(repo, ('overlays/tb-prod/stalwart-configs/config/values.yaml', values))
