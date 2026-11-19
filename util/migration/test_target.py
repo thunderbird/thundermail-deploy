@@ -293,12 +293,12 @@ class Builder(Sandbox):
             'stalwart-legacy-healthz',
             'stalwart-target-healthz',
             'target-nlb',
-            'kargo-stage-configs',
-            'kargo-warehouse-configs',
             'restore-target-db-dry-run',
         ):
             self.assertRegex(out, r'(?m)^WAIT  %s +\S' % re.escape(name))
             self.assertNotRegex(out, r'(?m)^(PASS|FAIL)  %s ' % re.escape(name))
+        for name in ('kargo-stage-configs', 'kargo-warehouse-configs'):
+            self.assertRegex(out, r'(?m)^FAIL  %s ' % name)
         for name in (
             'spf-final-txt',
             't7-prs',
@@ -322,6 +322,54 @@ class Builder(Sandbox):
         self.build(HERE, **self.prod_env(WINDOW_SHA='stale'))
         self.assertNotIn('fix3', f.read_text())
         self.assertNotIn('stale', f.read_text())
+
+    def test_prod_build_writes_the_file_when_the_node_lookup_is_empty(self):
+        rules = [r for r in stage_rules(ecs='accounts-prod') if r['match'] != 'describe-instances']
+        rc, out = self.build(HERE, **self.prod_env(rules=rules))
+        self.assertRegex(out, r'(?m)^LEGACY_STALWART_NODE_IDS +len=0 NEED$')
+        self.assertRegex(out, r'(?m)^written ')
+        self.assertTrue((self.t / 'shm' / 'cutover.env').exists())
+
+    def test_prod_ingress_load_balancers_are_picked_by_host(self):
+        def ing(name, host, lb):
+            rules = [{'host': host}] if host else []
+            return {
+                'metadata': {'name': name},
+                'spec': {'rules': rules},
+                'status': {'loadBalancer': {'ingress': [{'hostname': lb}]}},
+            }
+
+        items = {
+            'keycloak-customer': [
+                ing('keycloak-customer-admin', None, 'admin.ts.example.test'),
+                ing('keycloak-customer-public', 'auth.tb.pro', 'k8s-public-auth.elb.example.test'),
+            ],
+            'accounts': [ing('accounts-tb-prod', None, 'accounts.ts.example.test')],
+        }
+        rules = [
+            {
+                'tool': 'kubectl',
+                'match': '-n %s get ingress -o json' % ns,
+                'out': json.dumps({'items': v}),
+            }
+            for ns, v in items.items()
+        ] + stage_rules(ecs='accounts-prod')
+        (self.t / 'kc-target').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
+        self.build(HERE, **self.prod_env(rules=rules))
+        text = (self.t / 'shm' / 'cutover.env').read_text()
+        self.assertIn("TBPROD_AUTH_ALB='k8s-public-auth.elb.example.test'", text)
+        self.assertIn("TBPROD_ACCOUNTS_ALB=''", text)
+
+    def test_rebuild_moves_the_window_sha_to_head_on_request(self):
+        self.build(HERE, **self.prod_env())
+        f = self.t / 'shm' / 'cutover.env'
+        f.write_text(f.read_text() + "WINDOW_SHA='fix3'\n")
+        head = subprocess.run(
+            ['git', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True
+        ).stdout.strip()
+        self.build(HERE, '--rebuild', '--move-window-sha', **self.prod_env())
+        self.assertIn("WINDOW_SHA='%s'" % head, f.read_text())
+        self.assertNotIn('fix3', f.read_text())
 
     def test_prod_cloudflare_token_comes_from_the_prod_file(self):
         home = self.t / 'home'
@@ -475,6 +523,14 @@ class KubeconfigGuard(Sandbox):
         self.assertEqual(rc, 64)
         self.assertIn('does not exist', out)
         self.assertEqual(self.log(), '')
+
+    def test_a_call_without_a_kubeconfig_refuses_except_kustomize(self):
+        rc, out = self.guard('kubectl get pods -n thundermail')
+        self.assertEqual(rc, 64, out)
+        self.assertIn('no --kubeconfig, kubectl would use the current context', out)
+        self.assertEqual(self.log(), '')
+        rc, out = self.guard('kubectl kustomize %s' % self.t)
+        self.assertEqual((rc, out), (0, 'reached\n'))
 
     def test_existing_file_reaches_kubectl(self):
         rc, out = self.guard('kubectl --kubeconfig %s/kc-target get pods' % self.t)
