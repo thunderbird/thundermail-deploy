@@ -173,6 +173,9 @@ elif url.endswith('/jmap'):
     elif m == 'x:QueuedMessage/get':
         res = {{'list': [dict(q[i], id=i) for i in a['ids'] if i in q]}}
     elif m == 'x:QueuedMessage/set':
+        if st.pop('slow_set', False):
+            c = os.environ['FAKE_CLOCK']
+            open(c, 'w').write(str(float(open(c).read() or 0) + 45))
         for i in st.pop('start_before_set', []):
             snap = json.loads(json.dumps(q[i]))
             st.setdefault('attempts', {{}})[i] = {{'left': 200, 'snap': snap}}
@@ -903,10 +906,27 @@ class Hold25(Base):
         self.assertEqual(self.state()['ended'], ['46'])
         self.assertIn('held again, overwritten by a delivery attempt that ended: ids=46', p.stdout)
 
+    def test_release_port25_rewrites_a_full_wait_after_a_slow_hold_write(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.edit(
+            pods=['stalwart-a'],
+            queue={'47': msg(time.time() + 40)},
+            start_before_set=['47'],
+            slow_set=True,
+        )
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertIn('hold write finished more than 30 s after the queue read', p.stdout)
+        self.assertEqual(self.state()['ended'], ['47'])
+
     def test_release_port25_closes_port_25_when_the_read_after_opening_fails(self):
-        for after in ({'jmap_down': True}, {'query_cap': 1}):
+        for n, after in enumerate(({'jmap_down': True}, {'query_cap': 1})):
             with self.subTest(after=after):
-                self.setUp()
+                if n:
+                    self.tearDown()
+                    self.setUp()
                 self.held_for_release()
                 self.edit(after_open=after)
                 p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
@@ -916,7 +936,6 @@ class Hold25(Base):
                     'queue hold after opening port 25 failed: closing port 25 again', p.stdout
                 )
                 self.assertNotIn('hold25-release-port25', self.rows())
-                self.tearDown()
 
     def test_release_port25_keeps_port_25_closed_when_the_drain_runs_out(self):
         self.held_for_release()

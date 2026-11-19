@@ -189,6 +189,7 @@ plan() {
               else {safe: ([$cur, $tw + .att * $p] | max), floor: ([$tw + .att * $p, $part] | max), again: ($k != null)} end)] as $m
     | [$m[] | select(.created <= $cut) | .safe - $t | select(. > 0)] as $w
     | {t: $t, tw: $tw, writes: ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): (.safe + $hold)}] | add // {}),
+       alld: ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): ([.rem[].d] | unique | length)}] | add // {}),
        mem: ($mem + ([$m[] | select((.held | not) and .created <= $wcut) | {(.id): {floor, counts}}] | add // {})),
        again: [$m[] | select(.again) | .id], old: ([$m[] | select(.created <= $cut)] | length),
        late: ([$m[] | select(.created > $cut)] | length), tohold: ([$m[] | select((.held | not) and .created <= $cut)] | length),
@@ -196,11 +197,17 @@ plan() {
 }
 
 hold_pass() {
+  local now
   [ "$(jq '.writes | length' <<<"$PLAN")" -gt 0 ] || return 0
   set_retry "$(jq -c .writes <<<"$PLAN")" || return 1
   [ "$APPLY" = 1 ] || return 0
-  [ "$(date -u +%s)" -le "$(jq .tw <<<"$PLAN")" ] || { echo "hold write finished more than $WRITE_SECS s after the queue read; the waits it wrote start too early"; return 1; }
   MEM=$(jq -c .mem <<<"$PLAN") || return 1
+  now=$(date -u +%s)
+  if [ "$now" -gt "$(jq .tw <<<"$PLAN")" ]; then
+    echo "hold write finished more than $WRITE_SECS s after the queue read: writing a full wait from now for every remote domain of those messages"
+    set_retry "$(jq -c --argjson n "$now" --argjson p "$DOMAIN_SECS" --argjson h "$((HOLD_HOURS * 3600))" '.alld | map_values($n + ([., 1] | max) * $p + $h)' <<<"$PLAN")" || return 1
+    MEM=$(jq -c --argjson n "$now" --argjson p "$DOMAIN_SECS" '.mem as $m | $m + (.alld | with_entries(.value = ($m[.key] + {floor: ($n + ([.value, 1] | max) * $p)})))' <<<"$PLAN") || return 1
+  fi
   printf '%s\n' "$MEM" > "$MEMF"
 }
 
