@@ -278,8 +278,10 @@ the keying for the real hosts.
   row, or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
   `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
-  `STALWART_SOURCE_PG_*` of the env file. It then checks that both branches are `ready`, later
-  than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
+  `STALWART_SOURCE_PG_*` of the env file, created at the `parent_lsn` the reset returned (row
+  `reset-lsn`), so a `production` that moves between the two calls does not stop a good reset;
+  the reset proof fails when `parent_lsn` did not change. It then checks that both branches are
+  `ready`, later than the stop row and at the same `parent_lsn`. It also reads schema `00000005`, runs the guard (both
   credentials log in on their branch, and the production endpoint answers `password
   authentication failed` to each), and runs the pre-delete in one transaction (`DELETE <n>`
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
@@ -288,9 +290,38 @@ the keying for the real hosts.
   applies the export. A second reset needs `--go`. `--phase boot` resumes an expired wait
   without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
   restore or blob step.
-- W 4.3 records the stop of legacy Stalwart, once no process is left on the six nodes, with
-  `t=$(date -u +%FT%TZ); printf 'stop-legacy-stalwart\t%s\t%s\tnodes\t6\n' "$t" "$t" >> "$TIMING_TSV"`;
-  the reset phase and `blob_compare.py` read that row.
+- `window/legacy-stalwart.sh read --apply` (W 4.3, after the stop) refuses unless
+  `window/gate.sh stop-legacy` passes, asks the six nodes of `LEGACY_STALWART_NODE_IDS` through SSM
+  Run Command for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
+  `node <id> thundermail=<state> enabled=<state>` line each, and writes the
+  `stop-legacy-stalwart` row only when all six report `inactive` (or `failed`) and `disabled`.
+  The reset phase and `blob_compare.py` read that row. The stop, start and restart modes are not
+  in this script.
+- On tb-prod a step that fails writes no timing row, so every row a gate reads means a pass:
+  `queue-drain` (value 0), `stop-legacy-stalwart`, `reset`, `pre-delete`, `recovery-wait`,
+  `verify-compare` (metrics `fails` and `unexpected_warns`). A stop writes `stop-W4` or `stop-W6`.
+  A failed W6 suite stops at once on tb-prod. `window/gate.sh stop-legacy | merge-recovery |
+  verify-compare` reads them after the last `cut-ecs` row and prints `GO    <gate>: ...` (exit 0)
+  or `WAIT  <gate>: <reason>` (exit 2): `stop-legacy` wants a `queue-drain` 0 row before a
+  `w4-read-done` row and no later `stop-W4`; `merge-recovery` wants `recovery-wait` as the last of
+  `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
+  `verify-compare` wants both rows at 0 and no later `stop-W6`.
+- `window/keep.sh save` encrypts the files of `$SECRET_DIR` that a reboot would lose
+  (`export.json`, `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
+  `duplicates.txt`, `source-branch.env`) with gpg for `KEEP_GPG_RECIPIENT` (operator file) into
+  `$EVIDENCE_DIR/keep/` with a sha256 manifest; W4 runs it after the read phase and after the
+  source branch. After a reboot: `build-cutover-env.sh --rebuild` (it names each kept file that is
+  missing), `window/keep.sh restore --apply` (gpg asks for the key), `--rebuild` again, which takes
+  `STALWART_SOURCE_PG_*` from the restored `source-branch.env`.
+- `verify/02_directory.py` reads `DROPPED_DOMAINS` (`$SECRET_DIR/domains-dropped.json`, written by
+  `domain_fix.py --dropped-list`): it leaves exactly those Domains out of the source set, prints
+  their count, and compares the DkimSignature count of tb-prod with the export after the drop
+  (fewer is a failure, more a warning on the expected list).
+- On tb-prod `window/w5-promote.sh` takes `T6_SHA` from the merge commit of PR 195
+  (`T6_PR_DEFAULT` in `targets/tb-prod.sh`) when the env file has neither `T6_SHA` nor `T6_PR`.
+- `gate-keycloak-version.sh --pull[=IMAGE]` runs the image once before the window and prints
+  `image <ref> cached: Keycloak <version>`; the gate prints the podman error when the image gives
+  no version.
 - `blob_compare.py wait` and `compare` (tb-prod, W 4.6) need the `stop-legacy-stalwart` row after
   the last `cut-ecs` row. `wait --apply` polls rule `tb-prod-cutover` until both pending metrics
   read 0 three times after the stop and the failed operations since `REPL_FAILED_SINCE` sum to 0,
