@@ -287,9 +287,31 @@ the keying for the real hosts.
   equal to the count before, then `0`). Its rows are `reset` and `pre-delete`. It ends with the
   boot steps: it writes a `recovery-wait` row and waits up to `RECOVERY_WAIT` (3600 s) for one
   recovery-mode pod started after the pre-delete, then 900 s for `STALWART_SCHEMA_VERSION`, and
-  applies the export. A second reset needs `--go`. `--phase boot` resumes an expired wait
+  applies the export inside the cluster (below). A second reset needs `--go`. `--phase boot` resumes an expired wait
   without a second reset. tb-prod runs no `task-queue`, dump of a database, `DROP SCHEMA`,
   restore or blob step.
+- On tb-prod the apply runs in a one-shot pod next to Stalwart, never through a port-forward from
+  the workstation: the CLI sends 500 creates per request with a fixed 60 s timeout, and from
+  outside the region every request timed out. `apply-pod.yaml` holds `stalwart-cli` 1.0.13 pinned
+  by digest (an index with linux/amd64 and linux/arm64), the label
+  `app.kubernetes.io/name: stalwart-config-applier`, no service account token, a read-only root,
+  uid 65532, a 3600 s deadline, and the recovery admin from Secret `stalwart-recovery-admin`
+  (keys `STALWART_USER`, `STALWART_PASSWORD`) by reference, as the settings Job has it. W4 creates
+  it with the manifest on stdin and `STALWART_URL=http://<pod IP of the one Ready recovery
+  pod>:8080`, sends `$SECRET_DIR/export.json` through `kubectl attach -i` (stdin; the CLI runs
+  `apply --stdin`), waits `APPLY_POD_WAIT` (1800 s) for the pod to end, writes the timestamped
+  log to `$SECRET_DIR/apply.log` and a copy with addresses masked to
+  `$EVIDENCE_DIR/apply-<TS>.log`, prints `apply: pod/<name> exit=<n> errors=<n> requests=<n>
+  longest request <s>s` from the CLI's `--debug` request lines (`apply_requests.py`), and
+  deletes the pod, also on a failure or an interrupt. No Service changes. The path: the
+  SecurityGroupPolicy `stalwart-config-applier` (tb-prod settings directory, PR 195) gives the
+  pod the Stalwart server security group, which the Stalwart pods carry too (`stalwart-server`),
+  and that group admits TCP 8080 from itself (rule `stalwart_mgmt` in platform-infrastructure
+  `pulumi/modules/thundermail_deploy.py`). The repo holds no NetworkPolicy. A failed batch stops
+  that object type and leaves the earlier batches committed, so a second apply would collide:
+  an `apply-start` row after the pre-delete with no `export-applied` row makes a rerun refuse, and
+  the retry is the revert of the recovery-mode PR and `--phase reset --apply --go` (about 20 to 25
+  minutes).
 - `window/legacy-stalwart.sh read --apply` (W 4.3, after the stop) refuses unless
   `window/gate.sh stop-legacy` passes, asks the six nodes of `LEGACY_STALWART_NODE_IDS` through SSM
   Run Command for `systemctl is-active thundermail; systemctl is-enabled thundermail`, prints one
