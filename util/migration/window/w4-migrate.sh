@@ -339,7 +339,7 @@ neon_need() { [ "$1" = 0 ] || [ "$APPLY" = 1 ] || { printf 'NEED  %s: the Neon r
 
 domain_fix_step() {
   local rc=0
-  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" || rc=$?
+  run_to "$S/domain-fix.txt" "$PY" "$MIG_DIR/domain_fix.py" --export "$S/export.json" --principals "$S/principals.json" || rc=$?
   [ "$APPLY" = 1 ] || return 0
   [ "$rc" = 0 ] || { echo "domain_fix.py exit $rc: $(first_error "$S/domain-fix.txt"); full text in $S/domain-fix.txt"; return 1; }
   grep '^domains checked=' "$S/domain-fix.txt" || true
