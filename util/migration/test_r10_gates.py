@@ -221,5 +221,172 @@ class T6OnTbProd(Prod):
         self.assertIn('T6_SHA from PR 7: def456', out)
 
 
+PODMAN = """#!/bin/sh
+case "$1" in
+  image) exit "${PODMAN_CACHED:-1}" ;;
+  run) [ -n "${PODMAN_FAIL:-}" ] && { echo "Error: initializing source docker://x: $PODMAN_FAIL" >&2; exit 125; }; echo "Keycloak 26.7.5"; exit 0 ;;
+esac
+exit 1
+"""
+KUBECTL = """#!/bin/sh
+case "$*" in
+  *"get sts keycloak-customer"*) printf 'quay.io/keycloak/keycloak@sha256:abc' ;;
+  *psql*) echo 26.7.5 ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+class KeycloakGate(unittest.TestCase):
+    def run_gate(self, *args, **env):
+        t = pathlib.Path(tempfile.mkdtemp())
+        b = t / 'bin'
+        b.mkdir()
+        for name, src in (('podman', PODMAN), ('kubectl', KUBECTL)):
+            (b / name).write_text(src)
+            (b / name).chmod(0o755)
+        e = {
+            'PATH': '%s:/usr/bin:/bin' % b,
+            'HOME': str(t),
+            'TARGET_ENV': 'tb-stage',
+            'CUTOVER_ENV': str(t / 'none.env'),
+            'KUBECONFIG_TARGET': '/dev/null',
+            'KC_LEGACY_PG_HOST': 'kc.example.test',
+            'KC_LEGACY_PG_USER': 'kc',
+            'EVIDENCE_DIR': str(t / 'ev'),
+            'SECRET_DIR': str(t / 'secret'),
+        }
+        e.update(env)
+        p = subprocess.run(
+            ['bash', str(HERE / 'gate-keycloak-version.sh'), *args],
+            capture_output=True,
+            text=True,
+            env=e,
+            timeout=60,
+        )
+        return p.returncode, p.stdout + p.stderr
+
+    def test_a_failed_pull_says_why(self):
+        rc, out = self.run_gate(PODMAN_FAIL='connection refused')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('pulling quay.io/keycloak/keycloak@sha256:abc (not in the local podman store)', out)
+        self.assertIn(
+            'GATE FAIL: podman run of quay.io/keycloak/keycloak@sha256:abc gave no Keycloak '
+            'version (rc=125): Error: initializing source docker://x: connection refused',
+            out,
+        )
+
+    def test_pull_caches_the_image_before_the_window(self):
+        rc, out = self.run_gate('--pull=quay.io/keycloak/keycloak@sha256:def')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('image quay.io/keycloak/keycloak@sha256:def cached: Keycloak 26.7.5', out)
+        rc, out = self.run_gate(PODMAN_CACHED='0')
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('pulling', out)
+        self.assertIn('image=26.7.5 migration_model=26.7.5\nGATE PASS', out)
+
+
+class StaleRuleIds(Prod):
+    def test_a_rule_id_from_before_a_rollback_says_to_rebuild_the_env_file(self):
+        fix = self.t / 'fix'
+        fix.mkdir()
+        snap = self.t / 'sg.json'
+        snap.write_text(
+            json.dumps({'rules': [{'SecurityGroupRuleId': 'sgr-new', 'IsEgress': False}]})
+        )
+        (fix / 'snapshot-legacy-sg.sh').write_text('echo %s\n' % snap)
+        out = self.fn(
+            'w2-cut-legacy.sh',
+            'snap_sg; echo "rc=$?"',
+            'MIG_DIR=%s LEGACY_PUB_SG=sg-1 RULES=(sgr-old)' % fix,
+            env=self.env(TARGET_ENV='tb-prod'),
+        )
+        self.assertIn('rule sgr-old is not an ingress rule of sg-1\na rollback puts the rules back', out)
+        self.assertIn('build-cutover-env.sh reads LEGACY_PUB_SG_RULE_IDS live', out)
+        self.assertIn('rc=1', out)
+
+
+GPG = r"""#!{py}
+import base64, os, sys
+a = sys.argv[1:]
+open(os.environ['FAKE_LOG'], 'a').write('gpg ' + ' '.join(a) + '\n')
+out, src = a[a.index('--output') + 1], a[-1]
+data = open(src, 'rb').read()
+if '--encrypt' in a:
+    rcpt = a[a.index('--recipient') + 1]
+    open(out, 'wb').write(b'ENC ' + rcpt.encode() + b' ' + base64.b64encode(data))
+elif '--decrypt' in a:
+    open(out, 'wb').write(base64.b64decode(data.split(b' ', 2)[2]))
+"""
+
+
+class Keep(Prod):
+    def setUp(self):
+        super().setUp()
+        (self.t / 'bin' / 'gpg').write_text(GPG.format(py=sys.executable))
+        (self.t / 'bin' / 'gpg').chmod(0o755)
+        self.s = self.t / 'secret'
+        self.s.mkdir(mode=0o700)
+        (self.s / 'export.json').write_text('{"secret": "dkim-private-key"}\n')
+        (self.s / 'source-branch.env').write_text('STALWART_SOURCE_PG_PASSWORD=pw-9\n')
+
+    def keep(self, mode, recipient='ops@example.test', apply=1):
+        setup = (
+            'KEEP_DIR=%s/ev/keep KEEP_GPG_RECIPIENT=%s APPLY=%d\n'
+            'KEEP_FILES="export.json principals.json source-branch.env"\n'
+            'GPG=(gpg --batch --yes --quiet)\n' % (self.t, recipient, apply)
+        )
+        return self.fn(
+            'keep.sh', '%s; echo "rc=$? NEEDS=$NEEDS"' % mode, setup, env=self.env(TARGET_ENV='tb-prod')
+        )
+
+    def test_save_encrypts_and_restore_puts_back_after_a_reboot(self):
+        out = self.keep('save')
+        self.assertIn('keep: 2 file(s) of', out)
+        self.assertIn('rc=0', out)
+        k = self.t / 'ev' / 'keep'
+        self.assertEqual(sorted(x.name for x in k.iterdir()), ['export.json.gpg', 'manifest.tsv', 'source-branch.env.gpg'])
+        for f in k.iterdir():
+            self.assertNotIn(b'dkim-private-key', f.read_bytes())
+            self.assertNotIn(b'pw-9', f.read_bytes())
+            self.assertEqual(oct(f.stat().st_mode & 0o777), '0o600')
+        for f in list(self.s.iterdir()):
+            f.unlink()
+        out = self.keep('restore')
+        self.assertIn('restored export.json', out)
+        self.assertIn('restored source-branch.env', out)
+        self.assertEqual((self.s / 'export.json').read_text(), '{"secret": "dkim-private-key"}\n')
+        self.assertEqual(oct((self.s / 'export.json').stat().st_mode & 0o777), '0o600')
+        out = self.keep('restore')
+        self.assertIn('present export.json', out)
+
+    def test_a_tampered_copy_is_not_restored(self):
+        self.keep('save')
+        (self.s / 'export.json').unlink()
+        (self.t / 'ev' / 'keep' / 'export.json.gpg').write_bytes(b'ENC x ' + __import__('base64').b64encode(b'other'))
+        out = self.keep('restore')
+        self.assertIn('export.json: sha256 ', out)
+        self.assertIn('rc=1', out)
+        self.assertFalse((self.s / 'export.json').exists())
+
+    def test_no_recipient_is_a_need_in_the_dry_run_and_a_stop_on_apply(self):
+        out = self.keep('save', recipient='', apply=0)
+        self.assertIn('NEED  KEEP_GPG_RECIPIENT for the encrypted copies of', out)
+        self.assertIn('rc=0 NEEDS=1', out)
+        out = self.keep('save', recipient='')
+        self.assertIn('rc=1', out)
+        self.assertFalse((self.t / 'ev' / 'keep').exists())
+
+    def test_the_read_phase_keeps_the_export(self):
+        text = (HERE / 'window' / 'w4-migrate.sh').read_text()
+        body = text[text.index('read_phase() {') :]
+        body = body[: body.index('\n}\n')]
+        self.assertLess(body.index('mark w4-export file'), body.index('step keep files keep_copy'))
+        reset = text[text.index('reset_phase() {') :]
+        self.assertLess(
+            reset.index('step source-branch-create'), reset.index('step keep-source files keep_copy')
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
