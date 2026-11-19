@@ -185,6 +185,13 @@ class Server:
                         got['size'] += self.readback_delta
                     lst.append({'id': i, **got})
             return [name, {'list': lst, 'notFound': []}, cid]
+        if name == 'Email/set' and self.kind == 15:
+            done = {}
+            for eid, patch in args['update'].items():
+                for k, v in patch.items():
+                    acc['emails'][eid]['mailboxIds'][k.split('/', 1)[1]] = v
+                done[eid] = None
+            return [name, {'updated': done}, cid]
         if name == 'Email/import' and self.kind == 15:
             spec = args['emails']['e']
             body = self.blobs[spec['blobId']]
@@ -347,9 +354,11 @@ class Tool(unittest.TestCase):
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
         self.assertEqual(rc, 0, out)
         self.assertIn(
-            'account=1 legacy=1 messages=2 delivered=2 present=0 failed=0 mailboxes_created=2', out
+            'account=1 legacy=1 messages=2 delivered=2 present=0 linked=0 failed=0 '
+            'mailboxes_created=2',
+            out,
         )
-        self.assertIn('delivered=3 present=0 failed=0 missing=0 in_legacy=3', out)
+        self.assertIn('delivered=3 present=0 linked=0 failed=0 missing=0 in_legacy=3', out)
         al = self.legacy(self.alice15)
         names = {k: v['name'] for k, v in al['boxes'].items()}
         got = {}
@@ -375,7 +384,7 @@ class Tool(unittest.TestCase):
         self.assertEqual(self.rows()[-1][4], '3')
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
         self.assertEqual(rc, 0, out)
-        self.assertIn('delivered=0 present=3 failed=0 missing=0 in_legacy=3', out)
+        self.assertIn('delivered=0 present=3 linked=0 failed=0 missing=0 in_legacy=3', out)
         self.assertEqual(sum(len(a['emails']) for a in self.v15.accounts.values()), 3)
         tsv = sorted(self.out.glob('import-*.tsv'))
         self.assertTrue(tsv)
@@ -387,7 +396,7 @@ class Tool(unittest.TestCase):
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
         self.assertEqual(rc, 1, out)
         self.assertIn('account=3 messages=1 MISSING: no legacy principal holds its address', out)
-        self.assertIn('delivered=3 present=0 failed=0 missing=1', out)
+        self.assertIn('delivered=3 present=0 linked=0 failed=0 missing=1', out)
         self.assertEqual([r[0] for r in self.rows()], ['mail-export'])
 
     def test_a_changed_file_is_not_imported(self):
@@ -487,7 +496,7 @@ class Tool(unittest.TestCase):
         self.assertEqual(sum(len(a['emails']) for a in self.v15.accounts.values()), 1)
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
         self.assertEqual(rc, 0, out)
-        self.assertIn('delivered=2 present=1 failed=0 missing=0 in_legacy=3', out)
+        self.assertIn('delivered=2 present=1 linked=0 failed=0 missing=0 in_legacy=3', out)
         self.assertEqual(sum(len(a['emails']) for a in self.v15.accounts.values()), 3)
 
     def test_a_legacy_account_without_an_inbox_stops(self):
@@ -508,6 +517,41 @@ class Tool(unittest.TestCase):
         rc, out = self.run_tool('import', '--from', str(self.out), '--apply', OLD_STALWART_URL=same)
         self.assertEqual(rc, 1, out)
         self.assertIn('refusing to import into tb-prod', out)
+
+    def test_two_messages_with_the_same_key_and_other_bytes_are_both_imported(self):
+        when = '2026-11-19T18:10:00Z'
+        self.v16.put(self.bob16, raw('aaa', 'bob', 't', mid=False), when)
+        self.v16.put(self.bob16, raw('bbb', 'bob', 't', mid=False), when)
+        self.assertEqual(self.export('--apply')[0], 0)
+        rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('delivered=5 present=0 linked=0 failed=0 missing=0 in_legacy=5', out)
+        self.assertEqual(len(self.legacy(self.bob15)['emails']), 3)
+        rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('delivered=0 present=5 linked=0 failed=0 missing=0 in_legacy=5', out)
+
+    def test_a_message_legacy_holds_in_one_of_its_folders_gets_the_other(self):
+        body = raw('both', 'alice', 'both')
+        when = '2026-11-19T18:11:00Z'
+        self.v16.put(self.alice16, body, when, boxes=('a', 'q'))
+        self.legacy(self.alice15)['boxes'].update(
+            {
+                'p': {'name': 'Projects', 'role': None, 'parentId': None},
+                'q': {'name': '2026', 'role': None, 'parentId': 'p'},
+            }
+        )
+        held = self.v15.put(self.alice15, body, when)
+        self.assertEqual(self.export('--apply')[0], 0)
+        rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('account=1 legacy=1 messages=3 delivered=2 present=0 linked=1 failed=0', out)
+        al = self.legacy(self.alice15)['emails']
+        self.assertEqual(sorted(al[held]['mailboxIds']), ['a', 'q'])
+        self.assertEqual(len(al), 3)
+        rc, out = self.run_tool('import', '--from', str(self.out), '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('delivered=0 present=4 linked=0 failed=0', out)
 
 
 FAKE_PY = """#!{py}

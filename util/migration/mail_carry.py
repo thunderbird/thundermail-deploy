@@ -386,6 +386,7 @@ class Legacy:
         if 'inbox' not in self.role:
             raise Stop('legacy account %s has no Inbox' % account)
         self.keys = {}
+        self.emails = {}
         self.created = 0
 
     def mailbox(self, box):
@@ -414,17 +415,48 @@ class Legacy:
 
     def present(self, mailbox):
         if mailbox not in self.keys:
-            keys = set()
+            found = collections.defaultdict(list)
             if not mailbox.startswith('new-'):
                 ids = self.j.query_all(
                     'Email/query', {'accountId': self.acc, 'filter': {'inMailbox': mailbox}}
                 )
-                for e in self.j.get(
-                    'Email/get', self.acc, ids, ['receivedAt', 'size', 'messageId']
-                ):
-                    keys.add(key(e))
-            self.keys[mailbox] = keys
+                props = ['receivedAt', 'size', 'messageId', 'blobId', 'mailboxIds']
+                for e in self.j.get('Email/get', self.acc, ids, props):
+                    entry = self.emails.setdefault(
+                        e['id'],
+                        {
+                            'id': e['id'],
+                            'blob': e['blobId'],
+                            'sha': None,
+                            'boxes': {b for b, v in (e.get('mailboxIds') or {}).items() if v},
+                        },
+                    )
+                    found[key(e)].append(entry)
+            self.keys[mailbox] = found
         return self.keys[mailbox]
+
+    def sha(self, entry):
+        if entry['sha'] is None:
+            path = '/jmap/download/%s/%s/m.eml' % (
+                self.acc,
+                urllib.parse.quote(entry['blob'], safe=''),
+            )
+            entry['sha'] = hashlib.sha256(self.j.raw(path, timeout=300)).hexdigest()
+        return entry['sha']
+
+    def match(self, boxes, m):
+        for b in boxes:
+            for entry in self.present(b).get(key(m), []):
+                if self.sha(entry) == m.get('sha256'):
+                    return entry
+        return None
+
+    def add(self, entry, boxes, m):
+        entry['boxes'].update(boxes)
+        for b in boxes:
+            same = self.present(b)[key(m)]
+            if entry not in same:
+                same.append(entry)
 
 
 def err_type(r, cid):
@@ -452,11 +484,26 @@ def key(m):
 
 def import_one(j, leg, src, m):
     boxes = [leg.mailbox(b) for b in m['mailboxes']] or [leg.role['inbox']]
-    seen = leg.present(boxes[0])
-    if key(m) in seen:
-        return 'present', None
+    found = leg.match(boxes, m)
+    if found:
+        missing = [b for b in boxes if b not in found['boxes']]
+        if not missing:
+            return 'present', None
+        if leg.apply:
+            r = j.one(
+                'Email/set',
+                {
+                    'accountId': leg.acc,
+                    'update': {found['id']: {'mailboxIds/' + b: True for b in missing}},
+                },
+                retry=False,
+            )
+            if found['id'] not in (r.get('updated') or {}):
+                return 'failed', 'Email/set did not add the folder'
+        leg.add(found, missing, m)
+        return 'linked', None
     if not leg.apply:
-        seen.add(key(m))
+        leg.add({'id': 'new', 'blob': None, 'sha': m.get('sha256'), 'boxes': set()}, boxes, m)
         return 'delivered', None
     body = read_export(src, m)
     if body is None:
@@ -485,7 +532,7 @@ def import_one(j, leg, src, m):
     back = j.get('Email/get', leg.acc, [made['id']], ['size'])
     if not back or back[0].get('size') != m['size']:
         return 'failed', 'read back after the import differs'
-    seen.add(key(m))
+    leg.add({'id': made['id'], 'blob': None, 'sha': m['sha256'], 'boxes': set()}, boxes, m)
     return 'delivered', made['id']
 
 
@@ -559,7 +606,7 @@ def cmd_import(a):
                     print('account=%d email=%s FAILED: %s' % (account, m['email'], note))
             totals.update(c)
             print(
-                'account=%d legacy=%d messages=%d %s=%d present=%d failed=%d %s=%d'
+                'account=%d legacy=%d messages=%d %s=%d present=%d linked=%d failed=%d %s=%d'
                 % (
                     account,
                     ids[0],
@@ -567,20 +614,23 @@ def cmd_import(a):
                     'delivered' if a.apply else 'to_import',
                     c['delivered'],
                     c['present'],
+                    c['linked'],
                     c['failed'],
                     'mailboxes_created' if a.apply else 'mailboxes_to_create',
                     leg.created,
                 )
             )
-    done = totals['delivered'] + totals['present']
+    done = totals['delivered'] + totals['present'] + totals['linked']
     print(
-        'mail-import: export=%s messages=%d %s=%d present=%d failed=%d missing=%d%s mode=%s'
+        'mail-import: export=%s messages=%d %s=%d present=%d linked=%d failed=%d missing=%d%s '
+        'mode=%s'
         % (
             src.name,
             len(msgs),
             'delivered' if a.apply else 'to_import',
             totals['delivered'],
             totals['present'],
+            totals['linked'],
             totals['failed'],
             totals['missing'],
             ' in_legacy=%d' % done if a.apply else '',
