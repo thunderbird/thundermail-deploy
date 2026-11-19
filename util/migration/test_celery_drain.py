@@ -37,7 +37,7 @@ elif cmd == 'logs describe-log-streams':
 elif cmd == 'logs get-log-events':
     cycles = st['cycles']
     ev = cycles[min(st.get('reads', 1), len(cycles)) - 1].get(opt('--log-stream-name'), [])
-    since = int(opt('--start-time'))
+    since = int(opt('--start-time') or 0)
     ev = [{'timestamp': now - a, 'message': m} for a, m in ev if now - a >= since]
     tok = opt('--next-token')
     if opt('--log-stream-name') in st.get('garbled', []):
@@ -287,6 +287,35 @@ class CeleryDrain(Base):
         self.assertIn(' %s %s received' % (TASK, ID1), seen)
         self.assertNotIn('secret', seen + out)
 
+    def test_a_task_received_hours_ago_and_unfinished_stays_held(self):
+        old = [[3 * 3600 * 1000, line(0, TASK, ID2, 'received')]]
+        self.state(cycles=[{STREAM + 'aaa': done(ID1), STREAM + 'bbb': old}])
+        rc, out = self.run_tool('read', '--apply')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('celery held=1 ', out)
+        self.assertRegex(out, r'held %s received 10(799|800|801)s' % re.escape(TASK))
+
+    def test_each_stream_is_read_from_its_head_once_then_by_token(self):
+        self.snapshot()
+        held = {
+            STREAM + 'aaa': done(ID1),
+            STREAM + 'bbb': [[20000, line(0, TASK, ID2, 'received')]],
+        }
+        fin = {
+            STREAM + 'aaa': done(ID1),
+            STREAM + 'bbb': held[STREAM + 'bbb']
+            + [[10000, line(0, TASK, ID2, 'succeeded in 1s: x')]],
+        }
+        self.state(cycles=[held, held, fin])
+        rc, out = self.run_tool('wait', '--apply')
+        self.assertEqual(rc, 0, out)
+        reads = [ln for ln in self.log().splitlines() if 'get-log-events' in ln]
+        self.assertNotIn('--start-time', ''.join(reads))
+        for st in ('aaa', 'bbb'):
+            mine = [ln for ln in reads if '--log-stream-name %s%s ' % (STREAM, st) in ln]
+            self.assertEqual(sum('--next-token' not in ln for ln in mine), 1, mine)
+            self.assertGreater(len(mine), 3)
+
     def test_a_retry_or_a_page_boundary_keeps_a_task_held(self):
         ev = done(ID1, 300) + [
             [200000, line(0, TASK, ID2, 'received')],
@@ -307,7 +336,12 @@ class CeleryDrain(Base):
             STREAM + 'aaa': done(ID1),
             STREAM + 'bbb': [[20000, line(0, TASK, ID2, 'received')]],
         }
-        self.state(cycles=[held, held, {STREAM + 'aaa': done(ID1), STREAM + 'bbb': done(ID2)}])
+        fin = {
+            STREAM + 'aaa': done(ID1),
+            STREAM + 'bbb': held[STREAM + 'bbb']
+            + [[10000, line(0, TASK, ID2, 'succeeded in 1s: x')]],
+        }
+        self.state(cycles=[held, held, fin])
         rc, out = self.run_tool('wait', '--apply')
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count('celery held=1 '), 2, out)

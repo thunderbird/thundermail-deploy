@@ -12,9 +12,8 @@ need LEGACY_ECS_TARGETS LEGACY_ECS_CLUSTER_PREFIX
 RO=(aws --profile mzla-legacy-ro --region "$AWS_REGION")
 TIMEOUT=${CELERY_DRAIN_TIMEOUT:-900}
 INTERVAL=${CELERY_DRAIN_INTERVAL:-30}
-LOOKBACK=${CELERY_DRAIN_LOOKBACK:-7200}
 FRESH=${CELERY_DRAIN_FRESH:-180}
-for v in "$TIMEOUT" "$INTERVAL" "$LOOKBACK" "$FRESH"; do [[ $v =~ ^[0-9]+$ ]] || { echo "CELERY_DRAIN_TIMEOUT, _INTERVAL, _LOOKBACK and _FRESH take whole seconds (got '$v')" >&2; exit 64; }; done
+for v in "$TIMEOUT" "$INTERVAL" "$FRESH"; do [[ $v =~ ^[0-9]+$ ]] || { echo "CELERY_DRAIN_TIMEOUT, _INTERVAL and _FRESH take whole seconds (got '$v')" >&2; exit 64; }; done
 W2_RESTORE=$EVIDENCE_DIR/cut-legacy-restore.txt
 read -ra CELERY <<<"$(tr ' ' '\n' <<<"$LEGACY_ECS_TARGETS" | grep -- '-celery-' | tr '\n' ' ' || :)"
 [ "${#CELERY[@]}" = 1 ] || stop "LEGACY_ECS_TARGETS names ${#CELERY[@]} Celery services, not 1: $LEGACY_ECS_TARGETS"
@@ -29,13 +28,18 @@ log_group() {
   LOG_GROUP=${g[0]}
 }
 
+declare -A TOK=()
+SEEN=""
+
 events() {
-  local s=$1 since=$2 tok="" out next n
+  local s=$1 tok=${TOK[$1]:-} out next n lines
   while :; do
-    out=$("${RO[@]}" logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-time "$since" --start-from-head ${tok:+--next-token "$tok"} --output json) || return 1
-    printf '%s' "$out" | jq -r '.events[] | [(.timestamp | tostring)] + (.message | first(capture("Task (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\] (?<w>[a-z]+)"), (capture("Discarding revoked task: (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "revoked"), {n: "-", i: "-", w: "-"}) | [.n, .i, .w]) | join(" ")' || return 1
+    out=$("${RO[@]}" logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$s" --start-from-head ${tok:+--next-token "$tok"} --output json) || return 1
+    lines=$(printf '%s' "$out" | jq -r '.events[] | [(.timestamp | tostring)] + (.message | first(capture("Task (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\] (?<w>[a-z]+)"), (capture("Discarding revoked task: (?<n>[A-Za-z0-9_.:]+)\\[(?<i>[0-9a-f-]+)\\]") | .w = "revoked"), {n: "-", i: "-", w: "-"}) | [.n, .i, .w]) | join(" ")') || return 1
     n=$(printf '%s' "$out" | jq '.events | length') || return 1
     next=$(printf '%s' "$out" | jq -r '.nextForwardToken // ""') || return 1
+    [ -z "$lines" ] || SEEN+=$lines$'\n'
+    [ -z "$next" ] || TOK[$s]=$next
     [ "$n" -gt 0 ] && [ -n "$next" ] && [ "$next" != "$tok" ] || return 0
     tok=$next
   done
@@ -53,25 +57,24 @@ held_count() {
 }
 
 celery_read() {
-  local svc desired running tasks t s streams now since out sum held rec fin age
+  local svc desired running tasks t s streams now sum held rec fin age missing="" failed=""
   svc=$("${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text) || { echo "ecs describe-services $CL/$SV failed"; return 1; }
   read -r desired running <<<"$svc"
   tasks=$("${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text) || { echo "ecs list-tasks $CL/$SV failed"; return 1; }
   read -ra tasks <<<"$(tr '\t' ' ' <<<"$tasks")"
   streams=$("${RO[@]}" logs describe-log-streams --log-group-name "$LOG_GROUP" --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text) || { echo "logs describe-log-streams failed"; return 1; }
   now=$(( $(date +%s) * 1000 ))
-  since=$(( now - LOOKBACK * 1000 ))
-  out=$(for t in "${tasks[@]}"; do
+  for t in "${tasks[@]}"; do
     s=$(tr '\t' '\n' <<<"$streams" | grep -m1 -- "/${t##*/}\$" || :)
-    [ -n "$s" ] || { echo "MISSING ${t##*/}"; continue; }
-    events "$s" "$since" || echo "FAILED $s"
-  done) || return 1
-  if grep -q '^MISSING ' <<<"$out"; then echo "no log stream in $LOG_GROUP for running Celery task(s): $(sed -n 's/^MISSING //p' <<<"$out" | tr '\n' ' ')"; return 1; fi
-  if grep -q '^FAILED ' <<<"$out"; then echo "logs get-log-events failed for $(sed -n 's/^FAILED //p' <<<"$out" | tr '\n' ' ')"; return 1; fi
-  sum=$(held_count "$now" <<<"$out")
+    [ -n "$s" ] || { missing="$missing ${t##*/}"; continue; }
+    events "$s" || failed="$failed $s"
+  done
+  [ -z "$missing" ] || { echo "no log stream in $LOG_GROUP for running Celery task(s):$missing"; return 1; }
+  [ -z "$failed" ] || { echo "logs get-log-events failed for$failed"; return 1; }
+  sum=$(printf '%s' "$SEEN" | held_count "$now")
   sed '$d' <<<"$sum"
   read -r held rec fin age <<<"$(tail -1 <<<"$sum")"
-  printf 'celery held=%s received=%s finished=%s newest_log_age=%ss desired=%s running=%s tasks=%s lookback=%ss\n' "$held" "$rec" "$fin" "$age" "$desired" "$running" "${#tasks[@]}" "$LOOKBACK"
+  printf 'celery held=%s received=%s finished=%s newest_log_age=%ss desired=%s running=%s tasks=%s\n' "$held" "$rec" "$fin" "$age" "$desired" "$running" "${#tasks[@]}"
   HELD=$held
   READ_OK=0
   [ "$desired" -gt 0 ] && [ "$running" = "$desired" ] && [ "${#tasks[@]}" = "$running" ] && [ "$age" -ge 0 ] && [ "$age" -le "$FRESH" ] && READ_OK=1
@@ -110,7 +113,7 @@ plan() {
   printf '  + %s\n' "$(shq "${RO[@]}" ecs describe-services --cluster "$CL" --services "$SV" --query 'services[0].[desiredCount,runningCount]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" ecs list-tasks --cluster "$CL" --service-name "$SV" --desired-status RUNNING --query 'taskArns[]' --output text)"
   printf '  + %s\n' "$(shq "${RO[@]}" logs describe-log-streams --log-group-name '<celery log group>' --order-by LastEventTime --descending --max-items 50 --query 'logStreams[].logStreamName' --output text)"
-  printf '  + %s   (one per running task, the last %ss, paged)\n' "$(shq "${RO[@]}" logs get-log-events --log-group-name '<celery log group>' --log-stream-name '<stream of the task>' --start-time '<now-lookback>' --start-from-head --output json)" "$LOOKBACK"
+  printf '  + %s   (one per running task: its whole stream once, then the new events after the forward token)\n' "$(shq "${RO[@]}" logs get-log-events --log-group-name '<celery log group>' --log-stream-name '<stream of the task>' --start-from-head --output json)"
   [ "$CMD" = read ] || printf '  then the desired count check above again, and row celery-drain held 0\n'
 }
 
