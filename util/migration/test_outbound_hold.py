@@ -159,8 +159,11 @@ elif url.endswith('/jmap'):
     m, a, tag = req['methodCalls'][0]
     q = st['queue']
     if m == 'x:QueuedMessage/query':
-        ids = sorted(q)[a.get('position', 0):a.get('position', 0) + a.get('limit', 500)]
-        res = {{'ids': ids}}
+        cap = min(a.get('limit', 500), st.get('query_cap', 5000))
+        ids = sorted(q)[a.get('position', 0):a.get('position', 0) + cap]
+        res = {{'ids': ids, 'limit': cap}}
+        for i in st.pop('drop_after_query', []):
+            q.pop(i, None)
     elif m == 'x:QueuedMessage/get':
         res = {{'list': [dict(q[i], id=i) for i in a['ids'] if i in q]}}
     elif m == 'x:QueuedMessage/set':
@@ -855,6 +858,31 @@ class Hold25(Base):
         self.assertIn('drain: queued before the drain: 2500 remote, 0 still waiting', p.stdout)
         self.assertIn('read back: queue: total=2500 remote=2500 held=2500 not_held=0', p.stdout)
         self.assertEqual(self.egress(), {('-1', -1, -1)})
+
+    def test_release_port25_sees_mail_past_a_message_removed_during_the_read(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        now = time.time()
+        q = {'%05d' % n: msg(now + 22 * 3600) for n in range(500)}
+        q['%05d' % 0] = msg(now - 60, queue='local')
+        q['99999'] = msg(now - 60)
+        self.edit(pods=['stalwart-a'], queue=q, drop_after_query=['00000'])
+        self.add_row('hold25-queue-hold')
+        self.in_flight('99999', 200)
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertEqual(p.returncode, 0, p.stdout[-2000:] + p.stderr[-2000:])
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertIn('ids=99999', p.stdout)
+
+    def test_hold_stops_when_one_query_cannot_list_the_queue(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.queue()
+        self.edit(query_cap=3)
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('queue: one query returned 3 ids, its limit', p.stdout)
+        self.assertEqual(self.egress(), CLOSED)
+        self.assertNotIn('x:QueuedMessage/set', p.stdout)
 
     def test_release_port25_keeps_port_25_closed_when_the_drain_runs_out(self):
         self.held_for_release()

@@ -16,6 +16,7 @@ DOMAIN_SECS=${QUEUE_DOMAIN_ATTEMPT_SECONDS:-1360}
 DRAIN_POLL=${QUEUE_DRAIN_POLL_SECONDS:-15}
 DRAIN_MAX=${QUEUE_DRAIN_MAX_SECONDS:-5400}
 LOCK_SECS=605
+QUERY_LIMIT=5000
 MEMF=$EVIDENCE_DIR/hold25-memory.json
 MEM='{}'
 PLAN='{}'
@@ -134,13 +135,10 @@ connect() {
 }
 
 read_queue() {
-  local qids='[]' page list='[]' i now min cut=${1:-9999999999}
-  while :; do
-    page=$(call x:QueuedMessage/query "$(jq -cn --argjson p "$(jq length <<<"$qids")" '{position: $p, limit: 500}')" | jq -c '.ids') || return 1
-    [ "$(jq length <<<"$page")" -gt 0 ] || break
-    qids=$(printf '%s\n%s\n' "$qids" "$page" | jq -cs '.[0] + .[1]') || return 1
-    [ "$(jq length <<<"$page")" = 500 ] || break
-  done
+  local qids page list='[]' i now min cut=${1:-9999999999}
+  page=$(call x:QueuedMessage/query "{\"limit\": $QUERY_LIMIT}") || return 1
+  qids=$(jq -c '.ids' <<<"$page") || return 1
+  [ "$(jq '.ids | length' <<<"$page")" -lt "$(jq --argjson l "$QUERY_LIMIT" '.limit // $l' <<<"$page")" ] || { echo "queue: one query returned $(jq '.ids | length' <<<"$page") ids, its limit; the queue may hold more and cannot be read in one scan"; return 1; }
   for ((i = 0; i < $(jq length <<<"$qids"); i += 100)); do
     page=$(call x:QueuedMessage/get "$(jq -c --argjson i "$i" '{ids: .[$i:$i + 100]}' <<<"$qids")" | jq -c '.list') || return 1
     list=$(printf '%s\n%s\n' "$list" "$page" | jq -cs '.[0] + .[1]') || return 1
