@@ -1132,6 +1132,14 @@ class QuotaReset(Sandbox):
         self.assertEqual(rc, 0, out)
         self.assertIn('dry-run: then print the task id, write a quota-reset-started row and return without waiting', out)
 
+    def test_status_does_not_report_done_when_the_usage_read_fails(self):
+        first = {'tool': 'curl', 'match': 'x:Account/query.*"position":0,', 'out': jmap_reply('x:Account/query', {'ids': ['a1']})}
+        self.rules([first] + self.queue([], []))
+        rc, out = self.tool('status', 't9')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('quota reset status: the queues are empty but x:Account/get failed: usage not read', out)
+        self.assertNotIn('DONE', out)
+
     def test_status_reads_done_running_and_error(self):
         (self.t / 'ev' / 'timing-tb-prod.tsv').write_text('quota-reset-started\tx\tx\ttask\tt9\n')
         self.rules(self.queue([], ['a1', 'a2']))
