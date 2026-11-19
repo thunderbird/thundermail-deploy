@@ -286,6 +286,19 @@ the keying for the real hosts.
 - W 4.3 records the stop of legacy Stalwart, once no process is left on the six nodes, with
   `t=$(date -u +%FT%TZ); printf 'stop-legacy-stalwart\t%s\t%s\tnodes\t6\n' "$t" "$t" >> "$TIMING_TSV"`;
   the reset phase and `blob_compare.py` read that row.
+- `blob_compare.py wait` and `compare` (tb-prod, W 4.6) need the `stop-legacy-stalwart` row after
+  the last `cut-ecs` row. `wait --apply` polls rule `tb-prod-cutover` until both pending metrics
+  read 0 three times after the stop and the failed operations since `REPL_FAILED_SINCE` sum to 0,
+  then writes a `blob-replication-wait` row. `compare` lists both buckets in parallel by key range
+  (current versions; a delete marker or an absent key in tb-prod is missing), compares size and
+  ETag, and with `--apply` copies each difference from legacy and writes a `blob-compare left N`
+  row. It deletes nothing. The blobs `STALWART_WEBADMIN`, `STALWART_SPAM_TRAIN_DATA.lz4` and
+  `STALWART_SPAM_CLASSIFIER_MODEL.lz4` must match by checksum, or the run stops; Stalwart stores
+  them under the base32 of the blob key in its own alphabet (`knkectcxifjfix7xivbecrcnjfha` and so
+  on), which is what the compare looks up and prints beside the name. `--workers` defaults to 48:
+  with one `aws` process per page a review measured 48 at a time at 16 minutes for the dry run and
+  9 more for the relist of `--apply` (16 at a time: 42 and 23). Listings stay under `$EVIDENCE_DIR/blob-compare`, copies in
+  transit under `$SECRET_DIR`.
 - `setenv`, `setenv_secret` and the env file edits of W4 hold `flock` on `$ENV_FILE.lock`;
   `check-prereqs.sh` reads the env file under the same lock, shared.
 - `window/w7-since-flip.sh` counts `message-ingest.ham|spam` (inbound) and
