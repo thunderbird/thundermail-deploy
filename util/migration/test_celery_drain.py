@@ -26,6 +26,9 @@ def opt(name):
 sub = args[args.index('--region') + 2:]
 cmd = ' '.join(sub[:2])
 out, rc = '', 0
+if cmd in st.get('fail', []):
+    sys.stderr.write('Error when retrieving token from sso: Token has expired and refresh failed\n')
+    sys.exit(255)
 if cmd == 'ecs describe-services':
     d, r = st['services'][opt('--cluster') + '/' + opt('--services')]
     out = str(d) if opt('--query') == 'services[0].desiredCount' else '%d\t%d' % (d, r)
@@ -502,6 +505,128 @@ class CeleryDrain(Base):
         rc, out = self.run_tool('wait', '--apply', CELERY_DRAIN_TIMEOUT='0')
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count('celery held='), 1, out)
+
+    def held_tsv(self):
+        return list((self.t / 'ev').glob('celery-held-*.tsv'))
+
+    def test_timed_read_records_what_is_still_held_and_exits_0(self):
+        self.snapshot()
+        retry = 'retry: Retry in 3600s: secret-arg@b.test'
+        ev = done(ID1, 900) + [
+            [600000, line(0, TASK, ID2, 'received')],
+            [500000, line(0, TASK, ID2, retry)],
+        ]
+        third = '3' * 8 + ID1[8:]
+        cyc = {STREAM + 'aaa': ev, STREAM + 'bbb': [[20000, line(0, TASK, third, 'received')]]}
+        self.state(cycles=[cyc])
+        rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='1')
+        self.assertEqual(rc, 0, out)
+        self.assertGreater(out.count('celery held=2 '), 1, out)
+        self.assertNotIn('STOP', out)
+        f = self.held_tsv()
+        self.assertEqual(len(f), 1, out)
+        self.assertRegex(
+            out,
+            r'celery timed read: held=2 ignored=0 after \d+s of at most 1s; recorded in %s\n'
+            % re.escape(str(f[0])),
+        )
+        rows = [r.split('\t') for r in f[0].read_text().splitlines()]
+        self.assertEqual(rows[0], ['task', 'id', 'state', 'first_log_utc', 'last_log_utc', 'note'])
+        self.assertEqual(
+            [r[:3] for r in rows[1:]], [[TASK, ID2, 'retry'], [TASK, third, 'received']]
+        )
+        for r in rows[1:]:
+            self.assertRegex(r[3] + r[4], r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ){2}$')
+            self.assertEqual(r[5], 'held')
+        self.assertLess(rows[1][3], rows[1][4])
+        self.assertNotIn('secret', f[0].read_text() + out)
+        self.assertEqual(self.rows()[-1], 'celery-read')
+        self.assertTrue(self.timing().read_text().rstrip().endswith('held\t2'))
+        self.assertNotIn('celery-drain', self.rows())
+        self.assertEqual(list((self.t / 'ev').glob('*.raw')), [])
+
+    def test_timed_read_ends_early_at_held_0_and_records_ignored_tasks(self):
+        self.snapshot()
+        held = {
+            STREAM + 'aaa': done(ID1),
+            STREAM + 'bbb': [[3600000, line(0, TASK, ID2, 'received')]],
+        }
+        self.state(cycles=[held])
+        rc, out = self.run_tool(
+            'timed', '--apply', CELERY_DRAIN_READ_FOR='600', CELERY_DRAIN_IGNORE=ID2
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.count('celery held='), 1, out)
+        self.assertIn('celery timed read: held=0 ignored=1 after ', out)
+        rows = self.held_tsv()[0].read_text().splitlines()
+        self.assertEqual(len(rows), 2, rows)
+        self.assertTrue(rows[1].startswith('%s\t%s\treceived\t' % (TASK, ID2)), rows)
+        self.assertTrue(rows[1].endswith('\tignored'), rows)
+        self.state()
+        rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='600', TS='t2')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('celery timed read: held=0 ignored=0 ', out)
+        t2 = self.t / 'ev' / 'celery-held-t2.tsv'
+        self.assertEqual(len(t2.read_text().splitlines()), 1)
+
+    def test_timed_read_that_failed_is_not_an_empty_read(self):
+        self.snapshot()
+        idle = [[30000, '[2026-11-19 07:00:00,000: INFO/MainProcess] Connected to redis://x']]
+        cases = [
+            ({'cycles': [{STREAM + 'aaa': idle, STREAM + 'bbb': idle}]}, 'no Celery task line'),
+            (
+                {'tasks': ['aaa', 'ccc']},
+                'no log stream in %s for running Celery task(s): ccc' % GROUP,
+            ),
+            ({'garbled': [STREAM + 'bbb']}, 'logs get-log-events failed for %sbbb' % STREAM),
+            ({'fail': ['logs get-log-events']}, 'logs get-log-events failed for'),
+            ({'fail': ['ecs list-tasks']}, 'ecs list-tasks %s/%s failed' % (CL, SV)),
+            (
+                {
+                    'tasks': [],
+                    'services': {t: [2, 2] for t in TARGETS.split()} | {CL + '/' + SV: [2, 0]},
+                },
+                'no Celery task line',
+            ),
+        ]
+        for n, (st, why) in enumerate(cases):
+            self.state(**st)
+            rc, out = self.run_tool('timed', '--apply', CELERY_DRAIN_READ_FOR='0', TS='f%d' % n)
+            self.assertEqual(rc, 1, (st, out))
+            self.assertIn(why, out)
+            self.assertIn('STOP CELERY (apply): ', out)
+            self.assertIn('a failed read is not an empty read', out)
+            self.assertNotIn('celery timed read:', out)
+        self.assertEqual(self.held_tsv(), [])
+        self.assertNotIn('celery-read', self.rows())
+
+    def test_wait_never_passes_a_read_with_no_task_line(self):
+        self.snapshot()
+        idle = [[30000, '[2026-11-19 07:00:00,000: INFO/MainProcess] Connected to redis://x']]
+        self.state(cycles=[{STREAM + 'aaa': idle, STREAM + 'bbb': idle}])
+        rc, out = self.run_tool('wait', '--apply', CELERY_DRAIN_TIMEOUT='0')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('celery held=0 received=0 finished=0 ', out)
+        self.assertIn('not a drained read: needs desired=running=tasks above 0, a task line', out)
+        self.assertNotIn('celery-drain', self.rows())
+
+    def test_timed_dry_run_prints_the_plan_and_calls_nothing(self):
+        rc, out = self.run_tool('timed')
+        self.assertEqual(rc, 2, out)
+        self.assertIn('NEED  no %s' % (self.t / 'ev' / 'cut-legacy-restore.txt'), out)
+        self.snapshot()
+        rc, out = self.run_tool('timed', CELERY_DRAIN_READ_FOR='240')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('every 0s for at most 240s, ending early at held=0', out)
+        self.assertIn(
+            'the tasks still held to %s' % (self.t / 'ev' / 'celery-held-20261119T000000Z.tsv'), out
+        )
+        self.assertIn('row celery-read held <n>', out)
+        self.assertIn('CELERY dry-run: done', out)
+        self.assertEqual(self.log(), '')
+        self.assertEqual(self.held_tsv(), [])
+        rc, out = self.run_tool('timed', CELERY_DRAIN_READ_FOR='3m')
+        self.assertEqual(rc, 64, out)
 
     def test_one_celery_service_and_one_celery_log_group(self):
         self.env_file.write_text(
