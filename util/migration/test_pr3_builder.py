@@ -464,11 +464,11 @@ class Attempts(Base):
         self.assertEqual(v['CUTOVER_ATTEMPT'], '1')
         self.assertEqual(v['EVIDENCE_DIR'], str(a1))
         self.assertEqual(v['TIMING_TSV'], str(a1 / 'timing-tb-prod.tsv'))
-        self.assertEqual(
-            v['SECRET_DIR'],
-            str(self.t / 'shm' / 'cutover-tb-prod' / 'attempt-1' / 'secret-artifacts'),
-        )
+        sec = self.state.parent / 'cutover-tb-prod-secret' / 'attempt-1'
+        self.assertEqual(v['SECRET_DIR'], str(sec))
         self.assertTrue(a1.is_dir())
+        self.assertEqual(oct(sec.stat().st_mode & 0o777), '0o700')
+        self.assertNotIn('shm', v['SECRET_DIR'])
 
     def test_a_second_attempt_starts_fresh(self):
         self.build_ns()
@@ -483,7 +483,7 @@ class Attempts(Base):
         self.assertEqual(v['CUTOVER_ATTEMPT'], '2')
         self.assertEqual(v['EVIDENCE_DIR'], str(a2))
         self.assertEqual(v['TIMING_TSV'], str(a2 / 'timing-tb-prod.tsv'))
-        self.assertIn('/attempt-2/secret-artifacts', v['SECRET_DIR'])
+        self.assertEqual(v['SECRET_DIR'], str(self.state.parent / 'cutover-tb-prod-secret' / 'attempt-2'))
         for name in ('FREIGHT', 'CUT_ECS_END', 'STALWART_SOURCE_PG_HOST'):
             self.assertNotIn(name, v)
         self.assertIn(
@@ -602,27 +602,22 @@ class Attempts(Base):
         self.assertNotIn('STALWART_SOURCE_PG_PASSWORD', v)
         self.assertNotIn('leaked', self.text())
 
-    def test_rebuild_after_a_reboot_takes_the_source_branch_from_its_restored_file(self):
-        sec = self.t / 'sec' / 'attempt-1' / 'secret-artifacts'
-        sec.mkdir(parents=True, mode=0o700)
-        self.build_ns(SECRET_DIR=str(sec))
+    def test_rebuild_after_a_reboot_takes_the_source_branch_from_the_disk(self):
+        self.build_ns(SECRET_DIR=None)
+        sec = pathlib.Path(self.values()['SECRET_DIR'])
         (sec / 'source-branch.env').write_text(
             'STALWART_SOURCE_PG_HOST=src.example.test\nSTALWART_SOURCE_PG_DB=stalwart\n'
             'STALWART_SOURCE_PG_USER=reader\nSTALWART_SOURCE_PG_PASSWORD=pw-kept\n'
         )
-        keep = self.state / 'attempt-1' / 'keep'
-        keep.mkdir(parents=True)
-        (keep / 'manifest.tsv').write_text('export.json\tabc\nsource-branch.env\tdef\n')
-        rc, out = self.build_ns('--rebuild', SECRET_DIR=str(sec))
+        (sec / 'source-branch.env').chmod(0o600)
+        self.envfile.unlink()
+        rc, out = self.build_ns('--rebuild', SECRET_DIR=None)
         v = self.values()
         self.assertEqual(v['STALWART_SOURCE_PG_PASSWORD'], 'pw-kept')
         self.assertEqual(v['STALWART_SOURCE_PG_HOST'], 'src.example.test')
         self.assertNotIn('pw-kept', out)
         self.assertIn('STALWART_SOURCE_PG_PASSWORD    from %s/source-branch.env' % sec, out)
-        self.assertIn(
-            'export.json is missing from %s: bash %s/window/keep.sh restore --apply' % (sec, HERE), out
-        )
-        self.assertNotIn('source-branch.env is missing', out)
+        self.assertNotIn('keep.sh', out)
 
     def test_the_timing_file_default_is_the_attempt_directory(self):
         rc, out = self.run_ns(
@@ -785,7 +780,7 @@ class ProdBuildBeforeTheWindow(Base):
             },
         ]
 
-    def prod_build(self, keep_line='KEEP_GPG_RECIPIENT=operator@example.test\n'):
+    def test_prod_build_exits_0_with_only_the_operator_file(self):
         t = self.t
         repo = t / 'repo'
         shutil.copytree(
@@ -813,17 +808,13 @@ class ProdBuildBeforeTheWindow(Base):
             'TARGET_ENV=tb-prod\nTEST_USER=u@example.test\nTEST_MAILBOX=box@example.test\n'
             'TEST_MAILBOX_IMAP_HOST=imap.example.test\nTEST_MAILBOX_IMAP_USER=box@example.test\n'
             'TEST_MAILBOX_IMAP_PASSWORD=imap-pw-1\n'
-            + keep_line
         )
         op.chmod(0o600)
         (t / 'kc-target').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
         (t / 'kc-hub').write_text(kubeconfig('hub', 'mzla-eks-shared01'))
         self.rules(self.rules_all())
         env = self.prod(OPERATOR_ENV=str(op), **{k: str(v) for k, v in dirs.items()})
-        return self.run_sh([str(repo / 'util' / 'migration' / 'build-cutover-env.sh')], **env)
-
-    def test_prod_build_exits_0_with_only_the_operator_file(self):
-        rc, out = self.prod_build()
+        rc, out = self.run_sh([str(repo / 'util' / 'migration' / 'build-cutover-env.sh')], **env)
         self.assertNotRegex(out, r'(?m)^\S+ +len=\d+ (NEED|CONTAINS)')
         self.assertRegex(out, r'(?m)^written \S+ \(mode 600\) vars=\d+ missing=0$')
         self.assertEqual(rc, 0, out)
@@ -833,12 +824,6 @@ class ProdBuildBeforeTheWindow(Base):
         self.assertIn("TARGET_NLB_DNS='nlb.example.test'", text)
         self.assertIn("NEON_BRANCH_KC='production'", text)
         self.assertNotIn('neon-key-1', out)
-
-    def test_prod_build_needs_the_keep_gpg_recipient(self):
-        rc, out = self.prod_build(keep_line='')
-        self.assertNotEqual(rc, 0, out)
-        self.assertRegex(out, r'(?m)^KEEP_GPG_RECIPIENT +len=0 NEED unset \(not written')
-        self.assertRegex(out, r'(?m)^written \S+ \(mode 600\) vars=\d+ missing=1$')
 
 
 if __name__ == '__main__':

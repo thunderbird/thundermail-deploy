@@ -81,9 +81,14 @@ evidence_default() {
   if [ "$TARGET_ENV" = tb-prod ]; then printf '%s/attempt-%s' "$HOME/.local/state/talos/cutover-$TARGET_ENV" "${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}"
   else printf '%s' "$HOME/.local/state/talos/cutover-$TARGET_ENV"; fi
 }
+secret_root() { printf '%s' "$HOME/.local/state/talos/cutover-$TARGET_ENV-secret"; }
 secret_default() {
-  if [ "$TARGET_ENV" = tb-prod ]; then printf '%s/cutover-%s/attempt-%s/secret-artifacts' "$(dirname "${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}")" "$TARGET_ENV" "${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}"
+  if [ "$TARGET_ENV" = tb-prod ]; then printf '%s/attempt-%s' "$(secret_root)" "${CUTOVER_ATTEMPT:-$(cutover_attempt_last)}"
   else printf '%s' "/dev/shm/talos/cutover-$TARGET_ENV/secret-artifacts"; fi
+}
+secret_dir_ok() {
+  [ -e "$1" ] || return 0
+  [ ! -L "$1" ] && [ -d "$1" ] && [ -O "$1" ] && [ -z "$(find "$1" \( -perm /077 -o -type l -o ! -user "$(id -u)" \) -print -quit 2>/dev/null)" ]
 }
 env_lock_ready() {
   command -v flock >/dev/null 2>&1 || return 1

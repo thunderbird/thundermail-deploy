@@ -344,13 +344,13 @@ the keying for the real hosts.
   failed rerun of the read phase holds the gate); `merge-recovery` wants `recovery-wait` as the last of
   `reset`, `pre-delete`, `recovery-wait`, `stop-W4` (a `--phase boot` resume writes it again);
   `verify-compare` wants both rows at 0 and no later `stop-W6`.
-- `window/keep.sh save` encrypts the files of `$SECRET_DIR` that a reboot would lose
-  (`export.json`, `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
-  `duplicates.txt`, `source-branch.env`) with gpg for `KEEP_GPG_RECIPIENT` (operator file) into
-  `$EVIDENCE_DIR/keep/` with a sha256 manifest; W4 runs it in every read phase, a rerun that
-  reuses the export too, and after the source branch. After a reboot: `build-cutover-env.sh --rebuild` (it names each kept file that is
-  missing), `window/keep.sh restore --apply` (gpg asks for the key), `--rebuild` again, which takes
-  `STALWART_SOURCE_PG_*` from the restored `source-branch.env`.
+- On tb-prod `$SECRET_DIR` is on disk, not tmpfs: `~/.local/state/talos/cutover-tb-prod-secret/attempt-<n>`
+  (mode 700, files 600 under umask 077), so a reboot loses none of `export.json`,
+  `principals.json`, `settings.json`, `domains-dropped.json`, `domain-fixed.txt`,
+  `duplicates.txt`, `source-branch.env` or `apply.log`, and `--rebuild` finds them where they are
+  (it takes `STALWART_SOURCE_PG_*` from `source-branch.env`). Every script refuses a secret
+  directory, or a file in it, that is a symlink, not the operator's, or open to group or others.
+  W8 prints the delete for after #1577 signs off: `rm -rf ~/.local/state/talos/cutover-tb-prod-secret <env file>`.
 - `verify/02_directory.py` reads `DROPPED_DOMAINS` (`$SECRET_DIR/domains-dropped.json`, written by
   `domain_fix.py --dropped-list`): it leaves exactly those Domains out of the source set, prints
   their count, and compares the DkimSignature count of tb-prod with the export after the drop
