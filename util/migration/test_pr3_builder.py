@@ -798,21 +798,26 @@ class ProdBuildBeforeTheWindow(Base):
             },
         ]
 
-    def test_prod_build_exits_0_with_only_the_operator_file(self):
+    OPERATOR = (
+        'TARGET_ENV=tb-prod\nTEST_USER=u@example.test\nTEST_MAILBOX=box@example.test\n'
+        'TEST_MAILBOX_IMAP_HOST=imap.example.test\nTEST_MAILBOX_IMAP_USER=box@example.test\n'
+        'TEST_MAILBOX_IMAP_PASSWORD=imap-pw-1\n'
+    )
+
+    def prod_build(self, operator=OPERATOR, *args):
         t = self.t
         repo = t / 'repo'
-        shutil.copytree(
-            HERE, repo / 'util' / 'migration', ignore=shutil.ignore_patterns('__pycache__')
-        )
-        values = 'blobStoreBucket: tgt-blob\ninMemoryStoreURL: redis://redis.example.test:6379\n'
-        self.repo(repo, ('overlays/tb-prod/stalwart-configs/config/values.yaml', values))
-        dirs = {}
-        for name in ('KCD_DIR', 'ACD_DIR'):
-            dirs[name] = t / name.lower()
-            self.repo(dirs[name], ('overlays/tb-prod/kustomization.yaml', 'resources: []\n'))
-        for name in ('PI_DIR', 'APPOINTMENT_DIR', 'TMD_DIR'):
-            dirs[name] = t / name.lower()
-            (dirs[name] / '.git').mkdir(parents=True)
+        dirs = {name: t / name.lower() for name in ('KCD_DIR', 'ACD_DIR', 'PI_DIR', 'APPOINTMENT_DIR', 'TMD_DIR')}
+        if not repo.exists():
+            shutil.copytree(
+                HERE, repo / 'util' / 'migration', ignore=shutil.ignore_patterns('__pycache__')
+            )
+            values = 'blobStoreBucket: tgt-blob\ninMemoryStoreURL: redis://redis.example.test:6379\n'
+            self.repo(repo, ('overlays/tb-prod/stalwart-configs/config/values.yaml', values))
+            for name in ('KCD_DIR', 'ACD_DIR'):
+                self.repo(dirs[name], ('overlays/tb-prod/kustomization.yaml', 'resources: []\n'))
+            for name in ('PI_DIR', 'APPOINTMENT_DIR', 'TMD_DIR'):
+                (dirs[name] / '.git').mkdir(parents=True)
         home = t / 'home'
         for f, line in (
             ('.neon-api.env', 'NEON_API_KEY=neon-key-1\n'),
@@ -822,17 +827,16 @@ class ProdBuildBeforeTheWindow(Base):
             (home / f).write_text(line)
             (home / f).chmod(0o600)
         op = home / 'operator.env'
-        op.write_text(
-            'TARGET_ENV=tb-prod\nTEST_USER=u@example.test\nTEST_MAILBOX=box@example.test\n'
-            'TEST_MAILBOX_IMAP_HOST=imap.example.test\nTEST_MAILBOX_IMAP_USER=box@example.test\n'
-            'TEST_MAILBOX_IMAP_PASSWORD=imap-pw-1\n'
-        )
+        op.write_text(operator)
         op.chmod(0o600)
         (t / 'kc-target').write_text(kubeconfig('kc-prod', 'mzla-eks-tb-prod01'))
         (t / 'kc-hub').write_text(kubeconfig('hub', 'mzla-eks-shared01'))
         self.rules(self.rules_all())
         env = self.prod(OPERATOR_ENV=str(op), **{k: str(v) for k, v in dirs.items()})
-        rc, out = self.run_sh([str(repo / 'util' / 'migration' / 'build-cutover-env.sh')], **env)
+        return self.run_sh([str(repo / 'util' / 'migration' / 'build-cutover-env.sh'), *args], **env)
+
+    def test_prod_build_exits_0_with_only_the_operator_file(self):
+        rc, out = self.prod_build()
         self.assertNotRegex(out, r'(?m)^\S+ +len=\d+ (NEED|CONTAINS)')
         self.assertRegex(out, r'(?m)^written \S+ \(mode 600\) vars=\d+ missing=0$')
         self.assertEqual(rc, 0, out)
@@ -842,6 +846,28 @@ class ProdBuildBeforeTheWindow(Base):
         self.assertIn("TARGET_NLB_DNS='nlb.example.test'", text)
         self.assertIn("NEON_BRANCH_KC='production'", text)
         self.assertNotIn('neon-key-1', out)
+        self.assertNotIn('TEST_MAILBOX_CHECK', text)
+
+    def test_a_manual_mailbox_check_needs_no_imap_values(self):
+        manual = 'TARGET_ENV=tb-prod\nTEST_USER=u@example.test\nTEST_MAILBOX=box@example.test\nTEST_MAILBOX_CHECK=manual\n'
+        rc, out = self.prod_build(manual.replace('TEST_MAILBOX=box@example.test\n', ''))
+        self.assertNotEqual(rc, 0, out)
+        self.assertRegex(out, r'(?m)^TEST_MAILBOX +len=0 NEED unset')
+        rc, out = self.prod_build(manual)
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r'(?m)^written \S+ \(mode 600\) vars=\d+ missing=0$')
+        self.assertNotRegex(out, r'(?m)^TEST_MAILBOX_IMAP_\w+ +len=')
+        self.assertIn('TEST_MAILBOX_IMAP_*            not written: TEST_MAILBOX_CHECK=manual, the operator reads TEST_MAILBOX by hand', out)
+        text = self.text()
+        self.assertIn("TEST_MAILBOX_CHECK='manual'", text)
+        self.assertNotIn('TEST_MAILBOX_IMAP_', text)
+        rc, out = self.prod_build(manual, '--check')
+        self.assertNotRegex(out, r'(?m)^FAIL  (operator-values|secrets-non-empty) .*TEST_MAILBOX_IMAP')
+
+    def test_another_mailbox_check_value_stops(self):
+        rc, out = self.prod_build(self.OPERATOR + 'TEST_MAILBOX_CHECK=web\n')
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn('TEST_MAILBOX_CHECK=web: the only value is manual', out)
 
 
 if __name__ == '__main__':

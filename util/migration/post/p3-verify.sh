@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
+case "${TEST_MAILBOX_CHECK:-}" in
+  '') ;;
+  manual) die "TEST_MAILBOX_CHECK=manual: p3-verify.sh reads TEST_MAILBOX over IMAP and needs TEST_MAILBOX_IMAP_HOST, TEST_MAILBOX_IMAP_USER and TEST_MAILBOX_IMAP_PASSWORD; check the reset mail in TEST_MAILBOX by hand instead" ;;
+  *) die "TEST_MAILBOX_CHECK=$TEST_MAILBOX_CHECK: the only value is manual" ;;
+esac
 need TEST_USER TEST_MAILBOX TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD
 
 FROM_DOMAIN=${FROM_DOMAIN:-$LEGACY_AUTH_HOST}
