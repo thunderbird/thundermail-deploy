@@ -322,8 +322,11 @@ the keying for the real hosts.
   status=200` (the CLI reached Stalwart; `APPLY_SCHEMA_WAIT`, default 90 s, else no row and
   nothing sent), just before the export is sent, and an `apply-start` row after the pre-delete
   with no `export-applied` row makes a rerun refuse (and `window/gate.sh merge-recovery` wait).
-  When the attach fails and the CLI printed no `Plan:` line, nothing was applied: the pod is
-  deleted and an `apply-unsent` row lets the rerun send again. The run also fails when the CLI's `Plan:` counts per
+  When the attach fails and the pod log has no `Plan:` line, W4 stops the pod
+  (`activeDeadlineSeconds` 1), reads its final log, and only when that read works and still has
+  no `Plan:` line deletes the pod and writes an `apply-unsent` row that lets the rerun send again.
+  An unreadable log keeps the rerun blocked. On tb-prod `check-prereqs.sh` asks for
+  `create pods/attach`, `get pods/log` and `patch pods` in `thundermail`. The run also fails when the CLI's `Plan:` counts per
   operation type differ from the lines of `export.json` (a cut stdin stream), and
   the retry is the revert of the recovery-mode PR and `--phase reset --apply --go` (about 20 to 25
   minutes).

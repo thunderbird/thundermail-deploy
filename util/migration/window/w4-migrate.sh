@@ -567,6 +567,15 @@ apply_pod_phase() { "${KS[@]}" "${NS[@]}" get pod "$1" -o jsonpath='{.status.pha
 apply_pod_ended() { case "$(apply_pod_phase "$1")" in Succeeded|Failed) return 0 ;; *) return 1 ;; esac; }
 longest_request() { "$PY" "$MIG_DIR/apply_requests.py" "$1"; }
 schema_seen() { "${KS[@]}" "${NS[@]}" logs -c cli "pod/$1" 2>/dev/null | grep -qE '<- GET [^ ]*/api/schema status=200'; }
+apply_unplanned() {
+  local log
+  log=$("${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" 2>/dev/null) || { echo "the log of pod/$1 could not be read after the failed attach: the apply-start row stays"; return 1; }
+  ! grep -qE '^[^ ]+ Plan: ' <<<"$log" || return 1
+  "${KS[@]}" "${NS[@]}" patch pod "$1" --type merge -p '{"spec":{"activeDeadlineSeconds":1}}' >/dev/null 2>&1 || { echo "could not stop pod/$1 (patch activeDeadlineSeconds): the apply-start row stays"; return 1; }
+  until_ok 120 apply_pod_ended "$1" || { echo "pod/$1 did not stop within 120s: the apply-start row stays"; return 1; }
+  ( umask 077; "${KS[@]}" "${NS[@]}" logs --timestamps -c cli "pod/$1" > "$S/apply.log" ) || { echo "the final log of pod/$1 could not be read: the apply-start row stays"; return 1; }
+  ! grep -qE '^[^ ]+ Plan: ' "$S/apply.log" || { echo "the final log of pod/$1 has a Plan: line: the apply may have written, the apply-start row stays"; return 1; }
+}
 schema_wait() { local end=$(( $(date +%s) + ${APPLY_SCHEMA_WAIT:-90} )); until schema_seen "$1"; do [ "$(date +%s)" -lt "$end" ] || return 1; sleep 2; done; }
 
 incluster_apply() {
@@ -605,9 +614,9 @@ incluster_apply_run() {
   mark apply-start pod "$name" && [ -n "$(cut_row apply-start | awk -F'\t' -v n="$name" '$6 == n')" ] || { echo "could not write the apply-start row to $TIMING_TSV: the export is not sent"; return 1; }
   end=$(( $(date +%s) + APPLY_POD_WAIT ))
   timeout "$APPLY_POD_WAIT" "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?
-  if [ "$arc" != 0 ] && ! "${KS[@]}" "${NS[@]}" logs -c cli "pod/$name" 2>/dev/null | grep -qE '(^| )Plan: '; then
-    echo "attach to pod/$name failed (exit $arc, $S/apply.attach) and the CLI printed no Plan: line: nothing was applied"
-    apply_diag "$name"
+  if [ "$arc" != 0 ] && apply_unplanned "$name"; then
+    echo "attach to pod/$name failed (exit $arc, $S/apply.attach); the pod was stopped and its final log has no Plan: line: nothing was applied"
+    sed -E 's/[^ ]+@[^ ]+/<addr>/g' "$S/apply.log" > "$EVIDENCE_DIR/apply-$TS.log"
     "${KS[@]}" "${NS[@]}" delete pod "$name" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || { echo "pod/$name was not deleted: delete it by hand, then rerun"; return 1; }
     mark apply-unsent pod "$name" || echo "could not write the apply-unsent row to $TIMING_TSV: a rerun will refuse"
     echo "apply-unsent row written: a rerun of --phase boot --apply may send the export again"

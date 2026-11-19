@@ -99,7 +99,7 @@ c_operator_env() { mode600 "$OPERATOR_ENV" && echo "$OPERATOR_ENV mode 600, $(gr
 c_sso() { aws sts get-caller-identity --profile "$1" --query Arn --output text 2>/dev/null | grep -q AWSReservedSSO_AdministratorAccess && echo "AdministratorAccess via $1" || { echo "no session for $1 (aws sso login --sso-session mzla)"; return 1; }; }
 c_kube_target() {
   local apply_pod=()
-  [ "$TARGET_ENV" != tb-prod ] || apply_pod=('create pods thundermail attach' 'get pods thundermail log')
+  [ "$TARGET_ENV" != tb-prod ] || apply_pod=('create pods thundermail attach' 'get pods thundermail log' 'patch pods thundermail')
   can_all "$KC_TARGET" "${apply_pod[@]}" 'patch deployments thundermail' 'patch deployments thundermail scale' 'create pods thundermail' 'delete pods thundermail' \
     'create pods thundermail exec' 'create pods thundermail portforward' 'create secrets thundermail' 'delete secrets thundermail' \
     'get secrets thundermail' 'get endpointslices.discovery.k8s.io thundermail' 'get jobs.batch thundermail' 'get externalsecrets.external-secrets.io thundermail' \

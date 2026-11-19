@@ -27,6 +27,11 @@ elif ' attach -i -c cli ' in j:
     import time
     time.sleep(st.get('attach_sleep', 0))
     rc = st.get('attach_rc', 0)
+elif ' patch pod ' in j:
+    open(t + '/patched', 'a').write(j + '\n')
+    st['phase'] = 'Failed'
+elif ' logs --timestamps -c cli ' in j and st.get('ts_logs_rc'):
+    rc = st['ts_logs_rc']
 elif ' describe pod ' in j:
     out = 'Events:\n  Warning  Failed  ImagePullBackOff\n'
 elif '{{.status.phase}}' in j:
@@ -39,6 +44,7 @@ elif ' delete pod ' in j:
     open(t + '/deleted', 'a').write(j + '\n')
 else:
     rc = 1
+json.dump(st, open(os.environ['APPLY_STATE'], 'w'))
 if out:
     sys.stdout.write(out)
 sys.exit(rc)
@@ -219,7 +225,8 @@ class InClusterApply(w4.Prod):
             {'pods': [ready('10.0.0.5')], 'log': SCHEMA, 'attach_rc': 1, 'phase': 'Running'}
         )
         out = self.apply()
-        self.assertIn('and the CLI printed no Plan: line: nothing was applied', out)
+        self.assertIn('the pod was stopped and its final log has no Plan: line: nothing was applied', out)
+        self.assertIn('activeDeadlineSeconds', (self.t / 'patched').read_text())
         self.assertIn('apply-unsent row written', out)
         self.assertIn('rc=1', out)
         self.assertNotIn('still Running', out)
@@ -236,6 +243,19 @@ class InClusterApply(w4.Prod):
         (self.t / 'ev' / 'timing.tsv').unlink()
         out = self.apply()
         self.assertNotIn('apply-unsent', [r[0] for r in self.timing()])
+        out = self.apply([list(r) for r in self.timing()])
+        self.assertIn('an apply started after this pre-delete and did not finish', out)
+
+    def test_an_unreadable_log_after_a_failed_attach_keeps_the_rerun_blocked(self):
+        self.state(
+            {'pods': [ready('10.0.0.5')], 'log': SCHEMA, 'attach_rc': 1, 'phase': 'Running', 'ts_logs_rc': 1}
+        )
+        out = self.apply(wait=2)
+        self.assertIn('could not be read after the failed attach: the apply-start row stays', out)
+        self.assertIn('rc=1', out)
+        self.assertFalse((self.t / 'patched').exists())
+        self.assertNotIn('apply-unsent', [r[0] for r in self.timing()])
+        self.state({'pods': [ready('10.0.0.5')], 'log': LOG_OK})
         out = self.apply([list(r) for r in self.timing()])
         self.assertIn('an apply started after this pre-delete and did not finish', out)
 
