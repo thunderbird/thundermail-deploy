@@ -721,13 +721,30 @@ class ResetAfterStart(W4.Prod):
         self.assertIn('a start-legacy-stalwart row follows the stop-legacy-stalwart row', out)
         self.assertIn('rc=1', out)
         out = self.preflight(ok + [start, W4.STOPPED])
-        self.assertIn('a start-legacy-stalwart row follows the w4-read-done row', out)
-        self.assertIn('run --phase read --apply --go', out)
+        self.assertIn('a start-legacy-stalwart row follows the w4-export row', out)
+        self.assertIn('run --phase read first', out)
         self.assertIn('rc=1', out)
         out = self.preflight(ok + [start, W4.EXPORT, W4.READ, W4.STOPPED])
         self.assertIn('rc=0 stop=2026-11-19T04:30:00Z', out)
         out = self.preflight([W4.CUT, start] + ok[1:])
         self.assertIn('rc=0', out)
+
+    def test_a_start_after_the_export_makes_the_read_phase_dump_again(self):
+        body = W4.ReadPhase.BODY + 'read_phase; echo "rc=$?"'
+        self.rows([W4.CUT])
+        out = self.w4(body)
+        self.assertIn('rc=0', out)
+        out = self.w4(body)
+        self.assertIn('reusing the export of this cut', out)
+        tsv = self.t / 'ev' / 'timing.tsv'
+        start = ['start-legacy-stalwart', 'x', '2026-11-19T04:40:00Z', 'nodes', '6']
+        tsv.write_text(tsv.read_text() + '\t'.join(start) + '\n')
+        out = self.w4(body)
+        self.assertIn('a start-legacy-stalwart row follows the w4-export row', out)
+        self.assertNotIn('reusing the export of this cut', out)
+        self.assertIn('DUMP', out.split())
+        out = self.w4(body)
+        self.assertIn('reusing the export of this cut', out)
 
 
 if __name__ == '__main__':

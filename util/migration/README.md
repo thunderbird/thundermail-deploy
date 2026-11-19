@@ -299,8 +299,8 @@ there (or cannot be read), `remove` prints a `WARN` line with its size and time 
   `w4-export` and `w4-read-done` rows only. A rerun after a `queue-drain` stop reads the queue
   only; `--go` dumps again. `--phase reset` (gate `go-W4-reset`, no legacy admin API) refuses
   without a `w4-read-done` row and a later `stop-legacy-stalwart` row after the last `cut-ecs`
-  row, when a `start-legacy-stalwart` row follows the `w4-read-done` row (the export is stale:
-  `--phase read --apply --go`), or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
+  row, when a `start-legacy-stalwart` row follows the `w4-export` row (the export is stale, and
+  the next `--phase read --apply` dumps again without `--go`), or while a Stalwart pod exists. It then runs `neon_branch.py`: it resets
   `tb-prod-cutover` from its parent and proves the reset by `last_reset_at`, later than the stop
   row. It replaces `tb-prod-cutover-source` with a read-only branch whose own password goes into
   `STALWART_SOURCE_PG_*` of the env file, created at the `parent_lsn` the reset returned (row
