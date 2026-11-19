@@ -47,15 +47,19 @@ k8s_secret() { ktarget -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64
 direct() { sed 's/-pooler//'; }
 doh_a() { curl -s -m 15 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" | jq -r '[.Answer[]? | select(.type == 1) | .data] | sort | join(" ")'; }
 opw() { local v; v=$(op "$1"); [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || v=$(window_values "$1"); printf '%s' "$v"; }
-MAILBOX_CHECK=$(op TEST_MAILBOX_CHECK)
-case "$MAILBOX_CHECK" in
-  '') ;;
-  manual)
-    for v in TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD; do
-      OPERATOR_VARS=${OPERATOR_VARS/ $v/} SECRET_VARS=${SECRET_VARS/ $v/} PROD_OPERATOR_REQUIRED=${PROD_OPERATOR_REQUIRED/ $v/}
-    done ;;
-  *) die "TEST_MAILBOX_CHECK=$MAILBOX_CHECK: the only value is manual (the operator reads TEST_MAILBOX by hand); remove it to log in over IMAP" ;;
-esac
+MAILBOX_CHECK=""
+mailbox_mode() {
+  local v
+  MAILBOX_CHECK=$(op TEST_MAILBOX_CHECK)
+  case "$MAILBOX_CHECK" in
+    '') ;;
+    manual)
+      for v in TEST_MAILBOX_IMAP_HOST TEST_MAILBOX_IMAP_USER TEST_MAILBOX_IMAP_PASSWORD; do
+        OPERATOR_VARS=${OPERATOR_VARS/ $v/} SECRET_VARS=${SECRET_VARS/ $v/} PROD_OPERATOR_REQUIRED=${PROD_OPERATOR_REQUIRED/ $v/}
+      done ;;
+    *) die "TEST_MAILBOX_CHECK=$MAILBOX_CHECK: the only value is manual (the operator reads TEST_MAILBOX by hand); remove it to log in over IMAP" ;;
+  esac
+}
 window_values() { [ -f "$EVIDENCE_DIR/window-values.tsv" ] && awk -F'\t' -v n="$1" '$1 == n {v = $2; f = 1} END {if (f) printf "%s", v}' "$EVIDENCE_DIR/window-values.tsv" || true; }
 attempt_of() { [ -f "$1" ] || return 0; ( unset CUTOVER_ATTEMPT; set +eu; . "$1" >/dev/null 2>&1; printf '%s' "${CUTOVER_ATTEMPT:-1}" ); }
 attempt_guard() {
@@ -193,6 +197,7 @@ build() {
   local count=0 missing=0
   PUT=" "
   [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
+  mailbox_mode
   if [ "$TARGET_ENV" = tb-prod ] && [ -n "$(op FREEZE_SHA)" ] && [ "$REBUILD" != 1 ]; then die "FREEZE_SHA is set: the window is open, rerun with --rebuild"; fi
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-$TARGET_ENV.XXXXXX")
   trap 'rm -f "$tmp"' EXIT
@@ -381,6 +386,7 @@ check() {
   env_target_ok "$ENV_FILE" || exit 64
   local want=$TARGET_ENV
   set -a; eval "$(env_read "$ENV_FILE")"; set +a
+  mailbox_mode
   TARGET_ENV=$want
   [ -z "${LANE_PF_PORT:-}" ] || STALWART_URL=http://localhost:$LANE_PF_PORT
   . "$MIG_DIR/timing.sh"
