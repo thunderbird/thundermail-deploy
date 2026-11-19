@@ -320,7 +320,8 @@ build() {
   local tsv; tsv=$(op TIMING_TSV)
   [ "$TARGET_ENV" != tb-prod ] || case "$tsv" in "$EVIDENCE_DIR"/*) ;; *) tsv="" ;; esac
   put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
-  put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"
+  if [ "$TARGET_ENV" = tb-prod ]; then put SECRET_DIR "$SECRET_DIR" "directory for secret artifacts on disk (mode 700, files 600), kept over a reboot; deleted after the cutover (W8)"
+  else put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"; fi
   for side in "LEG:$LEGACY_AWS_PROFILE" "TGT:$TARGET_AWS_PROFILE"; do
     local p=${side%%:*}
     put "RCLONE_CONFIG_${p}_TYPE" s3 rclone
@@ -336,6 +337,7 @@ build() {
     case "${PUT:- }" in *" $name "*) continue ;; esac
     local v; v=$(op "$name")
     case "$name" in TEST_SENDER_APP_PASSWORD|STALWART_SOURCE_PG_*|STALWART_ADMIN_ACCOUNT_ID) [ -z "$(prev "$name")" ] || v=$(prev "$name") ;; esac
+    case "$TARGET_ENV:$name" in tb-prod:STALWART_SOURCE_PG_*) [ -n "$v" ] || [ "${REBUILD:-0}" != 1 ] || [ ! -s "$SECRET_DIR/source-branch.env" ] || { v=$(sed -n "s/^$name=//p" "$SECRET_DIR/source-branch.env" | tail -1); [ -z "$v" ] || printf '%-30s from %s\n' "$name" "$SECRET_DIR/source-branch.env"; } ;; esac
     if [ -z "$v" ] && [ "${REBUILD:-0}" = 1 ]; then
       case " $SECRET_VARS TEST_SENDER_APP_PASSWORD STALWART_SOURCE_PG_PASSWORD " in *" $name "*) ;; *) v=$(window_values "$name") ;; esac
       [ -n "$v" ] || printf '%-30s not restored: no copy in %s\n' "$name" "$EVIDENCE_DIR/window-values.tsv"
