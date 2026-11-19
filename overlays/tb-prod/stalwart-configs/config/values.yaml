@@ -23,3 +23,16 @@ webhookEvents:
   message-ingest.ham: true
   message-ingest.spam: true
   queue.authenticated-message-queued: true
+dataRetention:
+  expungeSchedule:
+    '@type': Daily
+    hour: 12
+    minute: 0
+  dataCleanupSchedule:
+    '@type': Daily
+    hour: 13
+    minute: 0
+  blobCleanupSchedule:
+    '@type': Daily
+    hour: 14
+    minute: 0
