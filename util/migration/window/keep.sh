@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MODE=${1:-}
+case "$MODE" in save|restore) shift ;; esac
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
 case "$MODE" in
-  save|restore) shift ;;
+  save|restore) ;;
   *) echo "usage: TARGET_ENV=<env> keep.sh save | restore [--dry-run | --apply]" >&2; exit 64 ;;
 esac
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

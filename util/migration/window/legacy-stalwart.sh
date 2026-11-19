@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MODE=${1:-}
+[ "$MODE" != read ] || shift
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
 case "$MODE" in
-  read) shift ;;
+  read) ;;
   stop|start|restart) echo "legacy-stalwart.sh $MODE: not in this tool (Tooling issue, ## Open, legacy Stalwart process commands); only read is built" >&2; exit 64 ;;
   *) echo "usage: TARGET_ENV=<env> legacy-stalwart.sh read [--dry-run | --apply]" >&2; exit 64 ;;
 esac

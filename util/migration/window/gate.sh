@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
 case "${1:-}" in
   stop-legacy|merge-recovery|verify-compare) GATE=$1 ;;
   *) echo "usage: TARGET_ENV=<env> gate.sh stop-legacy | merge-recovery | verify-compare" >&2; exit 64 ;;
 esac
-. "$(dirname "${BASH_SOURCE[0]}")/../target.sh"
 load_cutover_env
 TSV=${TIMING_TSV:-${EVIDENCE_DIR:-$(evidence_default)}/timing-$TARGET_ENV.tsv}
 [ -r "$TSV" ] || { printf 'WAIT  %s: no timing file %s\n' "$GATE" "$TSV"; exit 2; }
