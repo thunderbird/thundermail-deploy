@@ -48,3 +48,6 @@ patches:
             port: 8080
           periodSeconds: 10
           failureThreshold: 180
+      - op: add
+        path: /spec/progressDeadlineSeconds
+        value: 1900
