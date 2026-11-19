@@ -23,6 +23,7 @@ set -- "${ARGS[@]+"${ARGS[@]}"}"
 mkdir -p "$EVIDENCE_DIR"
 
 die() { echo "$*" >&2; exit 1; }
+legacy_stalwart_pg() { [ "$TARGET_ENV" != tb-prod ] || return 1; case " ${RUNNER_LEGACY_PG_KEYS:-stalwart keycloak accounts} " in *" stalwart "*) return 0 ;; esac; return 1; }
 need_hint() {
   case $1 in
     STALWART_URL) echo "build-cutover-env.sh writes http://localhost:18081 there; LANE_PF_PORT picks another local port" ;;

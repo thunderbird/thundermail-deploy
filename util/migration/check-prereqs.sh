@@ -314,7 +314,7 @@ rows() {
   row "backups" legacy-aws-reads c_aws_reads "$LEGACY" "ecs list-clusters" "logs describe-log-groups" "cloudwatch describe-alarms" "ec2 describe-instances"
   row "backups" "$TARGET_ENV-aws-reads" c_aws_reads "$TARGET_AWS_PROFILE" "ec2 describe-instances"
   row "go-T8 go-predns" accounts-secret-bundle c_accounts_bundle
-  row "go-W8" accounts-e2e-user c_e2e_user
+  if [ "$TARGET_ENV" = tb-prod ]; then skip "go-W8" accounts-e2e-user "tb-prod has no Accounts e2e user (operator decision): no E2E_USER_SECRET to check"; else row "go-W8" accounts-e2e-user c_e2e_user; fi
   row "backups go-access go-open go-P1 go-V2 go-rollback" paddle c_paddle
   row "go-T7" t7-pr-and-revert c_pr_pair keycloak-customer-deploy T7_PR T7_REVERT_PR
   row "go-T8" t8-pr-and-revert c_pr_pair accounts-deploy T8_PR T8_REVERT_PR

@@ -74,6 +74,15 @@ its host; the pod refuses to start unless the three legacy hosts are distinct:
 | `rehearsal-legacy-pg` key `accounts-host` | legacy Accounts | key `accounts` |
 | `rehearsal-legacy-pg` key `stalwart-host` | legacy Stalwart | key `stalwart` |
 
+On tb-prod, `RUNNER_LEGACY_PG_KEYS='keycloak accounts'` in `targets/tb-prod.sh` drops the
+legacy Stalwart line, and `runner-pod.sh` refuses a tb-prod key list that names `stalwart`. The
+Secret (still named by `LEGACY_PG_SECRET_NAME`) holds only the Keycloak and Accounts keys and
+hosts, and neither host may equal `STALWART_LEGACY_PG_HOST`. The pod wants two distinct legacy
+hosts and refuses to start when the mounted Secret has a `stalwart` key. `.pgpass` holds the
+target, Keycloak and Accounts lines. `/work` keeps its 20Gi default, since `RUNNER_WORK_SIZE` is
+unset. `--check` skips the legacy Stalwart database rows, and the W4 steps `task-queue` and
+`db-dump-legacy` refuse.
+
 The `python` container installs hash-pinned wheels as a non-root user and does not mount
 `/work`.
 
