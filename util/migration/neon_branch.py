@@ -164,7 +164,12 @@ class Neon:
                 sys.exit(
                     f'{what}: operation {failed[0].get("action")} on {bid} is {failed[0]["status"]}'
                 )
-            busy = [o for o in mine if o.get('status') not in ('finished', 'skipped', 'cancelled')]
+            busy = [o for o in ours if o.get('status') not in ('finished', 'skipped', 'cancelled')]
+            busy += [
+                o
+                for o in mine
+                if o not in ours and o.get('status') in ('running', 'scheduling', 'cancelling')
+            ]
             if b.get('current_state') == 'ready' and not busy:
                 return b
             time.sleep(SLEEP)

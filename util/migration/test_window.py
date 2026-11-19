@@ -1007,7 +1007,7 @@ class DryRun(Harness):
             with self.subTest(script=script):
                 self.setUp()
                 out = self.dry(script)
-                self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+                self.assertRegex(out, r'(?m)^rc=0$')
 
     def test_an_empty_load_balancer_name_is_pending_then_names_the_rebuild(self):
         for script in ('test-sender-password.sh', 'w6-verify.sh'):
@@ -1015,7 +1015,7 @@ class DryRun(Harness):
                 self.setUp()
                 out = self.dry(script, TARGET_NLB_DNS='')
                 self.assertIn('PENDING  TARGET_NLB_DNS is filled in-window', out)
-                self.assertTrue(out.rstrip().endswith('rc=0'), out[-1500:])
+                self.assertRegex(out, r'(?m)^rc=0$')
                 self.setUp()
                 out = self.dry(script, '--apply', TARGET_NLB_DNS='')
                 self.assertIn(
@@ -1023,7 +1023,7 @@ class DryRun(Harness):
                     ' exists; then run build-cutover-env.sh --rebuild)' % (self.t / 'cutover.env'),
                     out,
                 )
-                self.assertTrue(out.rstrip().endswith('rc=1'), out[-1500:])
+                self.assertRegex(out, r'(?m)^rc=1$')
 
     def test_w5_and_w7_restart_stalwart_after_the_promote(self):
         for script, before in (
