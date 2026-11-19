@@ -87,10 +87,10 @@ retake() {
 preflight() {
   local r state
   if [ "$APPLY" = 0 ] && ! runner_up; then
-    printf 'NEED  runner pod not Running: apply util/migration/runner-pod.yaml before W4 (dry run continues)\n'
+    printf 'NEED  runner pod not Running: %s before W4 (dry run continues)\n' "$([ "$TARGET_ENV" = tb-prod ] && echo "bash $MIG_DIR/window/runner-start.sh --apply" || echo 'apply util/migration/runner-pod.yaml')"
     NEEDS=$((NEEDS + 1))
   else
-    until_ok 60 runner_up || { echo "runner pod is not Running: re-apply util/migration/runner-pod.yaml"; return 1; }
+    until_ok 60 runner_up || { echo "runner pod is not Running: $([ "$TARGET_ENV" = tb-prod ] && echo "bash $MIG_DIR/window/runner-start.sh --apply" || echo 're-apply util/migration/runner-pod.yaml')"; return 1; }
     echo "runner Running"
   fi
   if runner_up; then

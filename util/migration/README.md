@@ -86,6 +86,19 @@ The `python` container installs hash-pinned wheels as a non-root user and does n
 `build-cutover-env.sh --check` runs `psql -Atc 'select 1'` against all four, which proves
 the keying for the real hosts.
 
+On tb-prod, `window/runner-start.sh` starts the runner. Without `--apply` it reads its gates and
+prints the commands `--apply` would run. The gates: 45 minutes of AWS session left, a
+SecurityGroupPolicy that gives `stalwart-config-applier` the groups of the `app=stalwart`
+policy, the key in Secret `stalwart-postgresql-admin-password`, ConfigMap `stalwart-config`
+naming `STALWART_TARGET_PG_HOST`, and no runner pod or Secret yet. `--apply` has
+`runner-pod.sh --secret` write the Secret file, creates the Secret from it with `kubectl create`
+(`kubectl apply` would copy the passwords into an annotation), deletes the file, creates the pod
+with `automountServiceAccountToken: false` and waits for Ready. It then checks the node role, the
+pod network interface, the service account and token, and logs in to the cutover branch,
+Keycloak and Accounts. `pg_isready` reaches legacy Stalwart, which gets no password line. On
+success it writes row `runner-start`. `check` runs the checks again; `remove --apply` deletes the
+pod and the Secret and writes row `runner-removed`.
+
 ## Script notes
 
 - `snapshot-zone.sh ZONE` keeps `data` for SRV/TLSA/CAA and also records a DoH answer per
