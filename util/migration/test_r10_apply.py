@@ -188,6 +188,17 @@ class InClusterApply(w4.Prod):
         self.assertTrue((self.t / 'secret' / 'apply.log').exists())
         self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
 
+    def test_no_apply_start_row_means_no_send(self):
+        self.rows([w4.CUT, ['pre-delete', 'x', 'x', 'deleted', '9']])
+        out = self.w4(
+            'APPLY_POD_WAIT=30; port_forward() { echo PF-OK; }\n'
+            'mark() { return 1; }\nprod_apply; echo "rc=$?"'
+        )
+        self.assertIn('could not write the apply-start row', out)
+        self.assertIn('rc=1', out)
+        self.assertFalse((self.t / 'attached.bin').exists())
+        self.assertIn('delete pod stalwart-apply-', (self.t / 'deleted').read_text())
+
     def test_not_exactly_one_ready_pod_creates_nothing(self):
         self.state({'pods': [ready('10.0.0.5'), ready('10.0.0.6', 'b')], 'log': LOG_OK})
         out = self.apply()

@@ -599,7 +599,7 @@ incluster_apply_run() {
   sed -e "s|__NAME__|$name|" -e "s|__STALWART_URL__|$url|" "$MIG_DIR/apply-pod.yaml" | "${KS[@]}" "${NS[@]}" create -f - >/dev/null || { echo "could not create pod/$name"; return 1; }
   "${KS[@]}" "${NS[@]}" wait --for=condition=Ready "pod/$name" --timeout=300s >/dev/null || { echo "pod/$name not Ready within 300s (image pull, scheduling or the security group of the pod)"; apply_diag "$name"; return 1; }
   echo "pod/$name Ready; sending $(wc -c < "$S/export.json") bytes of export over stdin to $url"
-  mark apply-start pod "$name"
+  mark apply-start pod "$name" && [ -n "$(cut_row apply-start | awk -F'\t' -v n="$name" '$6 == n')" ] || { echo "could not write the apply-start row to $TIMING_TSV: the export is not sent"; return 1; }
   end=$(( $(date +%s) + APPLY_POD_WAIT ))
   timeout "$APPLY_POD_WAIT" "${KS[@]}" "${NS[@]}" attach -i -c cli "pod/$name" < "$S/export.json" > "$S/apply.attach" 2>&1 || arc=$?
   left=$(( end - $(date +%s) ))
