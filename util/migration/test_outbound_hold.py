@@ -188,6 +188,9 @@ elif url.endswith('/jmap'):
                     if r['status']['@type'] != 'PermanentFailure':
                         r['retryDue'] = v['nextRetry']
             res = {{'updated': {{k: None for k in a['update']}}}}
+            if st.pop('fail_after_set', False):
+                bad = {{k: {{'type': 'serverFail'}} for k in a['update']}}
+                res = {{'updated': {{}}, 'notUpdated': bad}}
     out = {{'methodResponses': [[m, res, tag]]}}
 json.dump(st, open(p, 'w'))
 print(json.dumps(out))
@@ -920,6 +923,23 @@ class Hold25(Base):
         self.assertEqual(self.state().get('delivered', []), [])
         self.assertIn('hold write finished more than 30 s after the queue read', p.stdout)
         self.assertEqual(self.state()['ended'], ['47'])
+
+    def test_release_port25_rerun_after_a_failed_hold_write_does_not_trust_it(self):
+        self.run_tool('hold25.sh', 'set', '--apply')
+        self.edit(
+            pods=['stalwart-a'],
+            queue={'48': msg(time.time() + 40)},
+            start_before_set=['48'],
+            fail_after_set=True,
+        )
+        self.add_row('hold25-queue-hold')
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(self.egress(), CLOSED)
+        p = self.run_tool('hold25.sh', 'release-port25', '--apply', '--go', 'go 7.5 again')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.state().get('delivered', []), [])
+        self.assertGreaterEqual(sum(self.state()['sleeps']), 1350)
 
     def test_release_port25_closes_port_25_when_the_read_after_opening_fails(self):
         for n, after in enumerate(({'jmap_down': True}, {'query_cap': 1})):
