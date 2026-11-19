@@ -99,6 +99,18 @@ def main(argv):
         return 99
     piece, resume = argv[0], argv[1:] == ['--resume']
     budget = number('VERIFY_PIECE_BUDGET', 12600)
+    login = pathlib.Path(os.environ.get('EVIDENCE_DIR') or OUT) / 'sso-login-at.txt'
+    if login.exists():
+        left = int(login.stat().st_mtime + 14400 - 900 - time.time())
+        if left < budget:
+            print(
+                f'== piece {piece}: the AWS session has {max(left, 0)} s left '
+                'before its last 15 minutes'
+            )
+            budget = max(left, 0)
+        if budget <= 0:
+            print(f'NEED  piece {piece}: log in to AWS again, then rerun with --resume')
+            return 2
     d = pathlib.Path(os.environ.get('VERIFY_PIECES_DIR') or f'{OUT}/pieces') / piece
     progress = d / 'progress.tsv'
     if d.exists() and not resume:
@@ -116,7 +128,7 @@ def main(argv):
         if rows.get(b) == 'pass':
             continue
         used = time.time() - start
-        if longest and used + longest > budget:
+        if used + longest > budget or (longest == 0 and budget <= 0):
             print(
                 f'== piece {piece}: stopping before batch {b}: {used:.0f} s used, '
                 f'the longest batch took {longest:.0f} s, budget {budget} s (VERIFY_PIECE_BUDGET)'

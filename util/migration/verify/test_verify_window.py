@@ -1,6 +1,7 @@
 import datetime
 import http.server
 import json
+import time
 import os
 import pathlib
 import shutil
@@ -338,12 +339,9 @@ class Snapshot(Base):
         self.rules = SNAPSHOT_RULES
         rc, out = self.run_py(
             ['01_source_snapshot.py'],
-            TARGET_ENV='tb-stage',
+            TARGET_ENV='tb-prod',
             VERIFY_ACCOUNT_RANGE='3-9',
-            SOURCE_PG_HOST='h',
-            SOURCE_PG_DB='d',
-            SOURCE_PG_USER='u',
-            SOURCE_PG_PASSWORD='p',
+            **PROD,
         )
         self.assertEqual(rc, 0, out)
         p_queries = [x['query'] for x in self.queries() if ' from p ' in x['query']]
@@ -364,6 +362,18 @@ class Sample(Base):
 
     def emails(self, n):
         return {enc_id(7, d): email('b', 'b%d' % d, when=utc(RCVD + d)) for d in range(n)}
+
+    def test_a_large_table_samples_at_most_ten_percent(self):
+        Target.emails = self.emails(3)
+        self.rules = [
+            [r'pg_class', '100000000\n'],
+            [r'tablesample system', '1\t0\t%d\t%d\n' % (len(BODY), RCVD)],
+        ]
+        rc, out = self.run_py(
+            ['03_messages.py', '--sample'], TARGET_ENV='tb-prod', VERIFY_BODY_SAMPLE='4', **PROD
+        )
+        self.assertIn('s_email table sample 10.0000%', out)
+        self.assertNotIn('100.0000%', out)
 
     def test_compare_samples_on_the_source_and_fetches_only_those(self):
         Target.emails = self.emails(30)
@@ -599,6 +609,17 @@ class Pieces(Base):
     def runs(self):
         p = self.t / 'runs'
         return p.read_text().splitlines() if p.exists() else []
+
+    def test_an_expiring_aws_session_starts_no_batch(self):
+        ev = self.t / 'ev-login'
+        ev.mkdir()
+        login = ev / 'sso-login-at.txt'
+        login.write_text('x')
+        old = time.time() - 14400 + 600
+        os.utime(login, (old, old))
+        rc, out = self.piece('counts', EVIDENCE_DIR=str(ev))
+        self.assertIn('NEED  piece counts: log in to AWS again, then rerun with --resume', out)
+        self.assertEqual(self.runs(), [])
 
     def test_batches_stop_at_the_budget_and_resume_by_progress(self):
         rc, out = self.piece('counts', VERIFY_PIECE_BUDGET='1', FAKE_SLEEP='0.4')

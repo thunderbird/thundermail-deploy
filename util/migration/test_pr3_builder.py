@@ -507,6 +507,37 @@ class Attempts(Base):
                 )
                 self.assertEqual(self.values()['CUTOVER_ATTEMPT'], '1')
 
+    def test_a_refused_attempt_leaves_no_directory_and_a_rebuild_stays(self):
+        self.build_ns()
+        stale = self.values()
+        rc, out = self.build_ns(CUTOVER_ATTEMPT='2', EVIDENCE_DIR=stale['EVIDENCE_DIR'])
+        self.assertEqual(rc, 1, out)
+        self.assertFalse((self.state / 'attempt-2').exists())
+        (self.state / 'attempt-2').mkdir()
+        with open(self.envfile, 'a') as f:
+            f.write("FREIGHT='f1'\n")
+        rc, out = self.build_ns('--rebuild')
+        v = self.values()
+        self.assertEqual(v['CUTOVER_ATTEMPT'], '1', out)
+        self.assertEqual(v.get('FREIGHT'), 'f1', out)
+
+    def test_a_shell_value_of_the_old_attempt_refuses_a_new_one(self):
+        self.build_ns()
+        rc, out = self.build_ns(CUTOVER_ATTEMPT='2', FREIGHT='f1')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('FREIGHT is set in this shell', out)
+        self.assertFalse((self.state / 'attempt-2').exists())
+
+    def test_an_old_flat_timing_file_is_not_kept(self):
+        self.build_ns()
+        flat = self.state / 'timing-tb-prod.tsv'
+        text = self.envfile.read_text()
+        self.envfile.write_text(re.sub(r"(?m)^TIMING_TSV='.*'$", "TIMING_TSV='%s'" % flat, text))
+        rc, out = self.build_ns('--rebuild')
+        self.assertEqual(
+            self.values()['TIMING_TSV'], str(self.state / 'attempt-1' / 'timing-tb-prod.tsv'), out
+        )
+
     def test_an_earlier_attempt_refuses_once_a_later_one_exists(self):
         self.build_ns()
         self.build_ns(CUTOVER_ATTEMPT='2')

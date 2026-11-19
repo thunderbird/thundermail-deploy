@@ -3,6 +3,7 @@
 Writes $VERIFY_OUT/source.json, which the later checks compare against.
 VERIFY_ACCOUNT_RANGE=lo-hi snapshots only those accounts (one batch of a piece)."""
 import json
+import os
 from common import sql, ACC, DOC, LIVE, COLLECTIONS, OUT, Report, account_range
 
 r = Report("01 source snapshot")
@@ -18,9 +19,9 @@ else:
     UID_OK = "e.uid is not null"
     S_EMAIL = "s_email"
 pending = int(sql("select count(*) from f")[0][0])
-if pending == 0:
-    r.ok(f"v0.15 task queue (table f) is empty: {pending} pending tasks "
-         "(index updates and other work must drain before the copy, or the snapshot is incomplete)")
+if pending == 0 or os.environ.get("TARGET_ENV") != "tb-prod":
+    r.check(pending == 0, f"v0.15 task queue (table f) is empty: {pending} pending tasks "
+            "(index updates and other work must drain before the copy, or the snapshot is incomplete)")
 else:
     r.ok(f"v0.15 task queue (table f): {pending} pending tasks, not a failure: documents are "
          "counted in p; messages the index has not caught up with are compared by id only")

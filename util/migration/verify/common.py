@@ -114,7 +114,7 @@ def prod_source():
     host, db, user, password = (need(v) for v in SOURCE_VARS)
     c = {"host": host.replace("-pooler", ""), "dbname": db, "user": user, "password": password}
     legacy = os.environ.get("STALWART_LEGACY_PG_HOST", "").replace("-pooler", "")
-    if legacy and c["host"] == legacy:
+    if legacy and c["host"].split(".")[0] == legacy.split(".")[0]:
         sys.exit(f"refusing: STALWART_SOURCE_PG_HOST is the production endpoint "
                  f"(STALWART_LEGACY_PG_HOST), not branch {SOURCE_BRANCH}")
     legacy_pw = os.environ.get("STALWART_LEGACY_PG_PASSWORD")

@@ -31,10 +31,14 @@ def utc(t):
     return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+SMALL = 200000
+
+
 def source_sample(n, accounts):
     est = sql("select coalesce(max(reltuples), 0) from pg_class where relname = 's_email'")
     est = float(est[0][0])
-    pct = min(100.0, 100.0 * 20 * n / est) if est > 0 else 0.01
+    cap = 100.0 if est <= SMALL else 10.0
+    pct = min(cap, 100.0 * 20 * n / est) if est > 0 else 0.01
     while True:
         pct = max(pct, 0.0001)
         rows = sql(
@@ -44,10 +48,10 @@ def source_sample(n, accounts):
             f'order by random() limit {20 * n}'
         )
         got = {(int(a), int(d)): (int(z), int(t)) for a, d, z, t in rows if int(a) in accounts}
-        if len(got) >= n or pct >= 100:
+        if len(got) >= n or pct >= cap:
             keys = random.sample(sorted(got), min(n, len(got)))
             return [(a, d, *got[(a, d)]) for a, d in keys], pct
-        pct = min(100.0, pct * 4)
+        pct = min(cap, pct * 4)
 
 
 def find(src_acc, item):
@@ -107,7 +111,7 @@ def compare(r, src_acc):
     indexed = [(i, e) for i, e in hit if i[2] >= 0]
     sz = [key(i) for i, e in indexed if i[2] != e['size']]
     r.check(not sz, f'size mismatches: {len(sz)} of {len(indexed)} sampled {sz[:3]}')
-    tm = [key(i) for i, e in indexed if abs(i[3] - ts(e['receivedAt'])) > 1]
+    tm = [key(i) for i, e in indexed if i[3] >= 0 and abs(i[3] - ts(e['receivedAt'])) > 1]
     r.check(not tm, f'receivedAt mismatches: {len(tm)} of {len(indexed)} sampled {tm[:3]}')
     nf = [key(i) for i, e in hit if not e.get('mailboxIds')]
     r.check(not nf, f'messages in no folder: {len(nf)}')

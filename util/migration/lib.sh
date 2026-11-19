@@ -21,7 +21,7 @@ for a in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 [ "$APPLY" != 1 ] || no_placeholders || exit 64
-mkdir -p "$EVIDENCE_DIR"
+[ "${BUILDING_ENV:-}" = 1 ] || mkdir -p "$EVIDENCE_DIR"
 
 die() { echo "$*" >&2; exit 1; }
 legacy_stalwart_pg() { [ "$TARGET_ENV" != tb-prod ] || return 1; case " ${RUNNER_LEGACY_PG_KEYS:-stalwart keycloak accounts} " in *" stalwart "*) return 0 ;; esac; return 1; }

@@ -156,6 +156,7 @@ env_locked() {
   return "$rc"
 }
 env_append() { printf "%s='%s'\n" "$1" "$2" >> "$ENV_FILE"; }
+window_value() { [ "$TARGET_ENV" != tb-prod ] || printf '%s\t%s\n' "$1" "$2" >> "$EVIDENCE_DIR/window-values.tsv"; }
 
 setenv() {
   local q
@@ -163,6 +164,7 @@ setenv() {
   [ "$APPLY" = 1 ] || return 0
   q=$(printf '%s' "$2" | sed "s/'/'\\\\''/g")
   env_locked env_append "$1" "$q" || return 1
+  case $2 in *[$'\t\n']*) ;; *) window_value "$1" "$2" || true ;; esac
   export "$1=$2"
 }
 

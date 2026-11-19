@@ -11,6 +11,10 @@ for a in "$@"; do
   esac
 done
 BUILDING_ENV=1
+if [ -z "${CUTOVER_ATTEMPT:-}" ] && [ "${TARGET_ENV:-}" = tb-prod ] && [ -f "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" ]; then
+  CUTOVER_ATTEMPT=$(sed -n "s/^CUTOVER_ATTEMPT='\([1-9][0-9]*\)'$/\1/p" "${CUTOVER_ENV:-/dev/shm/talos/cutover-tb-prod.env}" | tail -1)
+  [ -n "$CUTOVER_ATTEMPT" ] || unset CUTOVER_ATTEMPT
+fi
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ENV_FILE=${CUTOVER_ENV:-/dev/shm/talos/cutover-$TARGET_ENV.env}
 OPERATOR_ENV=${OPERATOR_ENV:-$(operator_env_default)}
@@ -56,6 +60,9 @@ attempt_guard() {
   p=$(attempt_of "$ENV_FILE")
   [ -n "$p" ] && [ "$p" != "$CUTOVER_ATTEMPT" ] || return 0
   [ "$p" -lt "$CUTOVER_ATTEMPT" ] || die "$ENV_FILE is attempt $p: CUTOVER_ATTEMPT=$CUTOVER_ATTEMPT would replace it with an earlier attempt"
+  for v in $CARRY $WINDOW_CARRY; do
+    [ -z "${!v:-}" ] || die "$v is set in this shell (a loaded env file of attempt $p?): a new attempt carries nothing; start a fresh shell and rerun"
+  done
   PREV_IGNORED=1
   printf 'previous env file %s is attempt %s: nothing is carried from it into attempt %s\n' "$ENV_FILE" "$p" "$CUTOVER_ATTEMPT"
 }
@@ -159,12 +166,12 @@ build() {
   KUBECONFIG_TARGET=$(realpath -m "${KUBECONFIG_TARGET:-$HOME/.local/state/talos/$TARGET_KUBECONFIG_NAME}")
   KUBECONFIG_HUB=$(realpath -m "${KUBECONFIG_HUB:-$HOME/.local/state/talos/kc-hub}")
   KUBECONFIG_DEV=$(realpath -m "${KUBECONFIG_DEV:-$HOME/.local/state/talos/kc-dev}")
+  [ "$TARGET_ENV" != tb-prod ] || attempt_guard
   mkdir -p "$(dirname "$ENV_FILE")" "$EVIDENCE_DIR" "$SECRET_DIR"
   env_path_ok "$ENV_FILE" || die "refusing $ENV_FILE: it or its directory is a symlink, not owned by $(id -un), or writable by group or others"
   local count=0 missing=0
   PUT=" "
   [ ! -f "$ENV_FILE" ] || env_target_ok "$ENV_FILE" || exit 64
-  [ "$TARGET_ENV" != tb-prod ] || attempt_guard
   if [ "$TARGET_ENV" = tb-prod ] && [ -n "$(op FREEZE_SHA)" ] && [ "$REBUILD" != 1 ]; then die "FREEZE_SHA is set: the window is open, rerun with --rebuild"; fi
   tmp=$(mktemp "$(dirname "$ENV_FILE")/.cutover-$TARGET_ENV.XXXXXX")
   trap 'rm -f "$tmp"' EXIT
@@ -298,7 +305,9 @@ build() {
   done
   [ "$TARGET_ENV" != tb-prod ] || put CUTOVER_ATTEMPT "$CUTOVER_ATTEMPT" "CUTOVER_ATTEMPT in the environment, else the highest attempt-N directory under \$HOME/.local/state/talos/cutover-$TARGET_ENV, else 1"
   put EVIDENCE_DIR "$EVIDENCE_DIR" "evidence directory"
-  local tsv; tsv=$(op TIMING_TSV); put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
+  local tsv; tsv=$(op TIMING_TSV)
+  [ "$TARGET_ENV" != tb-prod ] || case "$tsv" in "$EVIDENCE_DIR"/*) ;; *) tsv="" ;; esac
+  put TIMING_TSV "${tsv:-$EVIDENCE_DIR/timing-$TARGET_ENV.tsv}" "TIMING_TSV in the environment or the previous file, else \$EVIDENCE_DIR/timing-$TARGET_ENV.tsv"
   put SECRET_DIR "$SECRET_DIR" "tmpfs directory for secret artifacts"
   for side in "LEG:$LEGACY_AWS_PROFILE" "TGT:$TARGET_AWS_PROFILE"; do
     local p=${side%%:*}
@@ -314,7 +323,7 @@ build() {
   for name in $CARRY; do
     case "${PUT:- }" in *" $name "*) continue ;; esac
     local v; v=$(op "$name")
-    [ "$name" != TEST_SENDER_APP_PASSWORD ] || v=$(prev "$name")
+    case "$name" in TEST_SENDER_APP_PASSWORD|STALWART_SOURCE_PG_*|STALWART_ADMIN_ACCOUNT_ID) [ -z "$(prev "$name")" ] || v=$(prev "$name") ;; esac
     if [ -z "$v" ] && [ "${REBUILD:-0}" = 1 ]; then
       case " $SECRET_VARS TEST_SENDER_APP_PASSWORD STALWART_SOURCE_PG_PASSWORD " in *" $name "*) ;; *) v=$(window_values "$name") ;; esac
       [ -n "$v" ] || printf '%-30s not restored: no copy in %s\n' "$name" "$EVIDENCE_DIR/window-values.tsv"
