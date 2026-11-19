@@ -26,13 +26,13 @@ webhookEvents:
 dataRetention:
   expungeSchedule:
     '@type': Daily
-    hour: 12
+    hour: 0
     minute: 0
   dataCleanupSchedule:
     '@type': Daily
-    hour: 13
+    hour: 2
     minute: 0
   blobCleanupSchedule:
     '@type': Daily
-    hour: 14
+    hour: 4
     minute: 0

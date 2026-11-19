@@ -369,13 +369,6 @@ value:
     else: 'false'
 ---
 '@type': update
-object: MtaStageData
-value:
-  maxMessages:
-    match: {}
-    else: '1000'
----
-'@type': update
 object: MtaSts
 value:
   mxHosts:
