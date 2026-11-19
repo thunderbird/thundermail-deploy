@@ -1,3 +1,4 @@
+import importlib
 import shutil
 import sys
 import unittest
@@ -137,6 +138,51 @@ class W6Apply(tw.Harness):
         self.assertNotIn('NEED  piece', out)
         self.assertIn('TEST apply: done', out)
         self.assertEqual(self.rows(), ['verify-bodies', 'verify-bodies'])
+
+
+class W6ProdRows(importlib.import_module('test_pr3_w4').Prod):
+    apply = W6Apply.apply
+
+    def fn(self, script, body, setup='', **kw):
+        kw.setdefault('env', self.env(TARGET_ENV='tb-prod'))
+        return super().fn(script, body, setup=setup, **kw)
+
+    def rows(self):
+        return [(r[0], r[3], r[4]) for r in self.timing()]
+
+    def test_a_failed_compare_writes_no_verify_compare_row(self):
+        mig = self.t / 'fix'
+        mode = W6Apply.COMPARE
+        out = self.apply(mode, 'echo "  FAIL  messages: missing on target 1"; exit 1\n')
+        self.assertIn('verify: run_all exit=1 FAIL=1', out)
+        self.assertIn('STOP TEST (apply): verify-compare failed', out)
+        self.assertEqual([r[0] for r in self.rows()], ['stop-TEST'])
+        shutil.rmtree(mig)
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.apply(mode, 'echo "  PASS  bodies downloaded (random sample): 1/1"\n')
+        self.assertIn('TEST apply: done', out)
+        self.assertEqual(
+            self.rows(),
+            [('verify-compare', 'fails', '0'), ('verify-compare', 'unexpected_warns', '0')],
+        )
+
+    def test_an_empty_source_credential_writes_no_row(self):
+        mode = W6Apply.COMPARE + '\nSOURCE_MISSING=" STALWART_SOURCE_PG_PASSWORD"'
+        out = self.apply(mode, 'echo "  PASS  x 1"\n')
+        self.assertIn('verify: empty in ', out)
+        self.assertEqual([r[0] for r in self.rows()], ['stop-TEST'])
+
+    def test_a_failed_step_writes_no_row_on_tb_prod_only(self):
+        out = self.w4('STEP=queue-drain METRIC=queued VALUE=3 t false; echo "rc=$?"')
+        self.assertIn('rc=1', out)
+        self.assertEqual(self.timing(), [])
+        out = self.w4('STEP=queue-drain METRIC=queued VALUE=0 t true; echo "rc=$?"')
+        self.assertEqual([(r[0], r[4]) for r in self.timing()], [('queue-drain', '0')])
+        (self.t / 'ev' / 'timing.tsv').unlink()
+        out = self.w4(
+            'STEP=queue-drain METRIC=queued VALUE=3 t false; echo "rc=$?"', target='tb-stage'
+        )
+        self.assertEqual([(r[0], r[4]) for r in self.timing()], [('queue-drain', '3')])
 
 
 if __name__ == '__main__':

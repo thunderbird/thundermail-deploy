@@ -6,18 +6,23 @@ import concurrent.futures
 import datetime
 import fcntl
 import hashlib
+import hmac
+import http.client
 import itertools
 import json
 import os
 import pathlib
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import uuid
+import xml.etree.ElementTree as ET
 
 UTC = datetime.timezone.utc
 REGION = 'eu-central-1'
@@ -47,7 +52,6 @@ NAMED = {
     )
 }
 READ_VERBS = {
-    ('s3api', 'list-object-versions'),
     ('s3api', 'get-object'),
     ('s3api', 'head-object'),
     ('cloudwatch', 'get-metric-statistics'),
@@ -77,6 +81,11 @@ RETRYABLE = re.compile(
 )
 ZTIME = re.compile(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ')
 BLOCK = 1 << 20
+CREDS_MARGIN = datetime.timedelta(minutes=5)
+S3_RETRY_CODES = ('SlowDown', 'RequestTimeout', 'InternalError', 'ExpiredToken')
+S3_TIMEOUT = 60
+TEST_ENDPOINT = re.compile(r'http://(127\.0\.0\.1|localhost):(\d{1,5})')
+EMPTY_SHA256 = hashlib.sha256(b'').hexdigest()
 
 
 class Stop(Exception):
@@ -122,13 +131,46 @@ def clean_etag(value):
 
 
 class Aws:
-    def __init__(self, retries, backoff):
+    def __init__(self, retries, backoff, endpoint=None):
         self.retries = retries
         self.backoff = backoff
         self.retried = 0
         self.lock = threading.Lock()
         self.cancel = threading.Event()
         self.env = dict(os.environ, AWS_PAGER='')
+        self.endpoint = endpoint
+        self.creds = {}
+        self.creds_lock = threading.Lock()
+
+    def credentials(self, profile, stale=None):
+        if profile not in (LEGACY_RO, TBPROD_RO):
+            raise Stop('refusing a read with profile %s' % profile)
+        with self.creds_lock:
+            c = self.creds.get(profile)
+            if (
+                c is None
+                or c is stale
+                or (c['expires'] is not None and c['expires'] - utcnow() <= CREDS_MARGIN)
+            ):
+                out = self.call(profile, 'configure', 'export-credentials', '--format', 'process')
+                bad = 'aws configure export-credentials (profile %s) gave no usable credentials'
+                if not isinstance(out, dict) or not (
+                    out.get('AccessKeyId') and out.get('SecretAccessKey')
+                ):
+                    raise Stop(bad % profile)
+                expires = out.get('Expiration')
+                try:
+                    expires = parse_aws_time(expires) if expires else None
+                except ValueError:
+                    raise Stop(bad % profile) from None
+                c = {
+                    'key': out['AccessKeyId'],
+                    'secret': out['SecretAccessKey'],
+                    'token': out.get('SessionToken'),
+                    'expires': expires,
+                }
+                self.creds[profile] = c
+            return c
 
     def call(self, profile, *args):
         cmd = ['aws', '--profile', profile, '--region', REGION, '--output', 'json', *args]
@@ -160,6 +202,193 @@ class Aws:
                 'refusing aws s3api %s %s: writes go to the tb-prod bucket only' % (verb, buckets)
             )
         return self.call(TBPROD_RW, 's3api', verb, *args)
+
+
+def s3_endpoint():
+    value = os.environ.get('BLOB_S3_ENDPOINT')
+    if not value:
+        return None
+    m = TEST_ENDPOINT.fullmatch(value)
+    if os.environ.get('BLOB_TEST') != '1' or not m or not 0 < int(m[2]) < 65536:
+        raise Usage(
+            'BLOB_S3_ENDPOINT is for tests only: it needs BLOB_TEST=1 and '
+            'http://127.0.0.1:<port> or http://localhost:<port>'
+        )
+    return m[1], int(m[2])
+
+
+def s3_quote(text):
+    return urllib.parse.quote(text, safe='-_.~')
+
+
+def sign(creds, host, path, query, now, region=REGION):
+    amz = now.strftime('%Y%m%dT%H%M%SZ')
+    scope = '%s/%s/s3/aws4_request' % (amz[:8], region)
+    cq = '&'.join('%s=%s' % kv for kv in sorted((s3_quote(k), s3_quote(v)) for k, v in query))
+    headers = {'host': host, 'x-amz-content-sha256': EMPTY_SHA256, 'x-amz-date': amz}
+    if creds.get('token'):
+        headers['x-amz-security-token'] = creds['token']
+    names = sorted(headers)
+    canonical = '\n'.join(
+        [
+            'GET',
+            path,
+            cq,
+            ''.join('%s:%s\n' % (n, headers[n]) for n in names),
+            ';'.join(names),
+            EMPTY_SHA256,
+        ]
+    )
+    text = '\n'.join(
+        ['AWS4-HMAC-SHA256', amz, scope, hashlib.sha256(canonical.encode()).hexdigest()]
+    )
+    key = ('AWS4' + creds['secret']).encode()
+    for part in (amz[:8], region, 's3', 'aws4_request'):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    signature = hmac.new(key, text.encode(), hashlib.sha256).hexdigest()
+    auth = 'AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s'
+    headers['authorization'] = auth % (creds['key'], scope, ';'.join(names), signature)
+    return path + ('?' + cq if cq else ''), headers
+
+
+def local_name(e):
+    return e.tag.rsplit('}', 1)[-1]
+
+
+def child_text(e, name):
+    for c in e:
+        if local_name(c) == name:
+            return c.text or ''
+    return None
+
+
+def parse_versions(body, bucket):
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError as exc:
+        raise Stop('%s: list-object-versions answer is not XML: %s' % (bucket, exc)) from None
+    if local_name(root) != 'ListVersionsResult':
+        raise Stop('%s: list-object-versions answered <%s>' % (bucket, local_name(root)))
+    url = child_text(root, 'EncodingType') == 'url'
+
+    def name(value):
+        return urllib.parse.unquote_plus(value) if url and value is not None else value
+
+    page = {
+        'Versions': [],
+        'DeleteMarkers': [],
+        'IsTruncated': child_text(root, 'IsTruncated') == 'true',
+        'NextKeyMarker': name(child_text(root, 'NextKeyMarker')),
+        'NextVersionIdMarker': child_text(root, 'NextVersionIdMarker'),
+    }
+    for e in root:
+        kind = local_name(e)
+        if kind not in ('Version', 'DeleteMarker'):
+            continue
+        if child_text(e, 'Key') is None:
+            raise Stop('%s: list-object-versions gave a %s without a Key' % (bucket, kind))
+        item = {
+            'Key': name(child_text(e, 'Key')),
+            'VersionId': child_text(e, 'VersionId'),
+            'IsLatest': child_text(e, 'IsLatest') == 'true',
+        }
+        if kind == 'Version':
+            item.update(Size=int(child_text(e, 'Size') or 0), ETag=child_text(e, 'ETag'))
+            page['Versions'].append(item)
+        else:
+            page['DeleteMarkers'].append(item)
+    return page
+
+
+def s3_error(body):
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return 'no-error-code', ''
+    code = child_text(root, 'Code') or 'no-error-code'
+    return code, ' '.join((child_text(root, 'Message') or '').split())[:300]
+
+
+class Lister:
+    def __init__(self, aws, bucket, profile):
+        self.aws = aws
+        self.bucket = bucket
+        self.profile = profile
+        self.conn = None
+        if aws.endpoint:
+            self.host = '%s:%d' % aws.endpoint
+            self.path = '/%s/' % bucket
+        else:
+            self.host = '%s.s3.%s.amazonaws.com' % (bucket, REGION)
+            self.path = '/'
+
+    def connect(self):
+        if self.aws.endpoint:
+            return http.client.HTTPConnection(*self.aws.endpoint, timeout=S3_TIMEOUT)
+        return http.client.HTTPSConnection(
+            self.host, timeout=S3_TIMEOUT, context=ssl.create_default_context()
+        )
+
+    def close(self):
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def page(self, key_marker, version_marker):
+        query = [('versions', ''), ('encoding-type', 'url'), ('max-keys', '1000')]
+        if key_marker is not None:
+            query.append(('key-marker', key_marker))
+        if version_marker:
+            query.append(('version-id-marker', version_marker))
+        stale = None
+        for attempt in itertools.count():
+            creds = self.aws.credentials(self.profile, stale)
+            target, headers = sign(creds, self.host, self.path, query, datetime.datetime.now(UTC))
+            status = None
+            try:
+                if self.conn is None:
+                    self.conn = self.connect()
+                self.conn.request('GET', target, headers=headers)
+                resp = self.conn.getresponse()
+                status, body = resp.status, resp.read()
+            except (OSError, http.client.HTTPException) as exc:
+                self.close()
+                code, err = 'connection error', '%s: %s' % (type(exc).__name__, exc)
+            else:
+                if status == 200:
+                    return parse_versions(body, self.bucket)
+                code, err = s3_error(body)
+                if 300 <= status < 400:
+                    self.close()
+                    raise Stop(
+                        'list-object-versions s3://%s (profile %s) answered HTTP %d %s: %s '
+                        '(redirects are not followed)'
+                        % (self.bucket, self.profile, status, code, err)
+                    )
+            retry = status is None or status >= 500 or code in S3_RETRY_CODES
+            if attempt >= self.aws.retries or not retry or self.aws.cancel.is_set():
+                self.close()
+                raise Stop(
+                    'list-object-versions s3://%s (profile %s) failed: %s%s: %s'
+                    % (
+                        self.bucket,
+                        self.profile,
+                        '' if status is None else 'HTTP %d ' % status,
+                        code,
+                        err,
+                    )
+                )
+            stale = creds if code == 'ExpiredToken' else None
+            self.close()
+            with self.aws.lock:
+                self.aws.retried += 1
+            time.sleep(min(30.0, self.aws.backoff * 2**attempt))
 
 
 def timing_tsv():
@@ -393,17 +622,13 @@ def list_shard(aws, side, i, lower, upper, key, relist):
         if isinstance(old, dict) and all(old.get(k) == v for k, v in meta.items()):
             return dict(old, reused=True)
     part = side.dir / ('shard-%04d.part' % i)
-    objects = markers = pages = 0
+    objects = markers = pages = versions = 0
     marker, version = lower, None
-    with part.open('w') as fh:
+    with Lister(aws, side.bucket, side.profile) as lister, part.open('w') as fh:
         while not aws.cancel.is_set():
-            args = ['--bucket=' + side.bucket, '--max-keys=1000', '--no-paginate']
-            if marker is not None:
-                args.append('--key-marker=' + marker)
-            if version:
-                args.append('--version-id-marker=' + version)
-            page = aws.read(side.profile, 's3api', 'list-object-versions', *args)
+            page = lister.page(marker, version)
             pages += 1
+            versions += len(page['Versions']) + len(page['DeleteMarkers'])
             latest = [
                 (
                     v['Key'],
@@ -441,7 +666,7 @@ def list_shard(aws, side, i, lower, upper, key, relist):
     if aws.cancel.is_set():
         raise Stop('listing cancelled')
     os.replace(part, side.file(i))
-    meta.update(objects=objects, markers=markers, pages=pages)
+    meta.update(objects=objects, markers=markers, pages=pages, versions=versions)
     done.write_text(json.dumps(meta))
     return dict(meta, reused=False)
 
@@ -732,10 +957,34 @@ def lock_out(out):
     return fh
 
 
+def wait_first(a):
+    print(
+        'no passing %s row after the %s row: compare --apply runs the replication wait first'
+        % (WAIT_ROW, STOP_ROW)
+    )
+    ws = new_summary('wait', True)
+    try:
+        cmd_wait(a, ws)
+        ws['result'] = 'pass'
+    except Stop as exc:
+        print('STOP  %s' % exc)
+        raise Stop(
+            'replication wait did not pass: no %s row written, nothing listed or copied' % WAIT_ROW
+        ) from None
+    finally:
+        print(count_line('blob-wait', ws, WAIT_KEYS))
+
+
 def start_condition(a, tsv):
     stop, wait, why = current_cut(tsv)
+    if a.apply and stop is not None and wait is None:
+        wait_first(a)
+        stop, wait, why = current_cut(tsv)
     if stop is not None and wait is None and not a.skip_wait_check:
-        why = 'no passing %s row after the %s row (run wait --apply first)' % (WAIT_ROW, STOP_ROW)
+        why = 'no passing %s row after the %s row (compare --apply waits for it first)' % (
+            WAIT_ROW,
+            STOP_ROW,
+        )
     if not why:
         return stop, wait, []
     if a.apply:
@@ -787,6 +1036,8 @@ def cmd_compare(a, summary):
         'shards=%d workers=%d boundaries: %s' % (len(shards), a.workers, ' '.join(bounds) or 'none')
     )
     key = {'stop': z(stop) if stop else 'none', 'wait': z(wait) if wait else 'none'}
+    listing = time.monotonic()
+    stats = {s.name: [0, 0, 0.0] for s in sides}
     jobs = [
         (
             (s.name, i),
@@ -808,6 +1059,16 @@ def cmd_compare(a, summary):
                 m['pages'],
                 ' reused' if m['reused'] else '',
             )
+        )
+        if not m['reused']:
+            stats[name][0] += m['pages']
+            stats[name][1] += m['versions']
+        stats[name][2] = time.monotonic() - listing
+    for s in sides:
+        pages, versions, seconds = stats[s.name]
+        print(
+            'listed %s pages=%d versions=%d in %.1fs (%d workers, one connection per shard)'
+            % (s.name, pages, versions, seconds, a.workers)
         )
     ev = Evidence(run_dir)
     named = {}
@@ -885,6 +1146,14 @@ COMPARE_KEYS = (
 )
 
 
+def new_summary(cmd, apply):
+    summary = dict.fromkeys(COMPARE_KEYS if cmd == 'compare' else WAIT_KEYS, 0)
+    summary.update(mode='apply' if apply else 'dry-run', result='stop')
+    if cmd == 'wait':
+        summary.update(stop='none', failed_since='none', ops='-', bytes='-', failed='-')
+    return summary
+
+
 def parser():
     ap = Parser(
         prog='blob_compare.py',
@@ -899,8 +1168,8 @@ def parser():
         p.add_argument('--dry-run', action='store_true')
         p.add_argument('--retries', type=int, default=8)
         p.add_argument('--backoff', type=float, default=1.0)
-    w.add_argument('--timeout', type=int, default=1800)
-    w.add_argument('--interval', type=int, default=60)
+        p.add_argument('--timeout', type=int, default=1800)
+        p.add_argument('--interval', type=int, default=60)
     c.add_argument('--out')
     c.add_argument('--shards', type=int, default=128)
     c.add_argument('--workers', type=int, default=48)
@@ -925,14 +1194,12 @@ def main(argv=None):
             raise Usage('--skip-wait-check is for a dry run only')
         if a.cmd == 'compare' and len(set(a.alphabet)) < 2:
             raise Usage('--alphabet needs two or more characters')
+        endpoint = s3_endpoint()
     except Usage as exc:
         print('usage: %s' % exc, file=sys.stderr)
         return 64
-    a.aws = Aws(a.retries, a.backoff)
-    summary = dict.fromkeys(COMPARE_KEYS if a.cmd == 'compare' else WAIT_KEYS, 0)
-    summary.update(mode='apply' if a.apply else 'dry-run', result='stop')
-    if a.cmd == 'wait':
-        summary.update(stop='none', failed_since='none', ops='-', bytes='-', failed='-')
+    a.aws = Aws(a.retries, a.backoff, endpoint)
+    summary = new_summary(a.cmd, a.apply)
     try:
         rc = cmd_wait(a, summary) if a.cmd == 'wait' else cmd_compare(a, summary)
     except Usage as exc:

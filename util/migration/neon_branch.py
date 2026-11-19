@@ -15,6 +15,7 @@ API = 'https://console.neon.tech/api/v2'
 SLEEP = float(os.environ.get('NEON_POLL_SECONDS', '2'))
 ID = re.compile(r'[a-z0-9][a-z0-9-]{0,62}')
 ROLE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
+LSN = re.compile(r'[0-9A-Fa-f]{1,8}/[0-9A-Fa-f]{1,8}')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -289,12 +290,19 @@ def cmd_reset(n, a):
         f'/projects/{n.project}/branches/{b["id"]}/restore',
         {'source_branch_id': n.parent},
     )
+    before = b.get('parent_lsn')
     b = n.settle(b['id'], 'reset', r, since)
     print('after: ' + line(b))
     if not later(b.get('last_reset_at'), a.after):
         print(
             f'reset proof FAILED: last_reset_at {b.get("last_reset_at")} '
             f'is not later than {a.after}'
+        )
+        return 1
+    if not LSN.fullmatch(b.get('parent_lsn') or ''):
+        print(
+            f'reset proof FAILED: no parent_lsn after the reset (before {before or "-"}): '
+            f'no LSN to create {a.branch}-source at'
         )
         return 1
     print(
@@ -310,9 +318,12 @@ def cmd_source(n, a):
     if old:
         n.check_child(old, a.name)
         print('existing: ' + line(old))
+    if a.lsn is not None and not LSN.fullmatch(a.lsn):
+        sys.exit(f'REFUSED: --lsn {a.lsn!r} is not an LSN')
+    at = f' at parent_lsn {a.lsn}' if a.lsn else ''
     if not a.apply:
         print(
-            f'plan: {"delete and " if old else ""}create {a.name} from the parent with a '
+            f'plan: {"delete and " if old else ""}create {a.name} from the parent{at} with a '
             f'read_write endpoint, reset the password of {a.role} on it, add a read_only '
             'endpoint, delete the read_write endpoint; nothing written (dry run)'
         )
@@ -333,7 +344,10 @@ def cmd_source(n, a):
         'POST',
         f'/projects/{n.project}/branches',
         {
-            'branch': {'parent_id': n.parent, 'name': a.name},
+            'branch': dict(
+                {'parent_id': n.parent, 'name': a.name},
+                **({'parent_lsn': a.lsn} if a.lsn else {}),
+            ),
             'endpoints': [{'type': 'read_write'}],
         },
     )
@@ -342,6 +356,8 @@ def cmd_source(n, a):
         sys.exit('REFUSED: the created branch is not a new child of the parent')
     n.child = plain_id(b['id'], 'branch id')
     b = n.settle(b['id'], 'create', r, since)
+    if a.lsn and b.get('parent_lsn') != a.lsn:
+        sys.exit(f'{a.name} has parent_lsn {b.get("parent_lsn") or "-"}, asked for {a.lsn}')
     eps = n.endpoints(b['id'])
     if len(eps) != 1 or eps[0].get('type') != 'read_write':
         sys.exit(f'{a.name} has {len(eps)} endpoint(s), want one read_write endpoint')
@@ -418,6 +434,7 @@ def main(argv=None):
     s.add_argument('--role', required=True)
     s.add_argument('--db', required=True)
     s.add_argument('--out', required=True)
+    s.add_argument('--lsn')
     s.add_argument('--after', required=True)
     s.add_argument('--apply', action='store_true')
     a = ap.parse_args(argv)
