@@ -1158,6 +1158,41 @@ class QuotaReset(Sandbox):
         self.assertEqual(rc, 1, out)
         self.assertIn('no quota-reset-started row after the last cut-ecs row and no task id given', out)
 
+    def test_status_rejects_malformed_or_incomplete_answers(self):
+        first = lambda ids: {'tool': 'curl', 'match': 'x:Account/query.*"position":0,', 'out': jmap_reply('x:Account/query', {'ids': ids})}
+        cases = {
+            'account ids not an array': [first({})] + self.queue([], []),
+            'account get notFound': [
+                first(['a1']),
+                {'tool': 'curl', 'match': 'x:Account/get', 'out': jmap_reply('x:Account/get', {'list': [], 'notFound': ['a1']})},
+            ] + self.queue([], []),
+            'account get misses an id': [
+                first(['a1', 'a2']),
+                {'tool': 'curl', 'match': 'x:Account/get', 'out': jmap_reply('x:Account/get', {'list': [{'id': 'a1', 'usedDiskQuota': 5}]})},
+            ] + self.queue([], []),
+            'task total below its ids': [
+                {'tool': 'curl', 'match': 'Task/query', 'out': jmap_reply('x:Task/query', {'ids': ['t1'], 'total': 0})},
+                {'tool': 'curl', 'match': 'x:Account/query', 'out': jmap_reply('x:Account/query', {'ids': []})},
+            ],
+            'task total out of range': [
+                {'tool': 'curl', 'match': 'Task/query', 'out': jmap_reply('x:Task/query', {'ids': [], 'total': 10000000000})},
+                {'tool': 'curl', 'match': 'x:Account/query', 'out': jmap_reply('x:Account/query', {'ids': []})},
+            ],
+        }
+        for case, rules in cases.items():
+            with self.subTest(case=case):
+                self.rules(rules)
+                rc, out = self.tool('status', 't9')
+                self.assertEqual(rc, 1, out)
+                self.assertNotIn('DONE', out)
+        self.rules([
+            first(['a1']),
+            {'tool': 'curl', 'match': 'x:Account/get', 'out': jmap_reply('x:Account/get', {'list': [{'id': 'a1', 'usedDiskQuota': 5}], 'notFound': []})},
+        ] + self.queue([], []))
+        rc, out = self.tool('status', 't9')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('DONE  quota reset finished: accounts=1 with_usage=1 used_bytes=5', out)
+
     def test_status_reads_done_running_and_error(self):
         (self.t / 'ev' / 'timing-tb-prod.tsv').write_text('quota-reset-started\tx\tx\ttask\tt9\n')
         self.rules(self.queue([], ['a1', 'a2']))

@@ -20,17 +20,18 @@ cred() {
 }
 jmap() { curl -sS -m 60 -K <(cred) -H 'Content-Type: application/json' --data "$1" "$API"; }
 call() { jmap "$(jq -cn --arg a "$STALWART_ADMIN_ACCOUNT_ID" --arg m "$1" --argjson args "$2" --argjson using "$USING" '{using: $using, methodCalls: [[$m, ({accountId: $a} + $args), "0"]]}')" | jq -ce '.methodResponses[0] | if .[0] == "error" then error(.[1] | tostring) else .[1] end'; }
-queued() { call x:Task/query "$(jq -cn --arg t "$1" '{filter: {"@type": $t}, limit: 5000, calculateTotal: true}')" | jq -re 'if (.ids | type) == "array" then (.total // (.ids | length)) else error("no ids") end'; }
+queued() { call x:Task/query "$(jq -cn --arg t "$1" '{filter: {"@type": $t}, limit: 5000, calculateTotal: true}')" | jq -re 'if (.ids | type) != "array" or any(.ids[]; type != "string") then error("ids") elif has("total") and ((.total | type) != "number" or .total != (.total | floor) or .total < (.ids | length) or .total >= 1000000000) then error("total") else (.total // (.ids | length)) end'; }
 usage() {
   local ids
-  local ids='[]' page list='[]' i got
+  local ids='[]' page list='[]' i got want
   while :; do
-    page=$(call x:Account/query "$(jq -cn --argjson p "$(jq 'length' <<<"$ids")" '{position: $p, limit: 1000}')" | jq -ce '.ids') || return 1
+    page=$(call x:Account/query "$(jq -cn --argjson p "$(jq 'length' <<<"$ids")" '{position: $p, limit: 1000}')" | jq -ce '.ids | if type == "array" and all(.[]; type == "string") then . else error("ids") end') || return 1
     [ "$(jq 'length' <<<"$page")" -gt 0 ] || break
     ids=$(jq -c --argjson p "$page" '. + $p' <<<"$ids")
   done
   for ((i = 0; i < $(jq 'length' <<<"$ids"); i += 200)); do
-    got=$(call x:Account/get "$(jq -c --argjson i "$i" '{ids: .[$i:$i + 200], properties: ["usedDiskQuota"]}' <<<"$ids")" | jq -ce '.list') || return 1
+    want=$(jq -c --argjson i "$i" '.[$i:$i + 200]' <<<"$ids")
+    got=$(call x:Account/get "$(jq -cn --argjson w "$want" '{ids: $w, properties: ["usedDiskQuota"]}')" | jq -ce --argjson w "$want" 'if (.list | type) == "array" and ((.notFound // []) | length) == 0 and ([.list[].id] | sort) == ($w | sort) then .list else error("incomplete") end') || return 1
     list=$(jq -c --argjson l "$got" '. + $l' <<<"$list")
   done
   jq -r '"accounts=\(length) with_usage=\([.[] | select((.usedDiskQuota // 0) > 0)] | length) used_bytes=\([.[].usedDiskQuota // 0] | add // 0)"' <<<"$list"

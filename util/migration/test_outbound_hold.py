@@ -1229,6 +1229,38 @@ class Block25(Base):
                 self.assertIn('the legacy queue was not read', p.stdout)
                 self.assertNotIn('legacy-outbound-block', self.rows())
 
+    def test_block_refuses_an_out_of_range_total(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=100000000000000000000)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertNotEqual(p.returncode, 0, p.stdout)
+        self.assertIn('the legacy queue was not read', p.stdout)
+        self.assertEqual(self.writes(), [])
+        self.assertNotIn('legacy-outbound-block', self.rows())
+
+    def test_block_cap_semantics_at_40_and_41(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=41)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertNotEqual(p.returncode, 0, p.stdout)
+        self.assertIn('the legacy queue holds 41 message(s)', p.stdout)
+        self.assertEqual(self.writes(), [])
+        self.edit(legacy_queue=40)
+        p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT='40')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('legacy queue: 40 message(s) stay queued on legacy', p.stdout)
+
+    def test_block_refuses_an_invalid_cap_even_with_an_empty_queue(self):
+        self.add_row('cut-ecs')
+        self.edit(legacy_queue=0)
+        for cap in ('abc', '010', '1000000000', ''):
+            with self.subTest(cap=cap):
+                p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5', LEGACY_QUEUE_ACCEPT=cap)
+                self.assertNotEqual(p.returncode, 0, p.stdout)
+                self.assertIn('LEGACY_QUEUE_ACCEPT=%s is not a whole number below 10^9' % cap, p.stdout)
+                self.assertEqual(self.writes(), [])
+                self.assertNotIn('legacy-outbound-block', self.rows())
+
     def test_block_apply_then_restore(self):
         self.add_row('cut-ecs')
         p = self.run_tool('block25.sh', 'block', '--apply', '--go', 'go 2.5')

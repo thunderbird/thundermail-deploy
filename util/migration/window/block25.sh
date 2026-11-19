@@ -103,17 +103,18 @@ legacy_queue() {
   legacy_tunnel || return 1
   body=$(curl -sk -m 15 -K <(curl_user "$OLD_STALWART_USER" "$OLD_STALWART_PASSWORD") "$OLD_STALWART_URL/api/queue/messages?limit=1") || { echo "legacy admin API on $OLD_STALWART_URL did not answer"; return 1; }
   LEGACY_QUEUE=$(jq -re '.data.total' <<<"$body") || { echo "legacy admin API answered without data.total"; return 1; }
-  [[ $LEGACY_QUEUE =~ ^[0-9]+$ ]] || { echo "legacy admin API answered a data.total that is not a whole number: $LEGACY_QUEUE"; return 1; }
+  [[ $LEGACY_QUEUE =~ ^(0|[1-9][0-9]{0,8})$ ]] || { echo "legacy admin API answered a data.total that is not a whole number below 10^9: $LEGACY_QUEUE"; return 1; }
   echo "legacy queue total=$LEGACY_QUEUE (admin API through the tunnel)"
 }
 
 block_gates() {
   local miss=""
   [ -n "$(awk -F'\t' '$1 == "cut-ecs"' "$TIMING_TSV" 2>/dev/null)" ] || miss="row cut-ecs (2.2 of the window) is not in $TIMING_TSV"
+  [ -n "$miss" ] || [ -z "${LEGACY_QUEUE_ACCEPT+x}" ] || [[ $LEGACY_QUEUE_ACCEPT =~ ^(0|[1-9][0-9]{0,8})$ ]] || miss="LEGACY_QUEUE_ACCEPT=$LEGACY_QUEUE_ACCEPT is not a whole number below 10^9"
   if [ -z "$miss" ]; then
     need OLD_STALWART_URL OLD_STALWART_USER OLD_STALWART_PASSWORD
     if ! legacy_queue; then miss="the legacy queue was not read"
-    elif [ "$LEGACY_QUEUE" != 0 ] && { [[ ! ${LEGACY_QUEUE_ACCEPT:-} =~ ^[0-9]+$ ]] || [ "$LEGACY_QUEUE" -gt "$LEGACY_QUEUE_ACCEPT" ]; }; then miss="the legacy queue holds $LEGACY_QUEUE message(s): wait for 2.4 (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least $LEGACY_QUEUE)"
+    elif [ "$LEGACY_QUEUE" != 0 ] && { [[ ! ${LEGACY_QUEUE_ACCEPT:-} =~ ^(0|[1-9][0-9]{0,8})$ ]] || [ "$LEGACY_QUEUE" -gt "$LEGACY_QUEUE_ACCEPT" ]; }; then miss="the legacy queue holds $LEGACY_QUEUE message(s): wait for 2.4 (or accept it: LEGACY_QUEUE_ACCEPT=<n> with n at least $LEGACY_QUEUE)"
     elif [ "$LEGACY_QUEUE" != 0 ]; then echo "legacy queue: $LEGACY_QUEUE message(s) stay queued on legacy and move with the data at 4.2 (LEGACY_QUEUE_ACCEPT=$LEGACY_QUEUE_ACCEPT)"; fi
   fi
   [ -n "$miss" ] || return 0
