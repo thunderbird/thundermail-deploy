@@ -18,7 +18,7 @@ data:
   config.json: |
     {
       "@type": "PostgreSql",
-      "host": "REPLACE_ME_CUTOVER_BRANCH_HOST",
+      "host": "ep-lucky-feather-a2t3agda.eu-central-1.aws.neon.tech",
       "port": 5432,
       "database": "stalwart",
       "authUsername": "stalwart_owner",
