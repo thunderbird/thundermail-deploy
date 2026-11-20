@@ -29,20 +29,20 @@ data:
     dataRetention:
       expungeSchedule:
         '@type': Daily
-        hour: 12
+        hour: 0
         minute: 0
       dataCleanupSchedule:
         '@type': Daily
-        hour: 13
+        hour: 2
         minute: 0
       blobCleanupSchedule:
         '@type': Daily
-        hour: 14
+        hour: 4
         minute: 0
 immutable: true
 kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-values-hgbfh852c5
+  name: stalwart-config-values-cgbfkmt459
   namespace: thundermail
