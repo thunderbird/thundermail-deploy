@@ -13,9 +13,6 @@ spec:
   selector:
     app: stalwart
   ports:
-    - name: lmtp
-      port: 24
-      targetPort: lmtp
     - name: smtp
       port: 25
       targetPort: smtp
