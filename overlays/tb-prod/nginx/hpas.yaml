@@ -7,3 +7,13 @@ metadata:
 spec:
   minReplicas: 2
   maxReplicas: 4
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: thundermail
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  replicas: 0

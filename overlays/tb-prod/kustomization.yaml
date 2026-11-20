@@ -12,12 +12,6 @@ components:
 
 namespace: "thundermail"
 
-replicas:
-  - name: stalwart
-    count: 0
-  - name: nginx
-    count: 0
-
 images:
   - name: stalwartlabs/stalwart
     newTag: v0.16.27
@@ -54,3 +48,13 @@ patches:
         value:
           name: STALWART_PUBLIC_URL
           value: "https://mail.thundermail.com"
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          tcpSocket:
+            port: 8080
+          periodSeconds: 10
+          failureThreshold: 180
+      - op: add
+        path: /spec/progressDeadlineSeconds
+        value: 1900
