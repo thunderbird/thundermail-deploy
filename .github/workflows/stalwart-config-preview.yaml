@@ -1,5 +1,15 @@
 name: Stalwart configuration preview
 
+# Which preview branches (watched by Kargo Warehouses) get updated, and when:
+#   - PR opened/updated/reopened: dev only, so the change can be tested in dev.
+#   - PR merged: every affected target (dev, stage, prod). dev and stage
+#     auto-promote (see ProjectConfig); prod gets Freight but waits for a manual
+#     promotion.
+#   - PR closed unmerged: dev is restored from the PR base.
+# To let a new target be tested from PRs, set prPreview: true on it below (non-prod
+# only) and enable auto-promotion for its Stage in platform-infrastructure's
+# tb-stalwart-configs base/shared/project.yaml. Default is merge-only.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
@@ -29,16 +39,19 @@ jobs:
             const targets = [
               {
                 id: 'thundermail-tb-stage-thundermail',
+                prPreview: false,
                 overlayPath: 'overlays/tb-stage-thundermail/stalwart-configs',
                 previewBranch: 'env/tb-stage-thundermail-stalwart-configs-preview'
               },
               {
                 id: 'thundermail-tb-dev01',
+                prPreview: true,
                 overlayPath: 'overlays/tb-dev/stalwart-configs',
                 previewBranch: 'env/tb-dev-thundermail-stalwart-configs-preview'
               },
               {
                 id: 'thundermail-tb-prod01',
+                prPreview: false,
                 overlayPath: 'overlays/tb-prod/stalwart-configs',
                 previewBranch: 'env/tb-prod-thundermail-stalwart-configs-preview'
               }
@@ -60,26 +73,32 @@ jobs:
             const sharedChange = changedPaths.some(path =>
               sharedPrefixes.some(prefix => path.startsWith(prefix))
             );
-            const affectedTargets = sharedChange
+            // Before merge only targets that allow PR previews (dev) publish;
+            // a merged PR publishes to every affected target.
+            const merged = context.payload.pull_request.merged === true;
+            const candidates = merged
               ? targets
-              : targets.filter(target =>
+              : targets.filter(target => target.prPreview);
+            const affectedTargets = sharedChange
+              ? candidates
+              : candidates.filter(target =>
                   changedPaths.some(path =>
                     path.startsWith(`${target.overlayPath}/`)
                   )
                 );
 
             if (affectedTargets.length === 0) {
-              core.setFailed(
-                'No configured Stalwart target matches the changed paths.'
+              core.notice(
+                'No Stalwart target to publish for these paths and event.'
               );
-              return;
             }
 
             core.setOutput('targets', JSON.stringify(affectedTargets));
 
   sync-preview-branches:
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.select-targets.outputs.targets != '[]'
     needs: select-targets
     runs-on: ubuntu-latest
     strategy:
