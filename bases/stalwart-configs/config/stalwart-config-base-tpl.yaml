@@ -163,7 +163,7 @@ value:
       '[::]:4190': true
     protocol: manageSieve
     useTls: true
-    tlsImplicit: false
+    tlsImplicit: true
     overrideProxyTrustedNetworks:
       '__INTERNAL_IP_CIDR__': true
 ---
