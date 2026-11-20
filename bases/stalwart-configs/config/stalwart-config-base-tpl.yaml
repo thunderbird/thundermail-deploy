@@ -163,7 +163,7 @@ value:
       '[::]:4190': true
     protocol: manageSieve
     useTls: true
-    tlsImplicit: false
+    tlsImplicit: true
     overrideProxyTrustedNetworks:
       '__INTERNAL_IP_CIDR__': true
 ---
@@ -228,6 +228,22 @@ value:
     bind:
       '[::]:25': true
     protocol: smtp
+    useTls: true
+    tlsImplicit: false
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
+---
+'@type': upsert
+object: NetworkListener
+matchOn:
+  - protocol
+  - bind
+value:
+  listen-smtp:
+    name: lmtp-plain
+    bind:
+      '[::]:24': true
+    protocol: lmtp
     useTls: true
     tlsImplicit: false
     overrideProxyTrustedNetworks:
