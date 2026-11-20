@@ -19,3 +19,16 @@ dnsPublishSpf: true
 authBanRateCount: 500
 scanBanRateCount: 1000
 addressBookName: Thundermail Contacts
+dataRetention:
+  expungeSchedule:
+    '@type': Daily
+    hour: 0
+    minute: 0
+  dataCleanupSchedule:
+    '@type': Daily
+    hour: 2
+    minute: 0
+  blobCleanupSchedule:
+    '@type': Daily
+    hour: 4
+    minute: 0
