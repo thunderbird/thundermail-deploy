@@ -1,0 +1,48 @@
+apiVersion: v1
+data:
+  values.yaml: |
+    domainSlug: thundermail
+    domainFQDN: thundermail.com
+    blobStoreRegion: EuCentral1
+    blobStoreBucket: mzla-tb-prod-thundermail-stalwart-blob-store
+    inMemoryStoreURL: rediss://master.stalwart-redis-thundermail.cfoyzs.euc1.cache.amazonaws.com
+    tracerSlug: stdout
+    internalIPCIDR: 10.130.0.0/16
+    tlsCertificateSANs:
+      '*.thundermail.com': true
+      '*.tb.pro': true
+    oidcIssuerURL: https://auth.tb.pro/realms/tbpro
+    stalwartPgHost: ep-still-resonance-b9c8rnw6-pooler.c-7.eu-central-1.aws.neon.tech
+    stalwartPgDatabase: neondb
+    stalwartPgAdminUsername: neondb_owner
+    dnsManagement: Manual
+    dnsPublishSpf: false
+    authBanRateCount: 5000
+    scanBanRateCount: 1000
+    addressBookName: Thundermail Address Book
+    allowedIPs: {}
+    webhookURL: https://accounts.tb.pro/api/v1/telemetry/stalwart/webhook/
+    webhookEvents:
+      message-ingest.ham: true
+      message-ingest.spam: true
+      queue.authenticated-message-queued: true
+    dataRetention:
+      expungeSchedule:
+        '@type': Daily
+        hour: 12
+        minute: 0
+      dataCleanupSchedule:
+        '@type': Daily
+        hour: 13
+        minute: 0
+      blobCleanupSchedule:
+        '@type': Daily
+        hour: 14
+        minute: 0
+immutable: true
+kind: ConfigMap
+metadata:
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+  name: stalwart-config-values-hgbfh852c5
+  namespace: thundermail
