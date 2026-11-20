@@ -155,7 +155,6 @@ object: NetworkListener
 matchOn:
   - protocol
   - useTls
-  - tlsImplicit
 value:
   listen-sieve:
     name: sieve
