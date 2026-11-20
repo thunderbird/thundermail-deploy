@@ -233,6 +233,22 @@ value:
     overrideProxyTrustedNetworks:
       '__INTERNAL_IP_CIDR__': true
 ---
+'@type': upsert
+object: NetworkListener
+matchOn:
+  - protocol
+  - bind
+value:
+  listen-smtp:
+    name: lmtp-plain
+    bind:
+      '[::]:24': true
+    protocol: lmtp
+    useTls: true
+    tlsImplicit: false
+    overrideProxyTrustedNetworks:
+      '__INTERNAL_IP_CIDR__': true
+---
 '@type': destroy
 object: NetworkListener
 value:
