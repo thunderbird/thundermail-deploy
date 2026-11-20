@@ -240,7 +240,7 @@ spec:
           name: stalwart-config-base-tpl-tgg6m75tff
         name: stalwart-config-template
       - configMap:
-          name: stalwart-config-values-h5mt8dtc97
+          name: stalwart-config-values-ft298hthcd
         name: stalwart-values
       - name: ssl-certificate
         secret:
