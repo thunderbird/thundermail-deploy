@@ -158,7 +158,6 @@ data:
     matchOn:
       - protocol
       - useTls
-      - tlsImplicit
     value:
       listen-sieve:
         name: sieve
@@ -166,7 +165,7 @@ data:
           '[::]:4190': true
         protocol: manageSieve
         useTls: true
-        tlsImplicit: false
+        tlsImplicit: true
         overrideProxyTrustedNetworks:
           '__INTERNAL_IP_CIDR__': true
     ---
@@ -231,6 +230,22 @@ data:
         bind:
           '[::]:25': true
         protocol: smtp
+        useTls: true
+        tlsImplicit: false
+        overrideProxyTrustedNetworks:
+          '__INTERNAL_IP_CIDR__': true
+    ---
+    '@type': upsert
+    object: NetworkListener
+    matchOn:
+      - protocol
+      - bind
+    value:
+      listen-smtp:
+        name: lmtp-plain
+        bind:
+          '[::]:24': true
+        protocol: lmtp
         useTls: true
         tlsImplicit: false
         overrideProxyTrustedNetworks:
@@ -501,5 +516,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-94dg2mh7h9
+  name: stalwart-config-base-tpl-tgg6m75tff
   namespace: thundermail
