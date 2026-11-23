@@ -304,6 +304,15 @@ data:
       '@type': Redis
       url: '__IN_MEMORY_STORE_URL__'
     ---
+    # Stalwart runs more than one replica, and each pod caches domains, addresses and accounts.
+    # Without a coordinator a directory change (a new alias, a deleted Domain) is only seen by the
+    # pod that served the request; the others keep their cached copy until they restart
+    # (thunderbird/platform-infrastructure#1806). "Default" uses the in-memory store above (Redis).
+    '@type': update
+    object: Coordinator
+    value:
+      '@type': Default
+    ---
     '@type': upsert
     object: Tracer
     matchOn:
@@ -516,5 +525,5 @@ kind: ConfigMap
 metadata:
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-  name: stalwart-config-base-tpl-tgg6m75tff
+  name: stalwart-config-base-tpl-km8c77bcfm
   namespace: thundermail
